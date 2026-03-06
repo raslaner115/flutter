@@ -1,0 +1,14 @@
+{
+  "provider": "apple_pay",
+  "data": {
+    "merchantIdentifier": "merchant.com.example.untitled1",
+    "displayName": "ProFix Services",
+    "merchantCapabilities": ["3DS"],
+    "supportedNetworks": ["amex", "visa", "discover", "masterCard"],
+    "countryCode": "IL",
+    "currencyCode": "ILS",
+    "requiredBillingContactFields": ["emailAddress", "name", "phoneNumber", "postalAddress"],
+    "requiredShippingContactFields": [],
+    "shippingMethods": []
+  }
+}

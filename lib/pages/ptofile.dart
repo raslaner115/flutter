@@ -10,6 +10,7 @@ import 'package:untitled1/language_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:untitled1/pages/edit_profile.dart';
+import 'package:untitled1/pages/subscription.dart';
 
 class profile extends StatefulWidget {
   final String? userId; 
@@ -188,6 +189,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           'delete_project': 'מחק פרויקט',
           'delete_confirm': 'האם אתה בטוח שברצונך למחוק פרויקט זה?',
           'delete': 'מחק',
+          'upgrade_pro': 'שדרג ל-Pro',
         };
       case 'ar':
         return {
@@ -221,6 +223,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           'delete_project': 'حذف المشروع',
           'delete_confirm': 'هل أنت متأكد أنك تريد حذف هذا المشروع؟',
           'delete': 'حذف',
+          'upgrade_pro': 'الترقية إلى Pro',
         };
       default:
         return {
@@ -254,6 +257,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           'delete_project': 'Delete Project',
           'delete_confirm': 'Are you sure you want to delete this project?',
           'delete': 'Delete',
+          'upgrade_pro': 'Upgrade to Pro',
         };
     }
   }
@@ -489,7 +493,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         key: _scaffoldKey,
-        backgroundColor: theme.colorScheme.background,
+        backgroundColor: const Color(0xFFF8FAFC),
         body: RefreshIndicator(
           onRefresh: _fetchUserData,
           child: _isLoading 
@@ -510,18 +514,32 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
                 slivers: [
                   _buildSliverAppBar(theme),
                   SliverToBoxAdapter(
-                    child: Container(
+                    child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 60, 24, 24),
                       child: Column(
                         children: [
-                          Text(strings['user_name']!, style: theme.textTheme.headlineMedium),
+                          Text(
+                            strings['user_name']!, 
+                            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))
+                          ),
                           const SizedBox(height: 16),
                           _buildStatsRow(strings, theme),
                           const SizedBox(height: 24),
-                          Text(strings['bio']!, textAlign: TextAlign.center, style: theme.textTheme.bodyLarge),
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)],
+                            ),
+                            child: Text(
+                              strings['bio']!, 
+                              textAlign: TextAlign.center, 
+                              style: const TextStyle(fontSize: 15, color: Color(0xFF64748B), height: 1.5)
+                            ),
+                          ),
                           const SizedBox(height: 32),
                           if (!_isOwnProfile) _buildActionButtons(strings, theme),
-                          const SizedBox(height: 8),
                         ],
                       ),
                     ),
@@ -531,10 +549,11 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
                     delegate: _SliverAppBarDelegate(
                       TabBar(
                         controller: _tabController,
-                        labelColor: theme.colorScheme.primary,
+                        labelColor: const Color(0xFF1976D2),
                         unselectedLabelColor: const Color(0xFF94A3B8),
-                        indicatorColor: theme.colorScheme.primary,
+                        indicatorColor: const Color(0xFF1976D2),
                         indicatorWeight: 3,
+                        indicatorSize: TabBarIndicatorSize.label,
                         dividerColor: Colors.transparent,
                         labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                         tabs: [Tab(text: strings['projects']), Tab(text: strings['reviews']), Tab(text: strings['about'])],
@@ -560,19 +579,28 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
 
   Widget _buildSliverAppBar(ThemeData theme) {
     return SliverAppBar(
-      expandedHeight: 140,
+      expandedHeight: 160,
       pinned: true,
       elevation: 0,
-      backgroundColor: theme.colorScheme.primary,
+      backgroundColor: const Color(0xFF1976D2),
       leading: Navigator.canPop(context) ? const BackButton(color: Colors.white) : null,
       flexibleSpace: FlexibleSpaceBar(
         background: Container(
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [theme.colorScheme.primary, theme.colorScheme.primary.withBlue(220)],
+              colors: [Color(0xFF1E3A8A), Color(0xFF1976D2)],
             ),
+          ),
+          child: Stack(
+            children: [
+              Positioned(
+                top: -20,
+                right: -20,
+                child: CircleAvatar(radius: 60, backgroundColor: Colors.white.withOpacity(0.05)),
+              ),
+            ],
           ),
         ),
       ),
@@ -593,9 +621,9 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
                     tag: 'avatar_${widget.userId ?? FirebaseAuth.instance.currentUser?.uid}',
                     child: CircleAvatar(
                       radius: 50,
-                      backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
+                      backgroundColor: const Color(0xFFF1F5F9),
                       backgroundImage: _profileImageUrl.isNotEmpty ? NetworkImage(_profileImageUrl) : null,
-                      child: _profileImageUrl.isEmpty ? Icon(Icons.person_rounded, size: 60, color: theme.colorScheme.primary) : null,
+                      child: _profileImageUrl.isEmpty ? const Icon(Icons.person_rounded, size: 60, color: Color(0xFF94A3B8)) : null,
                     ),
                   ),
                 ),
@@ -604,11 +632,11 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
             if (_isOwnProfile)
               Positioned(
                 bottom: -50,
-                right: -10,
+                right: -5,
                 child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(color: theme.colorScheme.primary, shape: BoxShape.circle),
-                  child: const Icon(Icons.camera_alt, color: Colors.white, size: 20),
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(color: Color(0xFF1976D2), shape: BoxShape.circle),
+                  child: const Icon(Icons.camera_alt, color: Colors.white, size: 16),
                 ),
               ),
           ],
@@ -620,35 +648,40 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
   Widget _buildStatsRow(Map<String, String> strings, ThemeData theme) {
     double avgRating = 0;
     if (_userReviews.isNotEmpty) {
-      int totalStars = _userReviews.fold(0, (sum, item) => sum + (item['stars'] as int? ?? 0));
+      double totalStars = _userReviews.fold(0.0, (sum, item) => sum + (item['stars'] as num? ?? 0).toDouble());
       avgRating = totalStars / _userReviews.length;
     }
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        _buildStatItem('124', strings['followers']!, theme),
-        _buildVerticalDivider(),
-        _buildStatItem('₪ 85', strings['rate']!, theme),
-        _buildVerticalDivider(),
-        _buildStatItem(avgRating > 0 ? avgRating.toStringAsFixed(1) : '0.0', 'Rating', theme),
-      ],
-    );
-  }
-
-  Widget _buildStatItem(String value, String label, ThemeData theme) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
-          const SizedBox(height: 4),
-          Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w500)),
+          _buildStatItem('124', strings['followers']!, theme),
+          _buildVerticalDivider(),
+          _buildStatItem('₪ 85', strings['rate']!, theme),
+          _buildVerticalDivider(),
+          _buildStatItem(avgRating > 0 ? avgRating.toStringAsFixed(1) : '0.0', 'Rating', theme),
         ],
       ),
     );
   }
 
-  Widget _buildVerticalDivider() => Container(height: 24, width: 1, color: const Color(0xFFE2E8F0));
+  Widget _buildStatItem(String value, String label, ThemeData theme) {
+    return Column(
+      children: [
+        Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+        const SizedBox(height: 4),
+        Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w500)),
+      ],
+    );
+  }
+
+  Widget _buildVerticalDivider() => Container(height: 30, width: 1, color: const Color(0xFFF1F5F9));
 
   Widget _buildActionButtons(Map<String, String> strings, ThemeData theme) {
     return Padding(
@@ -659,7 +692,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           _buildCircleAction(
             _isFollowing ? Icons.person_remove_rounded : Icons.person_add_rounded,
             _isFollowing ? strings['following']! : strings['follow']!,
-            _isFollowing ? const Color(0xFF94A3B8) : theme.colorScheme.primary,
+            _isFollowing ? const Color(0xFF94A3B8) : const Color(0xFF1976D2),
             () => setState(() => _isFollowing = !_isFollowing),
           ),
           _buildCircleAction(Icons.call_rounded, strings['call']!, const Color(0xFF22C55E), () {
@@ -710,14 +743,14 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE2E8F0), width: 2, style: BorderStyle.solid),
+                border: Border.all(color: const Color(0xFFCBD5E1), width: 2, style: BorderStyle.solid),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.add_rounded, size: 32, color: theme.colorScheme.primary),
+                  const Icon(Icons.add_rounded, size: 32, color: Color(0xFF1976D2)),
                   const SizedBox(height: 8),
-                  Text(strings['add_project']!, style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 12)),
+                  Text(strings['add_project']!, style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold, fontSize: 12)),
                 ],
               ),
             ),
@@ -734,7 +767,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(16),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))],
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -757,8 +790,13 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
                 ),
                 if (project['description'] != null)
                   Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text(project['description'], maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                    padding: const EdgeInsets.all(12),
+                    child: Text(
+                      project['description'], 
+                      maxLines: 1, 
+                      overflow: TextOverflow.ellipsis, 
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155))
+                    ),
                   ),
               ],
             ),
@@ -779,38 +817,51 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
       builder: (context) => DraggableScrollableSheet(
         initialChildSize: 0.7,
+        maxChildSize: 0.95,
         expand: false,
         builder: (context, scrollController) => SingleChildScrollView(
           controller: scrollController,
           child: Column(
             children: [
-              ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
-                child: imageUrl.isNotEmpty 
-                  ? Image.network(
-                      imageUrl, 
-                      fit: BoxFit.cover, 
-                      width: double.infinity,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return const Padding(padding: EdgeInsets.all(20.0), child: CircularProgressIndicator());
-                      },
-                      errorBuilder: (context, error, stackTrace) => const SizedBox(height: 200, child: Center(child: Icon(Icons.error, color: Colors.red, size: 50))),
-                    )
-                  : const SizedBox(height: 200, child: Center(child: Icon(Icons.image, size: 50, color: Colors.grey))),
+              const SizedBox(height: 12),
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 24),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: imageUrl.isNotEmpty 
+                    ? Image.network(
+                        imageUrl, 
+                        fit: BoxFit.cover, 
+                        width: double.infinity,
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return const Padding(padding: EdgeInsets.all(40.0), child: CircularProgressIndicator());
+                        },
+                        errorBuilder: (context, error, stackTrace) => const SizedBox(height: 200, child: Center(child: Icon(Icons.error, color: Colors.red, size: 50))),
+                      )
+                    : const SizedBox(height: 200, child: Center(child: Icon(Icons.image, size: 50, color: Colors.grey))),
+                ),
               ),
               Padding(
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(project['description'] ?? "", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 16),
+                    Text(project['description'] ?? "", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+                    const SizedBox(height: 20),
                     Row(
                       children: [
-                        const Icon(Icons.thumb_up_alt_outlined, color: Color(0xFF1976D2)),
+                        const Icon(Icons.thumb_up_rounded, color: Color(0xFF1976D2), size: 20),
                         const SizedBox(width: 8),
-                        Text("${project['likes'] ?? 0} Likes"),
+                        Text("${project['likes'] ?? 0} Likes", style: const TextStyle(color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
+                        const Spacer(),
+                        if (project['timestamp'] != null)
+                          Text(
+                            "Completed", 
+                            style: TextStyle(color: Colors.green[600], fontWeight: FontWeight.bold, fontSize: 12)
+                          ),
                       ],
                     ),
                   ],
@@ -829,7 +880,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.rate_review_rounded, size: 64, color: const Color(0xFFCBD5E1)),
+            const Icon(Icons.rate_review_rounded, size: 64, color: Color(0xFFCBD5E1)),
             const SizedBox(height: 16),
             Text(strings['no_reviews']!, style: const TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.w500)),
           ],
@@ -846,7 +897,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(20),
             boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
           ),
           child: Column(
@@ -855,18 +906,28 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(review['reviewerName'] ?? 'Anonymous', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  Row(
-                    children: List.generate(5, (i) => Icon(
-                      Icons.star_rounded,
-                      size: 16,
-                      color: i < (review['stars'] ?? 0) ? const Color(0xFFF59E0B) : const Color(0xFFE2E8F0),
-                    )),
+                  Text(review['reviewerName'] ?? 'Anonymous', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1E293B))),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(color: const Color(0xFFFEF9C3), borderRadius: BorderRadius.circular(8)),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.star_rounded, size: 16, color: Color(0xFFCA8A04)),
+                        const SizedBox(width: 4),
+                        Text(
+                          "${review['stars'] ?? 0}", 
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFFCA8A04))
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(review['comment'] ?? '', style: const TextStyle(color: Color(0xFF475569), fontSize: 14, height: 1.5)),
+              const SizedBox(height: 12),
+              Text(
+                review['comment'] ?? '', 
+                style: const TextStyle(color: Color(0xFF475569), fontSize: 14, height: 1.5)
+              ),
             ],
           ),
         );
@@ -880,9 +941,9 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              if (_isOwnProfile)
+          if (_isOwnProfile) ...[
+            Row(
+              children: [
                 Expanded(
                   child: ElevatedButton.icon(
                     onPressed: () async {
@@ -904,34 +965,58 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
                     icon: const Icon(Icons.edit_outlined, size: 18),
                     label: Text(strings['edit_profile']!),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: theme.colorScheme.primary,
+                      backgroundColor: const Color(0xFF1976D2),
                       foregroundColor: Colors.white,
                       elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
                 ),
-              if (_isOwnProfile) const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _shareProfile(strings),
-                  icon: const Icon(Icons.share_outlined, size: 18),
-                  label: Text(strings['share_profile']!),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: theme.colorScheme.primary,
-                    side: BorderSide(color: theme.colorScheme.primary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _shareProfile(strings),
+                    icon: const Icon(Icons.share_outlined, size: 18),
+                    label: Text(strings['share_profile']!),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF1976D2),
+                      side: const BorderSide(color: Color(0xFF1976D2)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
                   ),
                 ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => SubscriptionPage(email: _email)),
+                  );
+                },
+                icon: const Icon(Icons.stars_rounded, color: Colors.amber),
+                label: Text(strings['upgrade_pro']!),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1976D2).withOpacity(0.1),
+                  foregroundColor: const Color(0xFF1976D2),
+                  elevation: 0,
+                  side: const BorderSide(color: Color(0xFF1976D2)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
               ),
-            ],
-          ),
-          const SizedBox(height: 32),
-          Text(strings['contact_info']!, style: theme.textTheme.titleLarge),
+            ),
+            const SizedBox(height: 32),
+          ],
+          Text(strings['contact_info']!, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
           const SizedBox(height: 20),
           _buildInfoTile(Icons.phone_rounded, _phoneNumber.isNotEmpty ? _phoneNumber : 'N/A', theme),
           _buildInfoTile(Icons.email_rounded, _email.isNotEmpty ? _email : 'N/A', theme),
           _buildInfoTile(Icons.location_on_rounded, _town.isNotEmpty ? _town : 'N/A', theme),
           const SizedBox(height: 32),
-          Text(strings['skills']!, style: theme.textTheme.titleLarge),
+          Text(strings['skills']!, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
           const SizedBox(height: 16),
           Wrap(
             spacing: 10,
@@ -939,10 +1024,14 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
             children: _userProfessions.map((skill) => Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: theme.colorScheme.primary.withOpacity(0.08),
+                color: const Color(0xFF1976D2).withOpacity(0.08),
                 borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF1976D2).withOpacity(0.2)),
               ),
-              child: Text(skill, style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 13)),
+              child: Text(
+                skill, 
+                style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold, fontSize: 13)
+              ),
             )).toList(),
           ),
         ],
@@ -957,8 +1046,13 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
         children: [
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFF1F5F9))),
-            child: Icon(icon, size: 20, color: theme.colorScheme.primary),
+            decoration: BoxDecoration(
+              color: Colors.white, 
+              borderRadius: BorderRadius.circular(12), 
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5)],
+              border: Border.all(color: const Color(0xFFF1F5F9))
+            ),
+            child: Icon(icon, size: 20, color: const Color(0xFF1976D2)),
           ),
           const SizedBox(width: 16),
           Text(text, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Color(0xFF334155))),

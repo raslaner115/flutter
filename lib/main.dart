@@ -19,7 +19,7 @@ void main() async {
       databaseURL: 'https://profis-60aaa-default-rtdb.europe-west1.firebasedatabase.app'
   );
   
-  // Disable persistence to ensure we don't see stale local data like "gfvdcsxa"
+  // Disable persistence to ensure we don't see stale local data
   database.setPersistenceEnabled(false);
 
   runApp(

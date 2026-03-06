@@ -70,7 +70,7 @@ class _HomePageState extends State<HomePage> {
       
       if (mounted) {
         setState(() {
-          _topRatedWorkers = workers.take(5).toList();
+          _topRatedWorkers = workers.take(10).toList();
           _isTopRatedLoading = false;
         });
       }
@@ -85,11 +85,11 @@ class _HomePageState extends State<HomePage> {
     switch (locale) {
       case 'he':
         return {
-          'welcome': 'ברוך הבא',
-          'find_pros': 'מצא מקצוענים מקומיים',
-          'search_hint': 'חפש שירות...',
-          'categories': 'קטגוריות',
-          'see_all': 'ראה הכל',
+          'welcome': 'שלום,',
+          'find_pros': 'איזה שירות דרוש לך היום?',
+          'search_hint': 'חפש מקצוען (למשל: אינסטלטור)...',
+          'categories': 'קטגוריות פופולריות',
+          'see_all': 'הכל',
           'top_rated': 'הכי מדורגים',
           'view_all': 'צפה בהכל',
           'cat_names': {
@@ -105,30 +105,30 @@ class _HomePageState extends State<HomePage> {
         };
       case 'ar':
         return {
-          'welcome': 'مرحباً بعودتك',
-          'find_pros': 'ابحث عن محترفين محليين',
-          'search_hint': 'ابحث عن خدمة...',
-          'categories': 'الفئات',
-          'see_all': 'عرض الكل',
+          'welcome': 'مرحباً،',
+          'find_pros': 'ما هي الخدمة التي تحتاجها اليوم؟',
+          'search_hint': 'ابحث عن מחתרף...',
+          'categories': 'الفئات الشائعة',
+          'see_all': 'الكل',
           'top_rated': 'الأعلى تقييماً',
           'view_all': 'عرض الكل',
           'cat_names': {
             'plumber': 'سباك',
-            'Carpenter': 'נגר',
+            'Carpenter': 'نجار',
             'Electrician': 'كهربائي',
             'Painter': 'دهان',
             'Cleaner': 'عامل نظافة',
             'Handyman': 'عامل صيانة',
             'Landscaper': 'منسق حدائق',
-            'HVAC': 'تكييف ותברייد'
+            'HVAC': 'تكييف ותبرייد'
           }
         };
       default:
         return {
-          'welcome': 'Welcome back',
-          'find_pros': 'Find Local Pros',
-          'search_hint': 'Search for a service...',
-          'categories': 'Categories',
+          'welcome': 'Hello,',
+          'find_pros': 'What service do you need today?',
+          'search_hint': 'Search for a pro...',
+          'categories': 'Popular Categories',
           'see_all': 'See all',
           'top_rated': 'Top Rated',
           'view_all': 'View all',
@@ -152,16 +152,17 @@ class _HomePageState extends State<HomePage> {
     final theme = Theme.of(context);
     final isRtl = Provider.of<LanguageProvider>(context).locale.languageCode == 'he' || 
                   Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
+    final user = FirebaseAuth.instance.currentUser;
 
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
-        backgroundColor: theme.colorScheme.background,
+        backgroundColor: const Color(0xFFF8FAFC),
         body: RefreshIndicator(
           onRefresh: _fetchTopRatedWorkers,
           child: CustomScrollView(
             slivers: [
-              _buildSliverAppBar(localized, theme),
+              _buildSliverAppBar(localized, theme, user),
               SliverToBoxAdapter(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -179,32 +180,30 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildSliverAppBar(Map<String, dynamic> strings, ThemeData theme) {
+  Widget _buildSliverAppBar(Map<String, dynamic> strings, ThemeData theme, User? user) {
     return SliverAppBar(
-      expandedHeight: 220,
+      expandedHeight: 240, // Increased to prevent overflow
       floating: false,
       pinned: true,
-      backgroundColor: theme.colorScheme.primary,
+      backgroundColor: const Color(0xFF1976D2),
       elevation: 0,
       flexibleSpace: FlexibleSpaceBar(
         background: Container(
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                theme.colorScheme.primary,
-                theme.colorScheme.primary.withBlue(220),
-              ],
+              colors: [Color(0xFF1E3A8A), Color(0xFF1976D2)],
             ),
           ),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 80, 24, 20),
+            padding: const EdgeInsets.fromLTRB(24, 70, 24, 20), // Adjusted top padding
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 Text(
-                  strings['welcome'],
+                  '${strings['welcome']} ${user?.displayName?.split(' ').first ?? ''}',
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.9),
                     fontSize: 16,
@@ -221,7 +220,7 @@ class _HomePageState extends State<HomePage> {
                     letterSpacing: -0.5,
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(height: 24), // Replaced Spacer() with fixed height to avoid overflow
                 Container(
                   height: 54,
                   decoration: BoxDecoration(
@@ -239,7 +238,7 @@ class _HomePageState extends State<HomePage> {
                     textAlignVertical: TextAlignVertical.center,
                     decoration: InputDecoration(
                       hintText: strings['search_hint'],
-                      prefixIcon: Icon(Icons.search_rounded, color: theme.colorScheme.primary),
+                      prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF1976D2)),
                       border: InputBorder.none,
                       enabledBorder: InputBorder.none,
                       focusedBorder: InputBorder.none,
@@ -278,11 +277,11 @@ class _HomePageState extends State<HomePage> {
             children: [
               Text(
                 strings['categories'],
-                style: theme.textTheme.titleLarge,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
               ),
               TextButton(
                 onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SearchPage())),
-                child: Text(strings['see_all'], style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.w600)),
+                child: const Text('See all', style: TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.w600)),
               ),
             ],
           ),
@@ -294,7 +293,7 @@ class _HomePageState extends State<HomePage> {
               crossAxisCount: 4,
               mainAxisSpacing: 20,
               crossAxisSpacing: 16,
-              childAspectRatio: 0.68, // Improved aspect ratio to prevent overflow
+              childAspectRatio: 0.7,
             ),
             itemCount: categories.length,
             itemBuilder: (context, index) {
@@ -307,7 +306,6 @@ class _HomePageState extends State<HomePage> {
                     AspectRatio(
                       aspectRatio: 1,
                       child: Container(
-                        width: double.infinity,
                         decoration: BoxDecoration(
                           color: cat['color'],
                           borderRadius: BorderRadius.circular(16),
@@ -344,11 +342,11 @@ class _HomePageState extends State<HomePage> {
             children: [
               Text(
                 strings['top_rated'],
-                style: theme.textTheme.titleLarge,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
               ),
               TextButton(
                 onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SearchPage())),
-                child: Text(strings['view_all'], style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.w600)),
+                child: Text(strings['view_all'], style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.w600)),
               ),
             ],
           ),
@@ -359,13 +357,13 @@ class _HomePageState extends State<HomePage> {
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_topRatedWorkers.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text("No pros found yet.", style: TextStyle(color: Colors.grey[500])),
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Text("No pros found yet.", style: TextStyle(color: Colors.grey)),
           )
         else
           SizedBox(
-            height: 350,
+            height: 280,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -380,14 +378,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildTopRatedCard(Map<String, dynamic> worker, ThemeData theme) {
-    final List<String> placeholderProjects = [
-      'https://picsum.photos/300/200?sig=${worker['uid'].hashCode + 1}',
-      'https://picsum.photos/300/200?sig=${worker['uid'].hashCode + 2}',
-      'https://picsum.photos/300/200?sig=${worker['uid'].hashCode + 3}',
-    ];
-
     return Container(
-      width: 280,
+      width: 260,
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -406,25 +398,25 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Project Images Preview
-            SizedBox(
-              height: 140,
+            // Header Image Placeholder
+            Container(
+              height: 120,
+              decoration: BoxDecoration(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                image: worker['profileImageUrl'] != null && worker['profileImageUrl'].toString().isNotEmpty
+                    ? DecorationImage(image: NetworkImage(worker['profileImageUrl']), fit: BoxFit.cover)
+                    : null,
+                color: const Color(0xFFF1F5F9),
+              ),
               child: Stack(
                 children: [
-                  ClipRRect(
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                    child: Image.network(
-                      placeholderProjects[0],
-                      width: double.infinity,
-                      height: 140,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
+                  if (worker['profileImageUrl'] == null || worker['profileImageUrl'].toString().isEmpty)
+                    const Center(child: Icon(Icons.person_rounded, size: 50, color: Color(0xFF94A3B8))),
                   Positioned(
                     top: 12,
                     left: 12,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: Colors.black.withOpacity(0.6),
                         borderRadius: BorderRadius.circular(20),
@@ -432,11 +424,11 @@ class _HomePageState extends State<HomePage> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
+                          const Icon(Icons.star_rounded, color: Colors.amber, size: 14),
                           const SizedBox(width: 4),
                           Text(
                             (worker['avgRating'] as double).toStringAsFixed(1),
-                            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
@@ -450,61 +442,38 @@ class _HomePageState extends State<HomePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Hero(
-                        tag: 'avatar_${worker['uid']}',
-                        child: Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.primary.withOpacity(0.1),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
-                          ),
-                          child: Icon(Icons.person_rounded, color: theme.colorScheme.primary, size: 24),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              worker['name'] ?? 'Worker',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1E293B)),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            Text(
-                              worker['town'] ?? '',
-                              style: TextStyle(color: Colors.grey[600], fontSize: 13),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                  Text(
+                    worker['name'] ?? 'Worker',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1E293B)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 16),
-                  // Small project snapshots
+                  const SizedBox(height: 4),
+                  Text(
+                    (worker['professions'] is List && (worker['professions'] as List).isNotEmpty)
+                        ? (worker['professions'] as List).join(', ')
+                        : 'Professional',
+                    style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 12),
                   Row(
                     children: [
-                      _buildSmallProjectImg(placeholderProjects[1]),
-                      const SizedBox(width: 8),
-                      _buildSmallProjectImg(placeholderProjects[2]),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Container(
-                          height: 48,
+                      const Icon(Icons.location_on_rounded, color: Color(0xFF94A3B8), size: 14),
+                      const SizedBox(width: 4),
+                      Text(worker['town'] ?? '', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                      const Spacer(),
+                      if (worker['isPro'] == true)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(12),
+                            color: const Color(0xFFEEF2FF),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0xFFC7D2FE)),
                           ),
-                          child: Center(
-                            child: Icon(Icons.add_rounded, color: theme.colorScheme.primary, size: 20),
-                          ),
+                          child: const Text('PRO', style: TextStyle(color: Color(0xFF4F46E5), fontSize: 10, fontWeight: FontWeight.bold)),
                         ),
-                      ),
                     ],
                   ),
                 ],
@@ -512,17 +481,6 @@ class _HomePageState extends State<HomePage> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildSmallProjectImg(String url) {
-    return Container(
-      width: 60,
-      height: 48,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        image: DecorationImage(image: NetworkImage(url), fit: BoxFit.cover),
       ),
     );
   }

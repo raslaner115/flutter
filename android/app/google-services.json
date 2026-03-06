@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "24858176393",
+    "project_id": "profis-60aaa",
+    "storage_bucket": "profis-60aaa.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:24858176393:android:7e2b6867edbb11d22acf58",
+        "android_client_info": {
+          "package_name": "com.example.untitled1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxHsrOlzPevmkZQ5UC5ZmaERfLvqEC644"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

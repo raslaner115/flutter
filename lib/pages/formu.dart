@@ -1,5 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:untitled1/language_provider.dart';
 import 'package:untitled1/pages/ptofile.dart';
 
@@ -11,24 +16,62 @@ class BlogPage extends StatefulWidget {
 }
 
 class _BlogPageState extends State<BlogPage> {
-  final List<Map<String, dynamic>> _customPosts = [];
+  final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
+    app: FirebaseAuth.instance.app,
+    databaseURL: 'https://profis-60aaa-default-rtdb.europe-west1.firebasedatabase.app'
+  ).ref();
 
-  // Basic moderation list
-  final List<String> _blockedKeywords = [
-    'buy now', 'discount', 'sale', 'free', 'click here', 'http', 'www', 'promo',
-    'offensive_word1', 'offensive_word2',
-    'asdf', 'qwerty', 'zxcv'
-  ];
+  List<Map<String, dynamic>> _posts = [];
+  bool _isLoading = true;
 
-  bool _isSafe(String text) {
-    final lowerText = text.toLowerCase();
-    if (text.trim().length < 10) return false;
-    for (var keyword in _blockedKeywords) {
-      if (lowerText.contains(keyword)) return false;
-    }
-    final repeatRegex = RegExp(r'(.)\1{4,}');
-    if (repeatRegex.hasMatch(lowerText)) return false;
-    return true;
+  @override
+  void initState() {
+    super.initState();
+    _listenToPosts();
+  }
+
+  void _listenToPosts() {
+    _dbRef.child('blog_posts').onValue.listen((event) {
+      final dynamic data = event.snapshot.value;
+      List<Map<String, dynamic>> loadedPosts = [];
+      
+      if (data != null) {
+        if (data is Map) {
+          data.forEach((key, value) {
+            if (value is Map) {
+              final post = Map<String, dynamic>.from(value);
+              post['id'] = key.toString();
+              loadedPosts.add(post);
+            }
+          });
+        } else if (data is List) {
+          for (int i = 0; i < data.length; i++) {
+            if (data[i] != null && data[i] is Map) {
+              final post = Map<String, dynamic>.from(data[i]);
+              post['id'] = i.toString();
+              loadedPosts.add(post);
+            }
+          }
+        }
+        
+        // Sort by timestamp descending
+        loadedPosts.sort((a, b) {
+          final tA = a['timestamp'] ?? 0;
+          final tB = b['timestamp'] ?? 0;
+          return (tB as num).compareTo(tA as num);
+        });
+      }
+
+      if (mounted) {
+        setState(() {
+          _posts = loadedPosts;
+          _isLoading = false;
+        });
+      }
+    }, onError: (error) {
+      debugPrint("FETCH ERROR: $error");
+      if (mounted) setState(() => _isLoading = false);
+    });
   }
 
   Map<String, dynamic> _getLocalizedStrings(BuildContext context) {
@@ -36,193 +79,190 @@ class _BlogPageState extends State<BlogPage> {
     switch (locale) {
       case 'he':
         return {
-          'title': 'בלוג וטיפים',
-          'featured': 'כתבות מומלצות',
-          'create_post': 'כתוב פוסט חדש',
-          'post_title': 'כותרת הפוסט',
-          'post_category': 'קטגוריה',
-          'post_content': 'תוכן הפוסט',
-          'rules': 'שים לב: פוסטים הכוללים פרסומות או תוכן פוגעני יימחקו.',
+          'title': 'קהילה וטיפים',
+          'featured': 'פוסטים אחרונים',
+          'create_post': 'שתף עם הקהילה',
+          'post_title': 'כותרת',
+          'post_category': 'סוג הפוסט',
+          'post_content': 'מה תרצה לשתף?',
           'publish': 'פרסם',
           'cancel': 'ביטול',
-          'invalid_content': 'הפוסט נראה כמו פרסומת, תוכן פוגעני או ג\'יבריש. אנא נסה שוב.',
-          'author': 'מחבר',
-          'comments': 'תגובות',
-          'write_comment': 'כתוב תגובה...',
-          'posts': [
-            {
-              'title': 'איך לבחור את בעל המקצוע הנכון',
-              'authorName': 'אבי כהן',
-              'date': '15 במרץ 2024',
-              'excerpt': 'טיפים לבחירת אינסטלטור או חשמלאי אמין שיבצע את העבודה על הצד הטוב ביותר...',
-              'content': 'בחירת בעל מקצוע היא משימה מורכבת. מומלץ תמיד לבקש המלצות מחברים, לבדוק עבודות קודמות ולוודא שיש לו את ההסמכות המתאימות. אל תתפתו תמיד למחיר הנמוך ביותר, שכן איכות העבודה חשובה לא פחות.',
-              'category': 'מדריך',
-              'likes': 45,
-              'dislikes': 2,
-            },
-            {
-              'title': 'חידוש הבית בתקציב נמוך',
-              'authorName': 'דנה לוי',
-              'date': '10 במרץ 2024',
-              'excerpt': 'איך לצבוע את הבית לבד ולחסוך בעלויות תוך קבלת תוצאה מקצועית ומרשימה...',
-              'content': 'צביעת הבית היא הדרך המהירה והזולה ביותר לשדרג את המראה שלו. חשוב להכין את הקירות מראש, להשתמש בצבע איכותי ובמברשות מתאימות. התחילו מהפינות ועברו לשטחים הגדולים יותר.',
-              'category': 'עיצוב',
-              'likes': 32,
-              'dislikes': 1,
-            },
-          ]
+          'categories': ['שאלה', 'טיפ', 'מדריך', 'המלצה', 'אחר'],
+          'upload_photo': 'הוסף תמונה',
+          'no_posts': 'אין פוסטים עדיין',
         };
       case 'ar':
         return {
-          'title': 'المدونة والنصائح',
-          'featured': 'مقالات مختارة',
-          'create_post': 'اكتب مقالاً جديداً',
-          'post_title': 'عنوان المقال',
-          'post_category': 'الفئة',
-          'post_content': 'محتوى المقال',
-          'rules': 'ملاحظة: سيتم حذف المنشورات التي تتضمن إعلانات أو محتوى مسيء.',
+          'title': 'المنتدى والنصائح',
+          'featured': 'آخر المنشورات',
+          'create_post': 'شارك مع المجتمع',
+          'post_title': 'العنوان',
+          'post_category': 'نوع المنشور',
+          'post_content': 'ماذا تريد أن تشارك؟',
           'publish': 'نشر',
           'cancel': 'إلغاء',
-          'invalid_content': 'يبدو أن المنشور يحتوي على إعلانات أو محتوى غير لائق. يرجى المحاولة مرة أخرى.',
-          'author': 'مؤلف',
-          'comments': 'تعليقات',
-          'write_comment': 'اكتب تعليقاً...',
-          'posts': [
-            {
-              'title': 'كيفية اختيار المحترف المناسب',
-              'authorName': 'أحمد محمد',
-              'date': '15 مارس 2024',
-              'excerpt': 'نصائح لاختيار سباك أو كهربائي موثوق للقيام بالعمل على أكمل وجه...',
-              'content': 'يعد اختيار المحترف المناسب أمرًا حيويًا. تأكد من مراجعة التقييمات السابقة وطلب المراجع. الجودة أهم من السعر الأرخص دائمًا.',
-              'category': 'دليل',
-              'likes': 28,
-              'dislikes': 0,
-            },
-            {
-              'title': 'تجديد المنزل بميزانية محدودة',
-              'authorName': 'ليلى خالد',
-              'date': '10 مارس 2024',
-              'excerpt': 'كيفية طلاء المنزل بنفسك وتوفير التكاليف مع الحصول على نتيجة احترافية...',
-              'content': 'طلاء الجدران هو أسهل طريقة لتجديد المنزل. قم بتغطية الأثاث جيدًا واستخدم شريطًا لاصقًا للحواف النظيفة.',
-              'category': 'تصميم',
-              'likes': 19,
-              'dislikes': 1,
-            },
-          ]
+          'categories': ['سؤال', 'نصيحة', 'دليل', 'توصية', 'آخر'],
+          'upload_photo': 'أضف صورة',
+          'no_posts': 'لا توجد منشورات بعد',
         };
       default:
         return {
-          'title': 'Blog & Tips',
-          'featured': 'Featured Posts',
-          'create_post': 'Create a new post',
-          'post_title': 'Post Title',
+          'title': 'Community & Tips',
+          'featured': 'Recent Posts',
+          'create_post': 'Share with Community',
+          'post_title': 'Title',
           'post_category': 'Category',
-          'post_content': 'Post Content',
-          'rules': 'Note: Posts containing advertisements or nonsense will be removed.',
+          'post_content': 'What\'s on your mind?',
           'publish': 'Publish',
           'cancel': 'Cancel',
-          'invalid_content': 'Your post appears to contain spam, nonsense, or offensive material. Please revise.',
-          'author': 'Author',
-          'comments': 'Comments',
-          'write_comment': 'Write a comment...',
-          'posts': [
-            {
-              'title': 'How to Choose the Right Pro',
-              'authorName': 'John Doe',
-              'date': 'March 15, 2024',
-              'excerpt': 'Tips for choosing a reliable plumber or electrician to get the job done right...',
-              'content': 'Finding a reliable professional can be tricky. Always check reviews, ask for references, and ensure they have the necessary licenses. Don\'t just go for the cheapest quote; quality and reliability are paramount.',
-              'category': 'Guide',
-              'likes': 56,
-              'dislikes': 3,
-            },
-            {
-              'title': 'Home Renovation on a Budget',
-              'authorName': 'Jane Smith',
-              'date': 'March 10, 2024',
-              'excerpt': 'How to paint your home yourself and save costs while getting professional results...',
-              'content': 'Painting is the most cost-effective way to refresh your home. Preparation is key: clean the walls, tape the edges, and use high-quality rollers. One or two coats can make a world of difference.',
-              'category': 'DIY',
-              'likes': 42,
-              'dislikes': 0,
-            },
-          ]
+          'categories': ['Question', 'Tip', 'Guide', 'Recommendation', 'Other'],
+          'upload_photo': 'Add Photo',
+          'no_posts': 'No posts yet',
         };
     }
   }
 
   void _showCreatePostSheet(BuildContext context, Map<String, dynamic> strings) {
     final titleController = TextEditingController();
-    final categoryController = TextEditingController();
     final contentController = TextEditingController();
+    String selectedCategory = (strings['categories'] as List)[0];
+    File? selectedImage;
+    bool isUploading = false;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 20, right: 20, top: 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(strings['create_post'], style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(strings['rules'], style: const TextStyle(color: Colors.red, fontSize: 12)),
-            const SizedBox(height: 16),
-            TextField(controller: titleController, decoration: InputDecoration(labelText: strings['post_title'], border: const OutlineInputBorder())),
-            const SizedBox(height: 12),
-            TextField(controller: categoryController, decoration: InputDecoration(labelText: strings['post_category'], border: const OutlineInputBorder())),
-            const SizedBox(height: 12),
-            TextField(controller: contentController, maxLines: 5, decoration: InputDecoration(labelText: strings['post_content'], border: const OutlineInputBorder())),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 24, right: 24, top: 24),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextButton(onPressed: () => Navigator.pop(context), child: Text(strings['cancel'])),
-                const SizedBox(width: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(strings['create_post'], style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+                    IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: selectedCategory,
+                  decoration: InputDecoration(
+                    labelText: strings['post_category'],
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                  items: (strings['categories'] as List).map((cat) => DropdownMenuItem(value: cat.toString(), child: Text(cat.toString()))).toList(),
+                  onChanged: (val) => setSheetState(() => selectedCategory = val!),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: titleController,
+                  decoration: InputDecoration(
+                    labelText: strings['post_title'],
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: contentController,
+                  maxLines: 4,
+                  decoration: InputDecoration(
+                    labelText: strings['post_content'],
+                    alignLabelWithHint: true,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (selectedImage != null)
+                  Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.file(selectedImage!, height: 150, width: double.infinity, fit: BoxFit.cover),
+                      ),
+                      Positioned(
+                        right: 8,
+                        top: 8,
+                        child: GestureDetector(
+                          onTap: () => setSheetState(() => selectedImage = null),
+                          child: const CircleAvatar(backgroundColor: Colors.black54, radius: 14, child: Icon(Icons.close, size: 16, color: Colors.white)),
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final picker = ImagePicker();
+                      final pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
+                      if (pickedFile != null) setSheetState(() => selectedImage = File(pickedFile.path));
+                    },
+                    icon: const Icon(Icons.add_a_photo_outlined),
+                    label: Text(strings['upload_photo']),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                const SizedBox(height: 24),
                 ElevatedButton(
-                  onPressed: () {
-                    final title = titleController.text;
-                    final content = contentController.text;
-                    if (title.isNotEmpty && content.isNotEmpty) {
-                      if (_isSafe(title) && _isSafe(content)) {
-                        setState(() {
-                          _customPosts.insert(0, {
-                            'title': title,
-                            'authorName': 'Me', // Simplified for now
-                            'date': 'Just now',
-                            'excerpt': content.length > 100 ? content.substring(0, 100) + '...' : content,
-                            'content': content,
-                            'category': categoryController.text.isNotEmpty ? categoryController.text : 'General',
-                            'isUserPost': true,
-                            'likes': 0,
-                            'dislikes': 0,
-                          });
-                        });
-                        Navigator.pop(context);
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['invalid_content'])));
+                  onPressed: isUploading ? null : () async {
+                    if (titleController.text.isEmpty || contentController.text.isEmpty) return;
+                    
+                    setSheetState(() => isUploading = true);
+                    try {
+                      final user = FirebaseAuth.instance.currentUser;
+                      String? imageUrl;
+                      
+                      if (selectedImage != null) {
+                        final storageRef = FirebaseStorage.instance.ref().child('blog_images/${DateTime.now().millisecondsSinceEpoch}.jpg');
+                        await storageRef.putFile(selectedImage!);
+                        imageUrl = await storageRef.getDownloadURL();
                       }
+
+                      final postData = {
+                        'title': titleController.text.trim(),
+                        'content': contentController.text.trim(),
+                        'category': selectedCategory,
+                        'imageUrl': imageUrl,
+                        'authorUid': user?.uid,
+                        'authorName': user?.displayName ?? 'Anonymous',
+                        'timestamp': ServerValue.timestamp,
+                        'likes': 0,
+                      };
+
+                      await _dbRef.child('blog_posts').push().set(postData);
+                      if (mounted) {
+                        Navigator.pop(context);
+                      }
+                    } catch (e) {
+                      debugPrint("POST ERROR: $e");
+                    } finally {
+                      if (mounted) setSheetState(() => isUploading = false);
                     }
                   },
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1976D2)),
-                  child: Text(strings['publish'], style: const TextStyle(color: Colors.white)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1976D2),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: isUploading 
+                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : Text(strings['publish'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
+                const SizedBox(height: 24),
               ],
             ),
-            const SizedBox(height: 20),
-          ],
+          ),
         ),
       ),
     );
-  }
-
-  Future<void> _handleRefresh() async {
-    // For now, since it's local data or static, we just simulate a delay.
-    // If you add real Firebase fetching for posts, call it here.
-    await Future.delayed(const Duration(seconds: 1));
-    if (mounted) setState(() {});
   }
 
   @override
@@ -230,53 +270,31 @@ class _BlogPageState extends State<BlogPage> {
     final strings = _getLocalizedStrings(context);
     final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
     final isRtl = locale == 'he' || locale == 'ar';
-    final allPosts = [..._customPosts, ...strings['posts']];
 
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFFF8FAFC),
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          centerTitle: true,
+          title: Text(strings['title'], style: const TextStyle(color: Color(0xFF1E293B), fontWeight: FontWeight.bold)),
+        ),
         floatingActionButton: FloatingActionButton(
           onPressed: () => _showCreatePostSheet(context, strings),
           backgroundColor: const Color(0xFF1976D2),
           child: const Icon(Icons.add, color: Colors.white),
         ),
-        body: RefreshIndicator(
-          onRefresh: _handleRefresh,
-          child: CustomScrollView(
-            slivers: [
-              SliverAppBar(
-                expandedHeight: 120.0,
-                pinned: true,
-                backgroundColor: Colors.white,
-                elevation: 0,
-                flexibleSpace: FlexibleSpaceBar(
-                  title: Text(strings['title'], style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                  centerTitle: true,
-                ),
+        body: _isLoading 
+          ? const Center(child: CircularProgressIndicator())
+          : _posts.isEmpty 
+            ? Center(child: Text(strings['no_posts']))
+            : ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: _posts.length,
+                itemBuilder: (context, index) => _BlogCard(post: _posts[index]),
               ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-                  child: Text(strings['featured'], style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
-                ),
-              ),
-              SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final post = allPosts[index];
-                    return _BlogCard(
-                      post: post,
-                      localizedStrings: strings,
-                    );
-                  },
-                  childCount: allPosts.length,
-                ),
-              ),
-              const SliverToBoxAdapter(child: SizedBox(height: 32)),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -284,65 +302,160 @@ class _BlogPageState extends State<BlogPage> {
 
 class _BlogCard extends StatelessWidget {
   final Map<String, dynamic> post;
-  final Map<String, dynamic> localizedStrings;
 
-  const _BlogCard({Key? key, required this.post, required this.localizedStrings}) : super(key: key);
+  const _BlogCard({Key? key, required this.post}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      elevation: 2,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 12, offset: const Offset(0, 4))],
+      ),
       child: InkWell(
-        onTap: () {
-          // Show full post content in a dialog or new page
-          showDialog(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: Text(post['title']),
-              content: SingleChildScrollView(child: Text(post['content'])),
-              actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-            ),
-          );
-        },
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailPage(post: post))),
+        borderRadius: BorderRadius.circular(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (post['imageUrl'] != null && post['imageUrl'].toString().isNotEmpty)
+              ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                child: Image.network(
+                  post['imageUrl'], 
+                  height: 180, 
+                  width: double.infinity, 
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                    child: Text(post['category'], style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 12)),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(color: const Color(0xFFEEF2FF), borderRadius: BorderRadius.circular(8)),
+                        child: Text(post['category'] ?? '', style: const TextStyle(color: Color(0xFF4F46E5), fontWeight: FontWeight.bold, fontSize: 12)),
+                      ),
+                      const Spacer(),
+                      Text(
+                        post['timestamp'] != null 
+                          ? _formatTimestamp(post['timestamp'])
+                          : '',
+                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                      ),
+                    ],
                   ),
-                  const Spacer(),
-                  Text(post['date'], style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                  const SizedBox(height: 12),
+                  Text(post['title'] ?? '', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+                  const SizedBox(height: 8),
+                  Text(
+                    post['content'] ?? '',
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Color(0xFF64748B), height: 1.5),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      const Icon(Icons.person_outline, size: 16, color: Color(0xFF94A3B8)),
+                      const SizedBox(width: 4),
+                      Text(post['authorName'] ?? 'Anonymous', style: const TextStyle(color: Color(0xFF64748B), fontSize: 13, fontWeight: FontWeight.w500)),
+                      const Spacer(),
+                      const Icon(Icons.favorite_border, size: 18, color: Color(0xFFEF4444)),
+                      const SizedBox(width: 4),
+                      Text((post['likes'] ?? 0).toString(), style: const TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                    ],
+                  ),
                 ],
               ),
-              const SizedBox(height: 12),
-              Text(post['title'], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-              const SizedBox(height: 8),
-              Text(post['excerpt'], style: const TextStyle(color: Colors.grey, height: 1.4)),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  const Icon(Icons.person_outline, size: 16, color: Colors.grey),
-                  const SizedBox(width: 4),
-                  Text(post['authorName'], style: const TextStyle(color: Colors.grey, fontSize: 13)),
-                  const Spacer(),
-                  Icon(Icons.thumb_up_outlined, size: 16, color: Colors.blue[700]),
-                  const SizedBox(width: 4),
-                  Text(post['likes'].toString(), style: const TextStyle(color: Colors.grey, fontSize: 13)),
-                ],
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  String _formatTimestamp(dynamic timestamp) {
+    if (timestamp is num) {
+      final date = DateTime.fromMillisecondsSinceEpoch(timestamp.toInt());
+      return "${date.day}/${date.month}/${date.year}";
+    }
+    return '';
+  }
+}
+
+class PostDetailPage extends StatelessWidget {
+  final Map<String, dynamic> post;
+  const PostDetailPage({Key? key, required this.post}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        foregroundColor: const Color(0xFF1E293B),
+      ),
+      body: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (post['imageUrl'] != null && post['imageUrl'].toString().isNotEmpty)
+              Image.network(post['imageUrl'], width: double.infinity, fit: BoxFit.cover),
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(color: const Color(0xFFEEF2FF), borderRadius: BorderRadius.circular(8)),
+                    child: Text(post['category'] ?? '', style: const TextStyle(color: Color(0xFF4F46E5), fontWeight: FontWeight.bold, fontSize: 12)),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(post['title'] ?? '', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Icon(Icons.person_outline, size: 18, color: Color(0xFF94A3B8)),
+                      const SizedBox(width: 6),
+                      Text(post['authorName'] ?? 'Anonymous', style: const TextStyle(color: Color(0xFF64748B), fontSize: 14, fontWeight: FontWeight.w500)),
+                      const Spacer(),
+                      if (post['timestamp'] != null)
+                        Text(
+                          _formatTimestamp(post['timestamp']),
+                          style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
+                        ),
+                    ],
+                  ),
+                  const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Divider()),
+                  Text(
+                    post['content'] ?? '',
+                    style: const TextStyle(fontSize: 16, color: Color(0xFF334155), height: 1.7),
+                  ),
+                  const SizedBox(height: 40),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatTimestamp(dynamic timestamp) {
+    if (timestamp is num) {
+      final date = DateTime.fromMillisecondsSinceEpoch(timestamp.toInt());
+      return "${date.day}/${date.month}/${date.year}";
+    }
+    return '';
   }
 }

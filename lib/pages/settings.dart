@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'dart:io';import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:untitled1/language_provider.dart';
@@ -27,6 +28,7 @@ class _SettingsPageState extends State<SettingsPage> {
           'privacy': 'פרטיות',
           'help': 'עזרה',
           'logout': 'התנתקות',
+          'appearance': 'מראה',
         };
       case 'ar':
         return {
@@ -38,17 +40,7 @@ class _SettingsPageState extends State<SettingsPage> {
           'privacy': 'الخصوصية',
           'help': 'المساعدة',
           'logout': 'تسجيل الخروج',
-        };
-      case 'ru':
-        return {
-          'title': 'Настройки',
-          'notifications': 'Уведомления',
-          'language': 'Язык',
-          'about': 'О программе',
-          'account': 'Аккаунт',
-          'privacy': 'Конфиденциальность',
-          'help': 'Помощь',
-          'logout': 'Выйти',
+          'appearance': 'المظهر',
         };
       default:
         return {
@@ -60,6 +52,7 @@ class _SettingsPageState extends State<SettingsPage> {
           'privacy': 'Privacy',
           'help': 'Help & Support',
           'logout': 'Logout',
+          'appearance': 'Appearance',
         };
     }
   }
@@ -69,68 +62,91 @@ class _SettingsPageState extends State<SettingsPage> {
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (context) => const SignInPage()),
-      (route) => false,
+          (route) => false,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final strings = _getLocalizedStrings(context);
-    final theme = Theme.of(context);
-    final isRtl = Provider.of<LanguageProvider>(context).locale.languageCode == 'he' || 
-                  Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
+    final isRtl = Provider.of<LanguageProvider>(context).locale.languageCode == 'he' ||
+        Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
 
+    if (Platform.isIOS) {
+      return _buildIosSettings(context, strings, isRtl);
+    } else {
+      return _buildAndroidSettings(context, strings, isRtl);
+    }
+  }
+
+  // --- ANDROID (Galaxy / One UI) DESIGN ---
+  Widget _buildAndroidSettings(BuildContext context, Map<String, String> strings, bool isRtl) {
+    final theme = Theme.of(context);
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
-        backgroundColor: theme.colorScheme.background,
-        appBar: AppBar(
-          title: Text(strings['title']!, style: theme.textTheme.titleLarge),
-          backgroundColor: Colors.white,
-          elevation: 0,
-          centerTitle: false,
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            _buildSection(strings['account']!, [
-              _buildTile(Icons.person_outline_rounded, strings['account']!, theme),
-              _buildTile(Icons.lock_outline_rounded, strings['privacy']!, theme),
-            ], theme),
-            const SizedBox(height: 24),
-            _buildSection(strings['notifications']!, [
-              _buildSwitchTile(Icons.notifications_none_rounded, strings['notifications']!, _notificationsEnabled, (v) => setState(() => _notificationsEnabled = v), theme),
-            ], theme),
-            const SizedBox(height: 24),
-            _buildSection(strings['language']!, [
-              ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: theme.colorScheme.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
-                  child: Icon(Icons.language_rounded, color: theme.colorScheme.primary, size: 22),
+        backgroundColor: const Color(0xFFF2F2F7),
+        body: CustomScrollView(
+          slivers: [
+            SliverAppBar.large(
+              expandedHeight: 180,
+              backgroundColor: const Color(0xFFF2F2F7),
+              elevation: 0,
+              pinned: true,
+              flexibleSpace: FlexibleSpaceBar(
+                title: Text(strings['title']!,
+                    style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                centerTitle: false,
+                titlePadding: const EdgeInsetsDirectional.only(start: 24, bottom: 16),
+              ),
+            ),
+            SliverList(
+              delegate: SliverChildListDelegate([
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    children: [
+                      _buildGalaxySection(strings['account']!, [
+                        _buildGalaxyTile(Icons.person_outline_rounded, strings['account']!),
+                        _buildGalaxyTile(Icons.lock_outline_rounded, strings['privacy']!),
+                      ]),
+                      const SizedBox(height: 16),
+                      _buildGalaxySection(strings['notifications']!, [
+                        _buildGalaxySwitchTile(Icons.notifications_none_rounded, strings['notifications']!, _notificationsEnabled, (v) => setState(() => _notificationsEnabled = v)),
+                      ]),
+                      const SizedBox(height: 16),
+                      _buildGalaxySection(strings['language']!, [
+                        ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                          leading: Icon(Icons.language_rounded, color: theme.colorScheme.primary),
+                          title: Text(strings['language']!, style: const TextStyle(fontWeight: FontWeight.w600)),
+                          trailing: const LanguageDropDown(),
+                        ),
+                      ]),
+                      const SizedBox(height: 16),
+                      _buildGalaxySection(strings['help']!, [
+                        _buildGalaxyTile(Icons.help_outline_rounded, strings['help']!),
+                        _buildGalaxyTile(Icons.info_outline_rounded, strings['about']!),
+                      ]),
+                      const SizedBox(height: 32),
+                      SizedBox(
+                        width: double.infinity,
+                        child: TextButton(
+                          onPressed: _logout,
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+                            backgroundColor: Colors.white,
+                          ),
+                          child: Text(strings['logout']!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                      const SizedBox(height: 40),
+                    ],
+                  ),
                 ),
-                title: Text(strings['language']!, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                trailing: const languageDropDown(),
-              ),
-            ], theme),
-            const SizedBox(height: 24),
-            _buildSection(strings['help']!, [
-              _buildTile(Icons.help_outline_rounded, strings['help']!, theme),
-              _buildTile(Icons.info_outline_rounded, strings['about']!, theme),
-            ], theme),
-            const SizedBox(height: 32),
-            ElevatedButton.icon(
-              onPressed: _logout,
-              icon: const Icon(Icons.logout_rounded, size: 20),
-              label: Text(strings['logout']!),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFEE2E2),
-                foregroundColor: const Color(0xFFEF4444),
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
+              ]),
             ),
           ],
         ),
@@ -138,19 +154,19 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildSection(String title, List<Widget> children, ThemeData theme) {
+  Widget _buildGalaxySection(String title, List<Widget> children) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 12),
-          child: Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8), letterSpacing: 1)),
+          padding: const EdgeInsetsDirectional.only(start: 12, bottom: 8),
+          child: Text(title.toUpperCase(),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF8E8E93))),
         ),
         Container(
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
+            borderRadius: BorderRadius.circular(26),
           ),
           child: Column(children: children),
         ),
@@ -158,41 +174,115 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildTile(IconData icon, String title, ThemeData theme) {
+  Widget _buildGalaxyTile(IconData icon, String title) {
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(color: theme.colorScheme.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
-        child: Icon(icon, color: theme.colorScheme.primary, size: 22),
-      ),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-      trailing: const Icon(Icons.chevron_right_rounded, color: Color(0xFFCBD5E1)),
+      leading: Icon(icon, color: const Color(0xFF1976D2)),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
+      trailing: const Icon(Icons.chevron_right_rounded, size: 20),
       onTap: () {},
     );
   }
 
-  Widget _buildSwitchTile(IconData icon, String title, bool value, Function(bool) onChanged, ThemeData theme) {
+  Widget _buildGalaxySwitchTile(IconData icon, String title, bool value, Function(bool) onChanged) {
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(color: theme.colorScheme.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
-        child: Icon(icon, color: theme.colorScheme.primary, size: 22),
-      ),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+      leading: Icon(icon, color: const Color(0xFF1976D2)),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
       trailing: Switch(
         value: value,
         onChanged: onChanged,
-        activeColor: theme.colorScheme.primary,
-        activeTrackColor: theme.colorScheme.primary.withOpacity(0.2),
+        activeColor: const Color(0xFF1976D2),
+      ),
+    );
+  }
+
+  // --- iOS (Cupertino) DESIGN ---
+  Widget _buildIosSettings(BuildContext context, Map<String, String> strings, bool isRtl) {
+    return Directionality(
+      textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+      child: CupertinoPageScaffold(
+        backgroundColor: CupertinoColors.systemGroupedBackground,
+        navigationBar: CupertinoNavigationBar(
+          middle: Text(strings['title']!),
+          border: null,
+        ),
+        child: ListView(
+          children: [
+            CupertinoListSection.insetGrouped(
+              header: Text(strings['account']!),
+              children: [
+                CupertinoListTile(
+                  leading: const Icon(CupertinoIcons.person, color: CupertinoColors.systemBlue),
+                  title: Text(strings['account']!),
+                  trailing: const CupertinoListTileChevron(),
+                  onTap: () {},
+                ),
+                CupertinoListTile(
+                  leading: const Icon(CupertinoIcons.lock, color: CupertinoColors.systemBlue),
+                  title: Text(strings['privacy']!),
+                  trailing: const CupertinoListTileChevron(),
+                  onTap: () {},
+                ),
+              ],
+            ),
+            CupertinoListSection.insetGrouped(
+              header: Text(strings['notifications']!),
+              children: [
+                CupertinoListTile(
+                  leading: const Icon(CupertinoIcons.bell, color: CupertinoColors.systemRed),
+                  title: Text(strings['notifications']!),
+                  trailing: CupertinoSwitch(
+                    value: _notificationsEnabled,
+                    onChanged: (v) => setState(() => _notificationsEnabled = v),
+                  ),
+                ),
+              ],
+            ),
+            CupertinoListSection.insetGrouped(
+              header: Text(strings['language']!),
+              children: [
+                CupertinoListTile(
+                  leading: const Icon(CupertinoIcons.globe, color: CupertinoColors.systemGreen),
+                  title: Text(strings['language']!),
+                  trailing: const LanguageDropDown(),
+                ),
+              ],
+            ),
+            CupertinoListSection.insetGrouped(
+              header: Text(strings['help']!),
+              children: [
+                CupertinoListTile(
+                  leading: const Icon(CupertinoIcons.question_circle, color: CupertinoColors.systemOrange),
+                  title: Text(strings['help']!),
+                  trailing: const CupertinoListTileChevron(),
+                  onTap: () {},
+                ),
+                CupertinoListTile(
+                  leading: const Icon(CupertinoIcons.info, color: CupertinoColors.systemGrey),
+                  title: Text(strings['about']!),
+                  trailing: const CupertinoListTileChevron(),
+                  onTap: () {},
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: CupertinoButton(
+                color: CupertinoColors.white,
+                borderRadius: BorderRadius.circular(10),
+                onPressed: _logout,
+                child: Text(strings['logout']!,
+                    style: const TextStyle(color: CupertinoColors.destructiveRed, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class languageDropDown extends StatelessWidget {
-  const languageDropDown({Key? key}) : super(key: key);
+class LanguageDropDown extends StatelessWidget {
+  const LanguageDropDown({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -200,13 +290,21 @@ class languageDropDown extends StatelessWidget {
     String current = 'English';
     if (locale.languageCode == 'he') current = 'עברית';
     else if (locale.languageCode == 'ar') current = 'عربي';
-    else if (locale.languageCode == 'ru') current = 'русский ';
+    else if (locale.languageCode == 'ru') current = 'русский';
+
+    if (Platform.isIOS) {
+      return CupertinoButton(
+        padding: EdgeInsets.zero,
+        child: Text(current, style: const TextStyle(fontSize: 14)),
+        onPressed: () => _showIosLocalePicker(context),
+      );
+    }
 
     return DropdownButton<String>(
       value: current,
       underline: const SizedBox(),
       icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF64748B)),
-      items: ['English', 'עברית', 'عربي', 'русский '].map((String value) {
+      items: ['English', 'עברית', 'عربي', 'русский'].map((String value) {
         return DropdownMenuItem<String>(
           value: value,
           child: Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
@@ -217,6 +315,25 @@ class languageDropDown extends StatelessWidget {
           Provider.of<LanguageProvider>(context, listen: false).setLocale(newValue);
         }
       },
+    );
+  }
+
+  void _showIosLocalePicker(BuildContext context) {
+    showCupertinoModalPopup(
+      context: context,
+      builder: (context) => CupertinoActionSheet(
+        actions: ['English', 'עברית', 'عربي', 'русский'].map((lang) => CupertinoActionSheetAction(
+          onPressed: () {
+            Provider.of<LanguageProvider>(context, listen: false).setLocale(lang);
+            Navigator.pop(context);
+          },
+          child: Text(lang),
+        )).toList(),
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ),
     );
   }
 }
