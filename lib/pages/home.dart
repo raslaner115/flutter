@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -15,7 +16,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
     app: FirebaseAuth.instance.app,
-    databaseURL: 'https://profis-60aaa-default-rtdb.europe-west1.firebasedatabase.app'
+    databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
   ).ref();
 
   List<Map<String, dynamic>> _topRatedWorkers = [];
@@ -42,27 +43,27 @@ class _HomePageState extends State<HomePage> {
         var userData = Map<String, dynamic>.from(entry.value as Map);
         if (userData['userType'] == 'worker' && userData['isSubscribed'] == true) {
           userData['uid'] = entry.key;
+          
+          // Calculate ratings from nested reviews inside users/{uid}/reviews
+          double totalStars = 0;
+          int reviewCount = 0;
+          
+          if (userData['reviews'] != null && userData['reviews'] is Map) {
+            final Map<dynamic, dynamic> reviews = userData['reviews'] as Map;
+            reviewCount = reviews.length;
+            reviews.forEach((key, value) {
+              if (value is Map) {
+                final reviewData = Map<String, dynamic>.from(value);
+                totalStars += (reviewData['stars'] as num).toDouble();
+              }
+            });
+          }
+          
+          userData['avgRating'] = reviewCount > 0 ? totalStars / reviewCount : 0.0;
+          userData['reviewCount'] = reviewCount;
+          
           workers.add(userData);
         }
-      }
-
-      // Calculate ratings
-      for (var worker in workers) {
-        final reviewsSnapshot = await _dbRef.child('reviews').child(worker['uid']).get();
-        double totalStars = 0;
-        int reviewCount = 0;
-
-        if (reviewsSnapshot.exists) {
-          Map<Object?, Object?> reviews = reviewsSnapshot.value as Map<Object?, Object?>;
-          reviewCount = reviews.length;
-          reviews.forEach((key, value) {
-            final reviewData = Map<String, dynamic>.from(value as Map);
-            totalStars += (reviewData['stars'] as num).toDouble();
-          });
-        }
-
-        worker['avgRating'] = reviewCount > 0 ? totalStars / reviewCount : 0.0;
-        worker['reviewCount'] = reviewCount;
       }
 
       // Sort by avgRating DESC
@@ -90,56 +91,56 @@ class _HomePageState extends State<HomePage> {
           'search_hint': 'חפש מקצוען (למשל: אינסטלטור)...',
           'categories': 'קטגוריות פופולריות',
           'see_all': 'הכל',
-          'top_rated': 'הכי מדורגים',
-          'view_all': 'צפה בהכל',
+          'top_rated': 'מקצוענים מובילים בשבילך',
+          'view_all': 'ראה עוד',
           'cat_names': {
-            'plumber': 'אינסטלטור',
-            'Carpenter': 'נגר',
-            'Electrician': 'חשמלאי',
+            'plumber': 'אינסטלציה',
+            'Carpenter': 'נגרות',
+            'Electrician': 'חשמל',
             'Painter': 'צבע',
-            'Cleaner': 'מנקה',
-            'Handyman': 'שיפוצניק',
-            'Landscaper': 'גנן',
-            'HVAC': 'מיזוג אוויר'
+            'Cleaner': 'ניקיון',
+            'Handyman': 'תיקונים',
+            'Landscaper': 'גינון',
+            'HVAC': 'מיזוג'
           }
         };
       case 'ar':
         return {
-          'welcome': 'مرحباً،',
+          'welcome': 'أهلاً بك،',
           'find_pros': 'ما هي الخدمة التي تحتاجها اليوم؟',
-          'search_hint': 'ابحث عن מחתרף...',
-          'categories': 'الفئات الشائعة',
+          'search_hint': 'ابحث عن محترف...',
+          'categories': 'الفئات الأكثر شعبية',
           'see_all': 'الكل',
-          'top_rated': 'الأعلى تقييماً',
-          'view_all': 'عرض الكل',
+          'top_rated': 'أفضل المحترفين لك',
+          'view_all': 'عرض المزيد',
           'cat_names': {
-            'plumber': 'سباك',
-            'Carpenter': 'نجار',
-            'Electrician': 'كهربائي',
+            'plumber': 'سباكة',
+            'Carpenter': 'نجارة',
+            'Electrician': 'كهرباء',
             'Painter': 'دهان',
-            'Cleaner': 'عامل نظافة',
-            'Handyman': 'عامل صيانة',
-            'Landscaper': 'منسق حدائق',
-            'HVAC': 'تكييف ותبرייد'
+            'Cleaner': 'تنظيف',
+            'Handyman': 'صيانة',
+            'Landscaper': 'حدائق',
+            'HVAC': 'تكييف'
           }
         };
       default:
         return {
           'welcome': 'Hello,',
           'find_pros': 'What service do you need today?',
-          'search_hint': 'Search for a pro...',
+          'search_hint': 'Search for a pro (e.g. Plumber)...',
           'categories': 'Popular Categories',
           'see_all': 'See all',
-          'top_rated': 'Top Rated',
+          'top_rated': 'Top Rated Professionals',
           'view_all': 'View all',
           'cat_names': {
-            'plumber': 'Plumber',
-            'Carpenter': 'Carpenter',
-            'Electrician': 'Electrician',
-            'Painter': 'Painter',
-            'Cleaner': 'Cleaner',
+            'plumber': 'Plumbing',
+            'Carpenter': 'Carpentry',
+            'Electrician': 'Electrical',
+            'Painter': 'Painting',
+            'Cleaner': 'Cleaning',
             'Handyman': 'Handyman',
-            'Landscaper': 'Landscaper',
+            'Landscaper': 'Landscaping',
             'HVAC': 'HVAC'
           }
         };
@@ -163,14 +164,18 @@ class _HomePageState extends State<HomePage> {
           child: CustomScrollView(
             slivers: [
               _buildSliverAppBar(localized, theme, user),
-              SliverToBoxAdapter(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildCategories(context, localized, theme),
-                    _buildTopRatedSection(context, localized, theme),
-                    const SizedBox(height: 32),
-                  ],
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildCategories(context, localized, theme),
+                      const SizedBox(height: 8),
+                      _buildTopRatedSection(context, localized, theme),
+                      const SizedBox(height: 32),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -182,11 +187,11 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildSliverAppBar(Map<String, dynamic> strings, ThemeData theme, User? user) {
     return SliverAppBar(
-      expandedHeight: 240, // Increased to prevent overflow
+      expandedHeight: 250,
       floating: false,
       pinned: true,
-      backgroundColor: const Color(0xFF1976D2),
       elevation: 0,
+      backgroundColor: const Color(0xFF1976D2),
       flexibleSpace: FlexibleSpaceBar(
         background: Container(
           decoration: const BoxDecoration(
@@ -196,57 +201,71 @@ class _HomePageState extends State<HomePage> {
               colors: [Color(0xFF1E3A8A), Color(0xFF1976D2)],
             ),
           ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 70, 24, 20), // Adjusted top padding
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Text(
-                  '${strings['welcome']} ${user?.displayName?.split(' ').first ?? ''}',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  strings['find_pros'],
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                const SizedBox(height: 24), // Replaced Spacer() with fixed height to avoid overflow
-                Container(
-                  height: 54,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: TextField(
-                    textAlignVertical: TextAlignVertical.center,
-                    decoration: InputDecoration(
-                      hintText: strings['search_hint'],
-                      prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF1976D2)),
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Stack(
+            children: [
+              Positioned(
+                top: -20,
+                right: -20,
+                child: CircleAvatar(radius: 80, backgroundColor: Colors.white.withOpacity(0.05)),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 70, 24, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          '${strings['welcome']} ${user?.displayName?.split(' ').first ?? ''}',
+                          style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 16),
+                        ),
+                        const SizedBox(width: 8),
+                        const Icon(Icons.waving_hand, color: Colors.amber, size: 18),
+                      ],
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    Text(
+                      strings['find_pros'],
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        height: 1.2,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(40),
+        child: Container(
+          height: 60,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+          child: GestureDetector(
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SearchPage())),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10, offset: const Offset(0, 4)),
+                ],
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  const Icon(Icons.search_rounded, color: Color(0xFF64748B)),
+                  const SizedBox(width: 12),
+                  Text(
+                    strings['search_hint'],
+                    style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -257,22 +276,22 @@ class _HomePageState extends State<HomePage> {
   Widget _buildCategories(BuildContext context, Map<String, dynamic> strings, ThemeData theme) {
     final catNames = strings['cat_names'] as Map<String, String>;
     final List<Map<String, dynamic>> categories = [
-      {'key': 'plumber', 'icon': Icons.plumbing_rounded, 'color': const Color(0xFFEEF2FF), 'iconColor': const Color(0xFF6366F1)},
-      {'key': 'Carpenter', 'icon': Icons.handyman_rounded, 'color': const Color(0xFFFFF7ED), 'iconColor': const Color(0xFFF97316)},
-      {'key': 'Electrician', 'icon': Icons.bolt_rounded, 'color': const Color(0xFFFEFCE8), 'iconColor': const Color(0xFFEAB308)},
-      {'key': 'Painter', 'icon': Icons.format_paint_rounded, 'color': const Color(0xFFFDF2F8), 'iconColor': const Color(0xFFEC4899)},
-      {'key': 'Cleaner', 'icon': Icons.auto_awesome_rounded, 'color': const Color(0xFFF0FDF4), 'iconColor': const Color(0xFF22C55E)},
-      {'key': 'Handyman', 'icon': Icons.architecture_rounded, 'color': const Color(0xFFF5F3FF), 'iconColor': const Color(0xFF8B5CF6)},
-      {'key': 'Landscaper', 'icon': Icons.park_rounded, 'color': const Color(0xFFECFDF5), 'iconColor': const Color(0xFF10B981)},
-      {'key': 'HVAC', 'icon': Icons.air_rounded, 'color': const Color(0xFFECFEFF), 'iconColor': const Color(0xFF06B6D4)},
+      {'key': 'plumber', 'icon': Icons.plumbing_rounded, 'color': const Color(0xFFDBEAFE), 'iconColor': const Color(0xFF2563EB)},
+      {'key': 'Carpenter', 'icon': Icons.handyman_rounded, 'color': const Color(0xFFFFEDD5), 'iconColor': const Color(0xFFEA580C)},
+      {'key': 'Electrician', 'icon': Icons.bolt_rounded, 'color': const Color(0xFFFEF9C3), 'iconColor': const Color(0xFFCA8A04)},
+      {'key': 'Painter', 'icon': Icons.format_paint_rounded, 'color': const Color(0xFFFCE7F3), 'iconColor': const Color(0xFFDB2777)},
+      {'key': 'Cleaner', 'icon': Icons.auto_awesome_rounded, 'color': const Color(0xFFDCFCE7), 'iconColor': const Color(0xFF16A34A)},
+      {'key': 'Handyman', 'icon': Icons.architecture_rounded, 'color': const Color(0xFFF3E8FF), 'iconColor': const Color(0xFF9333EA)},
+      {'key': 'Landscaper', 'icon': Icons.park_rounded, 'color': const Color(0xFFD1FAE5), 'iconColor': const Color(0xFF059669)},
+      {'key': 'HVAC', 'icon': Icons.air_rounded, 'color': const Color(0xFFCFFAFE), 'iconColor': const Color(0xFF0891B2)},
     ];
 
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
@@ -281,53 +300,52 @@ class _HomePageState extends State<HomePage> {
               ),
               TextButton(
                 onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SearchPage())),
-                child: const Text('See all', style: TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.w600)),
+                child: Text(strings['see_all'], style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.w600)),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 4,
-              mainAxisSpacing: 20,
-              crossAxisSpacing: 16,
-              childAspectRatio: 0.7,
-            ),
+        ),
+        SizedBox(
+          height: 110,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: categories.length,
             itemBuilder: (context, index) {
               final cat = categories[index];
               final categoryName = catNames[cat['key']] ?? cat['key'];
               return GestureDetector(
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => SearchPage(initialTrade: categoryName))),
-                child: Column(
-                  children: [
-                    AspectRatio(
-                      aspectRatio: 1,
-                      child: Container(
+                child: Container(
+                  width: 80,
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Column(
+                    children: [
+                      Container(
+                        height: 64,
+                        width: 64,
                         decoration: BoxDecoration(
                           color: cat['color'],
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(20),
                         ),
                         child: Icon(cat['icon'], color: cat['iconColor'], size: 28),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      categoryName,
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF475569)),
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
+                      const SizedBox(height: 8),
+                      Text(
+                        categoryName,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
               );
             },
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -336,7 +354,7 @@ class _HomePageState extends State<HomePage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -357,9 +375,17 @@ class _HomePageState extends State<HomePage> {
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_topRatedWorkers.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Text("No pros found yet.", style: TextStyle(color: Colors.grey)),
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(40),
+              child: Column(
+                children: [
+                  Icon(Icons.search_off_rounded, size: 64, color: Colors.grey[300]),
+                  const SizedBox(height: 16),
+                  Text("No pros available right now.", style: TextStyle(color: Colors.grey[500])),
+                ],
+              ),
+            ),
           )
         else
           SizedBox(

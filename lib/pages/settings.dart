@@ -1,4 +1,5 @@
-import 'dart:io';import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -190,6 +191,7 @@ class _SettingsPageState extends State<SettingsPage> {
       trailing: Switch(
         value: value,
         onChanged: onChanged,
+        activeTrackColor: const Color(0xFF1976D2).withOpacity(0.5),
         activeColor: const Color(0xFF1976D2),
       ),
     );

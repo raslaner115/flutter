@@ -16,7 +16,7 @@ void main() async {
   
   final database = FirebaseDatabase.instanceFor(
       app: Firebase.app(),
-      databaseURL: 'https://profis-60aaa-default-rtdb.europe-west1.firebasedatabase.app'
+      databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
   );
   
   // Disable persistence to ensure we don't see stale local data

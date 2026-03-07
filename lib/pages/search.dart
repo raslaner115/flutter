@@ -16,7 +16,7 @@ class SearchPage extends StatefulWidget {
 class _SearchPageState extends State<SearchPage> {
   final TextEditingController _searchController = TextEditingController();
   
-  static const String _dbUrl = 'https://profis-60aaa-default-rtdb.europe-west1.firebasedatabase.app';
+  static const String _dbUrl = 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com';
   late final DatabaseReference _dbRef;
 
   List<Map<String, dynamic>> _allWorkers = [];
@@ -58,6 +58,25 @@ class _SearchPageState extends State<SearchPage> {
 
             if (userType == 'worker' && isSubscribed) {
               userData['uid'] = key;
+              
+              // Calculate ratings from nested reviews inside users/{uid}/reviews
+              double totalStars = 0;
+              int reviewCount = 0;
+              
+              if (userData['reviews'] != null && userData['reviews'] is Map) {
+                final Map<dynamic, dynamic> reviews = userData['reviews'] as Map;
+                reviewCount = reviews.length;
+                reviews.forEach((key, value) {
+                  if (value is Map) {
+                    final reviewData = Map<String, dynamic>.from(value);
+                    totalStars += (reviewData['stars'] as num).toDouble();
+                  }
+                });
+              }
+              
+              userData['avgRating'] = reviewCount > 0 ? totalStars / reviewCount : 0.0;
+              userData['reviewCount'] = reviewCount;
+              
               workers.add(userData);
             }
           }
@@ -69,25 +88,6 @@ class _SearchPageState extends State<SearchPage> {
           for (int i = 0; i < rawData.length; i++) {
             if (rawData[i] != null) processUser(i.toString(), rawData[i]);
           }
-        }
-
-        // Fetch ratings for all workers
-        for (var worker in workers) {
-          final reviewsSnapshot = await _dbRef.child('reviews').child(worker['uid']).get();
-          double totalStars = 0;
-          int reviewCount = 0;
-
-          if (reviewsSnapshot.exists) {
-            Map<Object?, Object?> reviews = reviewsSnapshot.value as Map<Object?, Object?>;
-            reviewCount = reviews.length;
-            reviews.forEach((key, value) {
-              final reviewData = Map<String, dynamic>.from(value as Map);
-              totalStars += (reviewData['stars'] as num).toDouble();
-            });
-          }
-
-          worker['avgRating'] = reviewCount > 0 ? totalStars / reviewCount : 0.0;
-          worker['reviewCount'] = reviewCount;
         }
 
         if (mounted) {

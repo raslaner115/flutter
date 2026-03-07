@@ -64,7 +64,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
     try {
       final DatabaseReference dbRef = FirebaseDatabase.instanceFor(
         app: FirebaseAuth.instance.app,
-        databaseURL: 'https://profis-60aaa-default-rtdb.europe-west1.firebasedatabase.app'
+        databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
       ).ref();
       
       final userSnapshot = await dbRef.child('users').child(targetUid).get();
@@ -89,58 +89,41 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
               _userProfessions = [];
             }
           });
-        }
-      }
 
-      final reviewsSnapshot = await dbRef.child('reviews').child(targetUid).get();
-      List<Map<String, dynamic>> loadedReviews = [];
-      
-      if (reviewsSnapshot.exists && reviewsSnapshot.value != null) {
-        final dynamic rawReviews = reviewsSnapshot.value;
-        if (rawReviews is Map) {
-          rawReviews.forEach((key, value) {
-            if (value is Map) {
-              final Map<String, dynamic> reviewMap = {};
-              value.forEach((k, v) => reviewMap[k.toString()] = v);
-              reviewMap['id'] = key.toString(); // This is the reviewer UID
-              loadedReviews.add(reviewMap);
-            }
-          });
-        }
-      }
+          // Fetch reviews nested inside user
+          List<Map<String, dynamic>> loadedReviews = [];
+          if (data['reviews'] != null && data['reviews'] is Map) {
+            (data['reviews'] as Map).forEach((key, value) {
+              if (value is Map) {
+                final Map<String, dynamic> reviewMap = Map<String, dynamic>.from(value);
+                reviewMap['id'] = key.toString();
+                loadedReviews.add(reviewMap);
+              }
+            });
+          }
 
-      final projectsSnapshot = await dbRef.child('projects').child(targetUid).get();
-      List<Map<String, dynamic>> loadedProjects = [];
-      if (projectsSnapshot.exists && projectsSnapshot.value != null) {
-        final dynamic rawProjects = projectsSnapshot.value;
-        if (rawProjects is Map) {
-          rawProjects.forEach((key, value) {
-            if (value is Map) {
-              final Map<String, dynamic> projectMap = {};
-              value.forEach((k, v) => projectMap[k.toString()] = v);
-              projectMap['id'] = key.toString();
-              loadedProjects.add(projectMap);
-            }
-          });
-        } else if (rawProjects is List) {
-          for (int i = 0; i < rawProjects.length; i++) {
-            final value = rawProjects[i];
-            if (value is Map) {
-              final Map<String, dynamic> projectMap = {};
-              value.forEach((k, v) => projectMap[k.toString()] = v);
-              projectMap['id'] = i.toString();
-              loadedProjects.add(projectMap);
-            }
+          // Fetch projects nested inside user
+          List<Map<String, dynamic>> loadedProjects = [];
+          if (data['projects'] != null && data['projects'] is Map) {
+            (data['projects'] as Map).forEach((key, value) {
+              if (value is Map) {
+                final Map<String, dynamic> projectMap = Map<String, dynamic>.from(value);
+                projectMap['id'] = key.toString();
+                loadedProjects.add(projectMap);
+              }
+            });
+          }
+
+          if (mounted) {
+            setState(() {
+              _userReviews = loadedReviews;
+              _projects = loadedProjects;
+              _isLoading = false;
+            });
           }
         }
-      }
-      
-      if (mounted) {
-        setState(() {
-          _userReviews = loadedReviews;
-          _projects = loadedProjects;
-          _isLoading = false;
-        });
+      } else {
+        if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
       debugPrint("FETCH ERROR: $e");
@@ -302,7 +285,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
 
       final DatabaseReference dbRef = FirebaseDatabase.instanceFor(
         app: FirebaseAuth.instance.app,
-        databaseURL: 'https://profis-60aaa-default-rtdb.europe-west1.firebasedatabase.app'
+        databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
       ).ref();
 
       await dbRef.child('users').child(currentUser.uid).update({'profileImageUrl': downloadUrl});
@@ -407,7 +390,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
       
       final DatabaseReference dbRef = FirebaseDatabase.instanceFor(
         app: FirebaseAuth.instance.app,
-        databaseURL: 'https://profis-60aaa-default-rtdb.europe-west1.firebasedatabase.app'
+        databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
       ).ref();
 
       final projectData = {
@@ -417,7 +400,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
         'timestamp': ServerValue.timestamp,
       };
 
-      await dbRef.child('projects').child(currentUser.uid).push().set(projectData);
+      await dbRef.child('users').child(currentUser.uid).child('projects').push().set(projectData);
       _fetchUserData();
     } catch (e) {
       debugPrint("UPLOAD ERROR: $e");
@@ -454,11 +437,11 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
     try {
       final DatabaseReference dbRef = FirebaseDatabase.instanceFor(
         app: FirebaseAuth.instance.app,
-        databaseURL: 'https://profis-60aaa-default-rtdb.europe-west1.firebasedatabase.app'
+        databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
       ).ref();
 
-      // Delete from Database
-      await dbRef.child('projects').child(currentUser.uid).child(projectId).remove();
+      // Delete from Database nested inside user
+      await dbRef.child('users').child(currentUser.uid).child('projects').child(projectId).remove();
 
       // Delete from Storage
       try {
@@ -1126,7 +1109,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
                 try {
                   final DatabaseReference dbRef = FirebaseDatabase.instanceFor(
                     app: FirebaseAuth.instance.app,
-                    databaseURL: 'https://profis-60aaa-default-rtdb.europe-west1.firebasedatabase.app'
+                    databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
                   ).ref();
 
                   // Fetch current user name
@@ -1141,7 +1124,8 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
                   };
 
                   // Use currentUser.uid as the key to limit to one review and allow editing
-                  await dbRef.child('reviews').child(targetUid).child(currentUser.uid).set(reviewData);
+                  // Nested inside user
+                  await dbRef.child('users').child(targetUid).child('reviews').child(currentUser.uid).set(reviewData);
 
                   if (context.mounted) {
                     Navigator.pop(context);

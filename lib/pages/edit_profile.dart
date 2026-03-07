@@ -48,7 +48,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
       final dbRef = FirebaseDatabase.instanceFor(
         app: FirebaseAuth.instance.app,
-        databaseURL: 'https://profis-60aaa-default-rtdb.europe-west1.firebasedatabase.app'
+        databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
       ).ref();
 
       await dbRef.child('users').child(user.uid).update({

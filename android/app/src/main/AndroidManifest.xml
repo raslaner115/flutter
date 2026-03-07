@@ -12,9 +12,9 @@
     <uses-permission android:name="com.android.vending.BILLING" />
 
     <application
-        android:label="untitled1"
+        android:label="HireHub"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/launcher_icon"
         android:requestLegacyExternalStorage="true">
         <activity
             android:name=".MainActivity"
