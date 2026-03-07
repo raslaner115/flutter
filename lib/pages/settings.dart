@@ -16,8 +16,8 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   bool _notificationsEnabled = true;
 
-  Map<String, String> _getLocalizedStrings(BuildContext context) {
-    final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
+  Map<String, String> _getLocalizedStrings(BuildContext context, {bool listen = true}) {
+    final locale = Provider.of<LanguageProvider>(context, listen: listen).locale.languageCode;
     switch (locale) {
       case 'he':
         return {
@@ -42,6 +42,30 @@ class _SettingsPageState extends State<SettingsPage> {
           'help': 'المساعدة',
           'logout': 'تسجيل الخروج',
           'appearance': 'المظهر',
+        };
+      case 'ru':
+        return {
+          'title': 'Настройки',
+          'notifications': 'Уведомления',
+          'language': 'Язык',
+          'about': 'О приложении',
+          'account': 'Аккаунт',
+          'privacy': 'Конфиденциальность',
+          'help': 'Помощь',
+          'logout': 'Выйти',
+          'appearance': 'Внешний вид',
+        };
+      case 'am':
+        return {
+          'title': 'ቅንብሮች',
+          'notifications': 'ማሳወቂያዎች',
+          'language': 'ቋንቋ',
+          'about': 'ስለ እኛ',
+          'account': 'መለያ',
+          'privacy': 'ግላዊነት',
+          'help': 'እርዳታ',
+          'logout': 'ውጣ',
+          'appearance': 'ገጽታ',
         };
       default:
         return {
@@ -70,8 +94,8 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final strings = _getLocalizedStrings(context);
-    final isRtl = Provider.of<LanguageProvider>(context).locale.languageCode == 'he' ||
-        Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
+    final localeCode = Provider.of<LanguageProvider>(context).locale.languageCode;
+    final isRtl = localeCode == 'he' || localeCode == 'ar';
 
     if (Platform.isIOS) {
       return _buildIosSettings(context, strings, isRtl);
@@ -293,6 +317,7 @@ class LanguageDropDown extends StatelessWidget {
     if (locale.languageCode == 'he') current = 'עברית';
     else if (locale.languageCode == 'ar') current = 'عربي';
     else if (locale.languageCode == 'ru') current = 'русский';
+    else if (locale.languageCode == 'am') current = 'አማርኛ';
 
     if (Platform.isIOS) {
       return CupertinoButton(
@@ -306,7 +331,7 @@ class LanguageDropDown extends StatelessWidget {
       value: current,
       underline: const SizedBox(),
       icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF64748B)),
-      items: ['English', 'עברית', 'عربي', 'русский'].map((String value) {
+      items: ['English', 'עברית', 'عربي', 'русский', 'አማርኛ'].map((String value) {
         return DropdownMenuItem<String>(
           value: value,
           child: Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
@@ -324,7 +349,7 @@ class LanguageDropDown extends StatelessWidget {
     showCupertinoModalPopup(
       context: context,
       builder: (context) => CupertinoActionSheet(
-        actions: ['English', 'עברית', 'عربي', 'русский'].map((lang) => CupertinoActionSheetAction(
+        actions: ['English', 'עברית', 'عربي', 'русский', 'አማርኛ'].map((lang) => CupertinoActionSheetAction(
           onPressed: () {
             Provider.of<LanguageProvider>(context, listen: false).setLocale(lang);
             Navigator.pop(context);

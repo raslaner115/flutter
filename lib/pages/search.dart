@@ -59,7 +59,6 @@ class _SearchPageState extends State<SearchPage> {
             if (userType == 'worker' && isSubscribed) {
               userData['uid'] = key;
               
-              // Calculate ratings from nested reviews inside users/{uid}/reviews
               double totalStars = 0;
               int reviewCount = 0;
               
@@ -131,7 +130,6 @@ class _SearchPageState extends State<SearchPage> {
         return matchesTrade && matchesSearch;
       }).toList();
       
-      // Default sort by rating
       _filteredWorkers.sort((a, b) => (b['avgRating'] as double).compareTo(a['avgRating'] as double));
     });
   }
@@ -139,14 +137,14 @@ class _SearchPageState extends State<SearchPage> {
   Map<String, dynamic> _getLocalizedStrings(BuildContext context) {
     final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
     final tradeNames = {
-      'Plumber': locale == 'he' ? 'אינסטלציה' : (locale == 'ar' ? 'سباكة' : 'Plumbing'),
-      'Carpenter': locale == 'he' ? 'נגרות' : (locale == 'ar' ? 'نجارة' : 'Carpentry'),
-      'Electrician': locale == 'he' ? 'חשמל' : (locale == 'ar' ? 'كهرباء' : 'Electrical'),
-      'Painter': locale == 'he' ? 'צבע' : (locale == 'ar' ? 'دهان' : 'Painting'),
-      'Cleaner': locale == 'he' ? 'ניקיון' : (locale == 'ar' ? 'تنظيف' : 'Cleaning'),
-      'Handyman': locale == 'he' ? 'תיקונים' : (locale == 'ar' ? 'صيانة' : 'Handyman'),
-      'Landscaper': locale == 'he' ? 'גינון' : (locale == 'ar' ? 'حدائق' : 'Landscaping'),
-      'HVAC': locale == 'he' ? 'מיזוג' : (locale == 'ar' ? 'تكييف' : 'HVAC'),
+      'Plumber': locale == 'he' ? 'אינסטלציה' : (locale == 'ar' ? 'سباكة' : (locale == 'ru' ? 'Сантехник' : (locale == 'am' ? 'ቧንቧ ሰራተኛ' : 'Plumbing'))),
+      'Carpenter': locale == 'he' ? 'נגרות' : (locale == 'ar' ? 'نجارة' : (locale == 'ru' ? 'Плотник' : (locale == 'am' ? 'አናጺ' : 'Carpentry'))),
+      'Electrician': locale == 'he' ? 'חשמל' : (locale == 'ar' ? 'كهرباء' : (locale == 'ru' ? 'Электрик' : (locale == 'am' ? 'ኤሌክትሪሻን' : 'Electrical'))),
+      'Painter': locale == 'he' ? 'צבע' : (locale == 'ar' ? 'دهان' : (locale == 'ru' ? 'Маляр' : (locale == 'am' ? 'ቀለም ቀቢ' : 'Painting'))),
+      'Cleaner': locale == 'he' ? 'ניקיון' : (locale == 'ar' ? 'تنظيف' : (locale == 'ru' ? 'Уборка' : (locale == 'am' ? 'ፅዳት' : 'Cleaning'))),
+      'Handyman': locale == 'he' ? 'תיקונים' : (locale == 'ar' ? 'صيانة' : (locale == 'ru' ? 'Мастер на час' : (locale == 'am' ? 'ጥገና' : 'Handyman'))),
+      'Landscaper': locale == 'he' ? 'גינון' : (locale == 'ar' ? 'حدائق' : (locale == 'ru' ? 'Ландшафт' : (locale == 'am' ? 'አትክልተኛ' : 'Landscaping'))),
+      'HVAC': locale == 'he' ? 'מיזוג' : (locale == 'ar' ? 'تكييف' : (locale == 'ru' ? 'Кондиционеры' : (locale == 'am' ? 'ኤሲ ጥገና' : 'HVAC'))),
     };
 
     switch (locale) {
@@ -166,6 +164,24 @@ class _SearchPageState extends State<SearchPage> {
           'trade': 'نوع الخدمة',
           'found': 'تم العثور على ${_filteredWorkers.length} نتيجة',
           'no_results': 'لم يتم العثور على نتائج لبحثك',
+          'trades': tradeNames,
+        };
+      case 'ru':
+        return {
+          'search': 'Найти профессионала или город...',
+          'filters': 'Фильтры',
+          'trade': 'Тип услуги',
+          'found': 'Найдено ${_filteredWorkers.length} результатов',
+          'no_results': 'Результатов не найдено',
+          'trades': tradeNames,
+        };
+      case 'am':
+        return {
+          'search': 'ባለሙያ ወይም ከተማ ይፈልጉ...',
+          'filters': 'ማጣሪያዎች',
+          'trade': 'የአገልግሎት ዓይነት',
+          'found': '${_filteredWorkers.length} ውጤቶች ተገኝተዋል',
+          'no_results': 'ምንም ውጤት አልተገኘም',
           'trades': tradeNames,
         };
       default:
@@ -189,8 +205,8 @@ class _SearchPageState extends State<SearchPage> {
   @override
   Widget build(BuildContext context) {
     final localized = _getLocalizedStrings(context);
-    final isRtl = Provider.of<LanguageProvider>(context).locale.languageCode == 'he' || 
-                  Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
+    final localeCode = Provider.of<LanguageProvider>(context).locale.languageCode;
+    final isRtl = localeCode == 'he' || localeCode == 'ar';
 
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,

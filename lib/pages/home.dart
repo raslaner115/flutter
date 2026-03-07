@@ -44,7 +44,6 @@ class _HomePageState extends State<HomePage> {
         if (userData['userType'] == 'worker' && userData['isSubscribed'] == true) {
           userData['uid'] = entry.key;
           
-          // Calculate ratings from nested reviews inside users/{uid}/reviews
           double totalStars = 0;
           int reviewCount = 0;
           
@@ -66,7 +65,6 @@ class _HomePageState extends State<HomePage> {
         }
       }
 
-      // Sort by avgRating DESC
       workers.sort((a, b) => (b['avgRating'] as double).compareTo(a['avgRating'] as double));
       
       if (mounted) {
@@ -81,8 +79,8 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Map<String, dynamic> _getLocalizedStrings(BuildContext context) {
-    final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
+  Map<String, dynamic> _getLocalizedStrings(BuildContext context, {bool listen = true}) {
+    final locale = Provider.of<LanguageProvider>(context, listen: listen).locale.languageCode;
     switch (locale) {
       case 'he':
         return {
@@ -124,6 +122,46 @@ class _HomePageState extends State<HomePage> {
             'HVAC': 'تكييف'
           }
         };
+      case 'ru':
+        return {
+          'welcome': 'Привет,',
+          'find_pros': 'Какая услуга вам нужна сегодня?',
+          'search_hint': 'Найти профессионала...',
+          'categories': 'Популярные категории',
+          'see_all': 'Все',
+          'top_rated': 'Лучшие специалисты',
+          'view_all': 'Смотреть все',
+          'cat_names': {
+            'plumber': 'Сантехник',
+            'Carpenter': 'Плотник',
+            'Electrician': 'Электрик',
+            'Painter': 'Маляр',
+            'Cleaner': 'Уборка',
+            'Handyman': 'Мастер на час',
+            'Landscaper': 'Ландшафт',
+            'HVAC': 'Кондиционеры'
+          }
+        };
+      case 'am':
+        return {
+          'welcome': 'ጤና ይስጥልኝ፣',
+          'find_pros': 'ዛሬ ምን ዓይነት አገልግሎት ይፈልጋሉ?',
+          'search_hint': 'ባለሙያ ይፈልጉ...',
+          'categories': 'ታዋቂ ዘርፎች',
+          'see_all': 'ሁሉንም',
+          'top_rated': 'ከፍተኛ ደረጃ የተሰጣቸው ባለሙያዎች',
+          'view_all': 'ሁሉንም ይመልከቱ',
+          'cat_names': {
+            'plumber': 'ቧንቧ ሰራተኛ',
+            'Carpenter': 'አናጺ',
+            'Electrician': 'ኤሌክትሪሻን',
+            'Painter': 'ቀለም ቀቢ',
+            'Cleaner': 'ፅዳት',
+            'Handyman': 'ጥገና',
+            'Landscaper': 'አትክልተኛ',
+            'HVAC': 'ኤሲ ጥገና'
+          }
+        };
       default:
         return {
           'welcome': 'Hello,',
@@ -151,8 +189,8 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final localized = _getLocalizedStrings(context);
     final theme = Theme.of(context);
-    final isRtl = Provider.of<LanguageProvider>(context).locale.languageCode == 'he' || 
-                  Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
+    final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
+    final isRtl = locale == 'he' || locale == 'ar';
     final user = FirebaseAuth.instance.currentUser;
 
     return Directionality(
@@ -424,7 +462,6 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header Image Placeholder
             Container(
               height: 120,
               decoration: BoxDecoration(

@@ -9,6 +9,7 @@ import 'package:untitled1/pages/formu.dart';
 import 'package:untitled1/pages/ptofile.dart';
 import 'package:untitled1/pages/sighn_in.dart';
 import 'package:untitled1/pages/settings.dart';
+import 'package:untitled1/pages/splash_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -38,7 +39,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       locale: Provider.of<LanguageProvider>(context).locale,
-      home: const SignInPage(),
+      home: const SplashScreen(),
     );
   }
 }
@@ -67,6 +68,10 @@ class _MyHomePageState extends State<MyHomePage> {
         return {'home': 'בית', 'search': 'חיפוש', 'blog': 'בלוג', 'profile': 'פרופיל', 'settings': 'הגדרות'};
       case 'ar':
         return {'home': 'الرئيسية', 'search': 'بحث', 'blog': 'مدونة', 'profile': 'الملف الشخصي', 'settings': 'الإعدادات'};
+      case 'ru':
+        return {'home': 'Главная', 'search': 'Поиск', 'blog': 'Блог', 'profile': 'Профиль', 'settings': 'Настройки'};
+      case 'am':
+        return {'home': 'ዋና ገጽ', 'search': 'ፍለጋ', 'blog': 'ብሎግ', 'profile': 'ፕሮፋይል', 'settings': 'ቅንብሮች'};
       default:
         return {'home': 'Home', 'search': 'Search', 'blog': 'Blog', 'profile': 'Profile', 'settings': 'Settings'};
     }
@@ -75,8 +80,8 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   Widget build(BuildContext context) {
     final labels = _getLocalizedLabels(context);
-    final isRtl = Provider.of<LanguageProvider>(context).locale.languageCode == 'he' || 
-                  Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
+    final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
+    final isRtl = locale == 'he' || locale == 'ar';
 
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,

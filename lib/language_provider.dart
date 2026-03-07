@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class LanguageProvider extends ChangeNotifier {
-  Locale _locale = const Locale('en');
+  Locale _locale = const Locale('he');
 
   Locale get locale => _locale;
 
@@ -19,8 +19,11 @@ class LanguageProvider extends ChangeNotifier {
       case 'русский ':
         _locale = const Locale('ru');
         break;
+      case 'አማርኛ':
+        _locale = const Locale('am');
+        break;
       default:
-        _locale = const Locale('en');
+        _locale = const Locale('he');
     }
     notifyListeners();
   }
