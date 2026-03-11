@@ -36,32 +36,41 @@ class _HomePageState extends State<HomePage> {
         return;
       }
 
-      Map<Object?, Object?> allUsers = usersSnapshot.value as Map<Object?, Object?>;
+      final dynamic data = usersSnapshot.value;
       List<Map<String, dynamic>> workers = [];
 
-      for (var entry in allUsers.entries) {
-        var userData = Map<String, dynamic>.from(entry.value as Map);
-        if (userData['userType'] == 'worker' && userData['isSubscribed'] == true) {
-          userData['uid'] = entry.key;
-          
-          double totalStars = 0;
-          int reviewCount = 0;
-          
-          if (userData['reviews'] != null && userData['reviews'] is Map) {
-            final Map<dynamic, dynamic> reviews = userData['reviews'] as Map;
-            reviewCount = reviews.length;
-            reviews.forEach((key, value) {
-              if (value is Map) {
-                final reviewData = Map<String, dynamic>.from(value);
-                totalStars += (reviewData['stars'] as num).toDouble();
-              }
-            });
+      void processUserData(String key, dynamic value) {
+        if (value is Map) {
+          var userData = Map<String, dynamic>.from(value);
+          if (userData['userType'] == 'worker') {
+            userData['uid'] = key;
+            
+            double totalStars = 0;
+            int reviewCount = 0;
+            
+            if (userData['reviews'] != null && userData['reviews'] is Map) {
+              final Map<dynamic, dynamic> reviews = userData['reviews'] as Map;
+              reviewCount = reviews.length;
+              reviews.forEach((k, v) {
+                if (v is Map) {
+                  final reviewData = Map<String, dynamic>.from(v);
+                  totalStars += (reviewData['stars'] as num).toDouble();
+                }
+              });
+            }
+            
+            userData['avgRating'] = reviewCount > 0 ? totalStars / reviewCount : 0.0;
+            userData['reviewCount'] = reviewCount;
+            workers.add(userData);
           }
-          
-          userData['avgRating'] = reviewCount > 0 ? totalStars / reviewCount : 0.0;
-          userData['reviewCount'] = reviewCount;
-          
-          workers.add(userData);
+        }
+      }
+
+      if (data is Map) {
+        data.forEach((key, value) => processUserData(key.toString(), value));
+      } else if (data is List) {
+        for (int i = 0; i < data.length; i++) {
+          if (data[i] != null) processUserData(i.toString(), data[i]);
         }
       }
 
@@ -74,7 +83,7 @@ class _HomePageState extends State<HomePage> {
         });
       }
     } catch (e) {
-      debugPrint("Error fetching top rated: $e");
+      debugPrint("HOME FETCH ERROR: $e");
       if (mounted) setState(() => _isTopRatedLoading = false);
     }
   }
@@ -85,6 +94,7 @@ class _HomePageState extends State<HomePage> {
       case 'he':
         return {
           'welcome': 'שלום,',
+          'guest': 'אורח',
           'find_pros': 'איזה שירות דרוש לך היום?',
           'search_hint': 'חפש מקצוען (למשל: אינסטלטור)...',
           'categories': 'קטגוריות פופולריות',
@@ -102,69 +112,10 @@ class _HomePageState extends State<HomePage> {
             'HVAC': 'מיזוג'
           }
         };
-      case 'ar':
-        return {
-          'welcome': 'أهلاً بك،',
-          'find_pros': 'ما هي الخدمة التي تحتاجها اليوم؟',
-          'search_hint': 'ابحث عن محترف...',
-          'categories': 'الفئات الأكثر شعبية',
-          'see_all': 'الكل',
-          'top_rated': 'أفضل المحترفين لك',
-          'view_all': 'عرض المزيد',
-          'cat_names': {
-            'plumber': 'سباكة',
-            'Carpenter': 'نجارة',
-            'Electrician': 'كهرباء',
-            'Painter': 'دهان',
-            'Cleaner': 'تنظيف',
-            'Handyman': 'صيانة',
-            'Landscaper': 'حدائق',
-            'HVAC': 'تكييف'
-          }
-        };
-      case 'ru':
-        return {
-          'welcome': 'Привет,',
-          'find_pros': 'Какая услуга вам нужна сегодня?',
-          'search_hint': 'Найти профессионала...',
-          'categories': 'Популярные категории',
-          'see_all': 'Все',
-          'top_rated': 'Лучшие специалисты',
-          'view_all': 'Смотреть все',
-          'cat_names': {
-            'plumber': 'Сантехник',
-            'Carpenter': 'Плотник',
-            'Electrician': 'Электрик',
-            'Painter': 'Маляр',
-            'Cleaner': 'Уборка',
-            'Handyman': 'Мастер на час',
-            'Landscaper': 'Ландшафт',
-            'HVAC': 'Кондиционеры'
-          }
-        };
-      case 'am':
-        return {
-          'welcome': 'ጤና ይስጥልኝ፣',
-          'find_pros': 'ዛሬ ምን ዓይነት አገልግሎት ይፈልጋሉ?',
-          'search_hint': 'ባለሙያ ይፈልጉ...',
-          'categories': 'ታዋቂ ዘርፎች',
-          'see_all': 'ሁሉንም',
-          'top_rated': 'ከፍተኛ ደረጃ የተሰጣቸው ባለሙያዎች',
-          'view_all': 'ሁሉንም ይመልከቱ',
-          'cat_names': {
-            'plumber': 'ቧንቧ ሰራተኛ',
-            'Carpenter': 'አናጺ',
-            'Electrician': 'ኤሌክትሪሻን',
-            'Painter': 'ቀለም ቀቢ',
-            'Cleaner': 'ፅዳት',
-            'Handyman': 'ጥገና',
-            'Landscaper': 'አትክልተኛ',
-            'HVAC': 'ኤሲ ጥገና'
-          }
-        };
       default:
         return {
           'welcome': 'Hello,',
+          'guest': 'Guest',
           'find_pros': 'What service do you need today?',
           'search_hint': 'Search for a pro (e.g. Plumber)...',
           'categories': 'Popular Categories',
@@ -189,8 +140,8 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final localized = _getLocalizedStrings(context);
     final theme = Theme.of(context);
-    final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
-    final isRtl = locale == 'he' || locale == 'ar';
+    final localeCode = Provider.of<LanguageProvider>(context).locale.languageCode;
+    final isRtl = localeCode == 'he' || localeCode == 'ar';
     final user = FirebaseAuth.instance.currentUser;
 
     return Directionality(
@@ -224,6 +175,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildSliverAppBar(Map<String, dynamic> strings, ThemeData theme, User? user) {
+    String displayName = user?.displayName?.split(' ').first ?? strings['guest'];
+    
     return SliverAppBar(
       expandedHeight: 250,
       floating: false,
@@ -254,7 +207,7 @@ class _HomePageState extends State<HomePage> {
                     Row(
                       children: [
                         Text(
-                          '${strings['welcome']} ${user?.displayName?.split(' ').first ?? ''}',
+                          '${strings['welcome']} $displayName',
                           style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 16),
                         ),
                         const SizedBox(width: 8),

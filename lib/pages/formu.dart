@@ -7,9 +7,10 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:untitled1/language_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:untitled1/pages/sighn_in.dart';
 
 class BlogPage extends StatefulWidget {
-  const BlogPage({Key? key}) : super(key: key);
+  const BlogPage({super.key});
 
   @override
   State<BlogPage> createState() => _BlogPageState();
@@ -113,31 +114,10 @@ class _BlogPageState extends State<BlogPage> {
           'sort': 'מיין לפי',
           'newest': 'הכי חדש',
           'most_liked': 'הכי הרבה לייקים',
-        };
-      case 'ar':
-        return {
-          'title': 'المنتدى والنصائح',
-          'create_post': 'شارك مع المجتمع',
-          'edit_post': 'تعديل المنشور',
-          'post_title': 'العنوان',
-          'post_category': 'نوع المنشور',
-          'post_content': 'ماذا تريد أن تشارك؟',
-          'publish': 'نشر',
-          'update': 'تحديث',
-          'cancel': 'إلغاء',
-          'categories': ['سؤال', 'نصيحة', 'دليل', 'توصية', 'آخر'],
-          'upload_photo': 'أضف صورة',
-          'no_posts': 'لا توجد منشورات بعد',
-          'delete': 'حذف',
-          'share': 'مشاركة',
-          'report': 'إبلاغ',
-          'hide': 'إخفاء',
-          'edit': 'تعديل',
-          'comments': 'تعليقات',
-          'add_comment': 'أضف تعليقاً...',
-          'sort': 'ترتيب حسب',
-          'newest': 'الأحدث',
-          'most_liked': 'الأكثر إعجاباً',
+          'guest_msg': 'עליך להירשם כדי לבצע פעולה זו',
+          'login': 'התחברות',
+          'error': 'שגיאה: חסרה הרשאה או בעיית תקשורת',
+          'empty_fields': 'נא למלא כותרת ותוכן',
         };
       default:
         return {
@@ -163,12 +143,45 @@ class _BlogPageState extends State<BlogPage> {
           'sort': 'Sort by',
           'newest': 'Newest',
           'most_liked': 'Most Liked',
+          'guest_msg': 'You must sign up to perform this action',
+          'login': 'Sign In',
+          'error': 'Error: Permission denied or connection issue',
+          'empty_fields': 'Please fill both title and content',
         };
     }
   }
 
+  bool _isGuest() {
+    final user = FirebaseAuth.instance.currentUser;
+    return user == null || user.isAnonymous;
+  }
+
+  void _showGuestDialog(BuildContext context, Map<String, dynamic> strings) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(strings['guest_msg']),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(strings['cancel'])),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const SignInPage()));
+            },
+            child: Text(strings['login']),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showCreatePostSheet(BuildContext context, {Map<String, dynamic>? existingPost}) {
     final strings = _getLocalizedStrings(context);
+    if (_isGuest()) {
+      _showGuestDialog(context, strings);
+      return;
+    }
+    
     final titleController = TextEditingController(text: existingPost?['title']);
     final contentController = TextEditingController(text: existingPost?['content']);
     String selectedCategory = existingPost?['category'] ?? (strings['categories'] as List)[0];
@@ -265,15 +278,27 @@ class _BlogPageState extends State<BlogPage> {
                 const SizedBox(height: 24),
                 ElevatedButton(
                   onPressed: isUploading ? null : () async {
-                    if (titleController.text.isEmpty || contentController.text.isEmpty) return;
+                    if (titleController.text.trim().isEmpty || contentController.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['empty_fields'])));
+                      return;
+                    }
                     
                     setSheetState(() => isUploading = true);
                     try {
                       final user = FirebaseAuth.instance.currentUser;
+                      if (user == null) throw Exception("User not signed in");
+
+                      String authorName = user.displayName ?? "User";
+                      if (user.displayName == null || user.displayName!.isEmpty) {
+                        try {
+                          final userSnap = await _dbRef.child('users').child(user.uid).child('name').get();
+                          if (userSnap.exists) authorName = userSnap.value.toString();
+                        } catch (_) {}
+                      }
+
                       String? imageUrl = existingImageUrl;
-                      
                       if (selectedImage != null) {
-                        final storageRef = FirebaseStorage.instance.ref().child('blog_images/${DateTime.now().millisecondsSinceEpoch}.jpg');
+                        final storageRef = FirebaseStorage.instance.ref().child('blog_images/${user.uid}_${DateTime.now().millisecondsSinceEpoch}.jpg');
                         await storageRef.putFile(selectedImage!);
                         imageUrl = await storageRef.getDownloadURL();
                       }
@@ -283,8 +308,8 @@ class _BlogPageState extends State<BlogPage> {
                         'content': contentController.text.trim(),
                         'category': selectedCategory,
                         'imageUrl': imageUrl,
-                        'authorUid': user?.uid,
-                        'authorName': user?.displayName ?? 'Anonymous',
+                        'authorUid': user.uid,
+                        'authorName': authorName,
                         'timestamp': existingPost?['timestamp'] ?? ServerValue.timestamp,
                         'likes': existingPost?['likes'] ?? 0,
                         'likedBy': existingPost?['likedBy'] ?? {},
@@ -296,11 +321,15 @@ class _BlogPageState extends State<BlogPage> {
                         await _dbRef.child('blog_posts').child(existingPost['id']).update(postData);
                       }
                       
-                      if (mounted) {
-                        Navigator.pop(context);
-                      }
+                      if (mounted) Navigator.pop(context);
                     } catch (e) {
-                      debugPrint("POST ERROR: $e");
+                      debugPrint("BLOG PUBLISH ERROR: $e");
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text("${strings['error']}. Make sure your rules allow writes."),
+                          duration: const Duration(seconds: 5),
+                        ));
+                      }
                     } finally {
                       if (mounted) setSheetState(() => isUploading = false);
                     }
@@ -324,10 +353,20 @@ class _BlogPageState extends State<BlogPage> {
   }
 
   void _deletePost(String postId) async {
-    await _dbRef.child('blog_posts').child(postId).remove();
+    try {
+      await _dbRef.child('blog_posts').child(postId).remove();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error deleting post")));
+    }
   }
 
   void _toggleLike(Map<String, dynamic> post) async {
+    final strings = _getLocalizedStrings(context);
+    if (_isGuest()) {
+      _showGuestDialog(context, strings);
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -343,10 +382,14 @@ class _BlogPageState extends State<BlogPage> {
       likes++;
     }
 
-    await _dbRef.child('blog_posts').child(postId).update({
-      'likes': likes,
-      'likedBy': likedBy,
-    });
+    try {
+      await _dbRef.child('blog_posts').child(postId).update({
+        'likes': likes,
+        'likedBy': likedBy,
+      });
+    } catch (e) {
+      debugPrint("LIKE ERROR: $e");
+    }
   }
 
   @override
@@ -400,6 +443,7 @@ class _BlogPageState extends State<BlogPage> {
                   onEdit: () => _showCreatePostSheet(context, existingPost: visiblePosts[index]),
                   onHide: () => setState(() => _hiddenPostIds.add(visiblePosts[index]['id'])),
                   localizedStrings: strings,
+                  onGuestDialog: () => _showGuestDialog(context, strings),
                 ),
               ),
       ),
@@ -414,16 +458,18 @@ class _BlogCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onHide;
   final Map<String, dynamic> localizedStrings;
+  final VoidCallback onGuestDialog;
 
   const _BlogCard({
-    Key? key, 
+    super.key, 
     required this.post, 
     required this.onLike,
     required this.onDelete,
     required this.onEdit,
     required this.onHide,
     required this.localizedStrings,
-  }) : super(key: key);
+    required this.onGuestDialog,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -439,7 +485,7 @@ class _BlogCard extends StatelessWidget {
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 12, offset: const Offset(0, 4))],
       ),
       child: InkWell(
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailPage(post: post, onLike: onLike, onEdit: onEdit, onDelete: onDelete, localizedStrings: localizedStrings))),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailPage(post: post, onLike: onLike, onEdit: onEdit, onDelete: onDelete, localizedStrings: localizedStrings, onGuestDialog: onGuestDialog))),
         borderRadius: BorderRadius.circular(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -529,15 +575,17 @@ class PostDetailPage extends StatefulWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final Map<String, dynamic> localizedStrings;
+  final VoidCallback onGuestDialog;
 
   const PostDetailPage({
-    Key? key, 
+    super.key, 
     required this.post, 
     required this.onLike,
     required this.onEdit,
     required this.onDelete,
     required this.localizedStrings,
-  }) : super(key: key);
+    required this.onGuestDialog,
+  });
 
   @override
   State<PostDetailPage> createState() => _PostDetailPageState();
@@ -565,14 +613,16 @@ class _PostDetailPageState extends State<PostDetailPage> {
       if (data != null) {
         if (data is Map) {
           data.forEach((key, value) {
-            final comment = Map<String, dynamic>.from(value as Map);
-            comment['id'] = key;
-            loadedComments.add(comment);
+            if (value is Map) {
+              final comment = Map<String, dynamic>.from(value);
+              comment['id'] = key;
+              loadedComments.add(comment);
+            }
           });
         } else if (data is List) {
           for (int i = 0; i < data.length; i++) {
-            if (data[i] != null) {
-              final comment = Map<String, dynamic>.from(data[i] as Map);
+            if (data[i] != null && data[i] is Map) {
+              final comment = Map<String, dynamic>.from(data[i]);
               comment['id'] = i.toString();
               loadedComments.add(comment);
             }
@@ -589,20 +639,32 @@ class _PostDetailPageState extends State<PostDetailPage> {
   }
 
   void _addComment() async {
-    if (_commentController.text.trim().isEmpty) return;
     final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) {
+      widget.onGuestDialog();
+      return;
+    }
+
+    if (_commentController.text.trim().isEmpty) return;
+    
     final commentData = {
       'text': _commentController.text.trim(),
-      'authorName': user?.displayName ?? 'Anonymous',
-      'authorUid': user?.uid,
+      'authorName': user.displayName ?? 'Anonymous',
+      'authorUid': user.uid,
       'timestamp': ServerValue.timestamp,
     };
-    await _dbRef.child('blog_posts').child(widget.post['id']).child('blog_comments').push().set(commentData);
-    _commentController.clear();
+    try {
+      await _dbRef.child('blog_posts').child(widget.post['id']).child('blog_comments').push().set(commentData);
+      _commentController.clear();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Permission denied: Update your rules.")));
+    }
   }
 
   void _deleteComment(String commentId) async {
-    await _dbRef.child('blog_posts').child(widget.post['id']).child('blog_comments').child(commentId).remove();
+    try {
+      await _dbRef.child('blog_posts').child(widget.post['id']).child('blog_comments').child(commentId).remove();
+    } catch (_) {}
   }
 
   @override
@@ -724,7 +786,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                               ],
                             ),
                           );
-                        }).toList(),
+                        }),
                       ],
                     ),
                   ),

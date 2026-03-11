@@ -2,8 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:untitled1/pages/subscription.dart';
 
 class CompleteWorkerProfilePage extends StatefulWidget {
   const CompleteWorkerProfilePage({Key? key}) : super(key: key);
@@ -40,61 +40,41 @@ class _CompleteWorkerProfilePageState extends State<CompleteWorkerProfilePage> {
   Future<void> _pickImage() async {
     final pickedFile = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
     if (pickedFile != null) {
-      setState(() {
-        _image = File(pickedFile.path);
-      });
+      setState(() => _image = File(pickedFile.path));
     }
   }
 
-  Future<void> _submitForm() async {
+  void _submitForm() {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedProfessions.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please select at least one profession')));
       return;
     }
 
-    setState(() => _isLoading = true);
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception('User not logged in');
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
 
-      String? imageUrl;
-      if (_image != null) {
-        final storageRef = FirebaseStorage.instance.ref().child('profile_pictures/${user.uid}.jpg');
-        await storageRef.putFile(_image!);
-        imageUrl = await storageRef.getDownloadURL();
-      }
+    Map<String, dynamic> workerData = {
+      'userType': 'worker',
+      'phone': _phoneController.text.trim(),
+      'optionalPhone': _optionalPhoneController.text.trim(),
+      'idNumber': _idController.text.trim(),
+      'description': _descriptionController.text.trim(),
+      'professions': _selectedProfessions,
+      'upgradedAt': ServerValue.timestamp,
+    };
 
-      Map<String, dynamic> workerData = {
-        'userType': 'worker',
-        'phone': _phoneController.text.trim(),
-        'optionalPhone': _optionalPhoneController.text.trim(),
-        'idNumber': _idController.text.trim(),
-        'description': _descriptionController.text.trim(),
-        'isSubscribed': true,
-        'isPro': true,
-        'professions': _selectedProfessions,
-        'upgradedAt': ServerValue.timestamp,
-      };
-
-      if (imageUrl != null) {
-        workerData['profileImageUrl'] = imageUrl;
-      }
-
-      final DatabaseReference dbRef = FirebaseDatabase.instanceFor(
-        app: FirebaseAuth.instance.app,
-        databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-      ).ref();
-
-      await dbRef.child('users').child(user.uid).update(workerData);
-      
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    // Instead of saving, go to subscription page
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SubscriptionPage(
+          email: user.email ?? "",
+          pendingUserData: workerData,
+          pendingImage: _image,
+        ),
+      ),
+    );
   }
 
   @override
@@ -113,7 +93,7 @@ class _CompleteWorkerProfilePageState extends State<CompleteWorkerProfilePage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'Please provide your professional details to complete your worker profile.',
+                'Please provide your professional details. Your profile will be created after subscription payment.',
                 style: TextStyle(fontSize: 16, color: Colors.grey),
               ),
               const SizedBox(height: 24),
@@ -135,10 +115,7 @@ class _CompleteWorkerProfilePageState extends State<CompleteWorkerProfilePage> {
                         right: 0,
                         child: Container(
                           padding: const EdgeInsets.all(8),
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF1976D2),
-                            shape: BoxShape.circle,
-                          ),
+                          decoration: const BoxDecoration(color: Color(0xFF1976D2), shape: BoxShape.circle),
                           child: const Icon(Icons.camera_alt, color: Colors.white, size: 20),
                         ),
                       ),
@@ -158,15 +135,13 @@ class _CompleteWorkerProfilePageState extends State<CompleteWorkerProfilePage> {
               _buildTextField(_descriptionController, 'Description', Icons.description, maxLines: 3),
               const SizedBox(height: 32),
               ElevatedButton(
-                onPressed: _isLoading ? null : _submitForm,
+                onPressed: _submitForm,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF1976D2),
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                child: _isLoading
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text('Complete Profile', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                child: const Text('Proceed to Payment', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -212,23 +187,18 @@ class _CompleteWorkerProfilePageState extends State<CompleteWorkerProfilePage> {
                     items: _professions.map((p) {
                       return DropdownMenuItem<String>(
                         value: p,
-                        child: StatefulBuilder(
-                          builder: (context, setMenuState) {
-                            return CheckboxListTile(
-                              title: Text(p),
-                              value: _selectedProfessions.contains(p),
-                              onChanged: (bool? checked) {
-                                setMenuState(() {
-                                  if (checked == true) {
-                                    _selectedProfessions.add(p);
-                                  } else {
-                                    _selectedProfessions.remove(p);
-                                  }
-                                });
-                                state.didChange(_selectedProfessions);
-                                setState(() {});
-                              },
-                            );
+                        child: CheckboxListTile(
+                          title: Text(p),
+                          value: _selectedProfessions.contains(p),
+                          onChanged: (bool? checked) {
+                            setState(() {
+                              if (checked == true) {
+                                _selectedProfessions.add(p);
+                              } else {
+                                _selectedProfessions.remove(p);
+                              }
+                            });
+                            state.didChange(_selectedProfessions);
                           },
                         ),
                       );

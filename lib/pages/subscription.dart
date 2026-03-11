@@ -4,11 +4,24 @@ import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:untitled1/pages/complete_worker_profile.dart';
+import 'package:untitled1/pages/sighn_up.dart';
+import '../main.dart';
 
 class SubscriptionPage extends StatefulWidget {
   final String email;
-  const SubscriptionPage({Key? key, required this.email}) : super(key: key);
+  final Map<String, dynamic>? pendingUserData;
+  final File? pendingImage;
+  final bool isNewRegistration;
+
+  const SubscriptionPage({
+    Key? key, 
+    required this.email, 
+    this.pendingUserData,
+    this.pendingImage,
+    this.isNewRegistration = false,
+  }) : super(key: key);
 
   @override 
   State<SubscriptionPage> createState() => _SubscriptionPageState();
@@ -20,15 +33,12 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   List<ProductDetails> _products = [];
   bool _isLoading = true;
 
-  // IMPORTANT: This ID must match exactly the Product ID you created in 
-  // Google Play Console and App Store Connect.
   static const String _proProductId = 'pro_worker_monthly'; 
 
   @override
   void initState() {
     super.initState();
     
-    // 1. Listen to purchase updates
     final Stream<List<PurchaseDetails>> purchaseUpdated = _inAppPurchase.purchaseStream;
     _subscription = purchaseUpdated.listen((purchaseDetailsList) {
       _listenToPurchaseUpdated(purchaseDetailsList);
@@ -38,7 +48,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       debugPrint("Purchase Stream Error: $error");
     });
 
-    // 2. Initialize store information
     _initStoreInfo();
   }
 
@@ -89,23 +98,21 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         } else if (purchaseDetails.status == PurchaseStatus.purchased ||
                    purchaseDetails.status == PurchaseStatus.restored) {
           
-          // If the product ID matches our pro plan, update Firebase
           if (purchaseDetails.productID == _proProductId) {
-            String? userType = await _updateUserProStatus(true);
-            
-            // Only show the success dialog for a fresh purchase
-            if (purchaseDetails.status == PurchaseStatus.purchased) {
-              _showSuccessDialog(userType == 'normal');
+            if (widget.isNewRegistration) {
+              // New user registration flow: Proceed to Phone Auth
+              _showSuccessDialog(false, isNewReg: true);
             } else {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Subscription status restored successfully!")),
-              );
-              if (mounted) Navigator.pop(context, true);
+              // Existing user upgrade flow: Finalize DB update
+              setState(() => _isLoading = true);
+              bool success = await _finalizeWorkerUpgrade();
+              setState(() => _isLoading = false);
+              
+              if (success) {
+                _showSuccessDialog(false, isNewReg: false);
+              }
             }
           }
-        } else if (purchaseDetails.status == PurchaseStatus.canceled) {
-           // User closed the payment sheet without buying
-           debugPrint("Purchase Canceled by User");
         }
 
         if (purchaseDetails.pendingCompletePurchase) {
@@ -113,6 +120,44 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         }
       }
     });
+  }
+
+  Future<bool> _finalizeWorkerUpgrade() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return false;
+
+      final dbRef = FirebaseDatabase.instanceFor(
+          app: FirebaseAuth.instance.app,
+          databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
+      ).ref();
+
+      Map<String, dynamic> updateData = {
+        'isPro': true,
+        'isSubscribed': true,
+        'subscriptionDate': ServerValue.timestamp,
+        'lastStatusCheck': ServerValue.timestamp,
+        'userType': 'worker',
+      };
+      
+      if (widget.pendingUserData != null) {
+        updateData.addAll(widget.pendingUserData!);
+      }
+
+      // Upload image if present (for existing user upgrade)
+      if (widget.pendingImage != null) {
+        final storageRef = FirebaseStorage.instance.ref().child('profile_pictures/${user.uid}.jpg');
+        await storageRef.putFile(widget.pendingImage!);
+        updateData['profileImageUrl'] = await storageRef.getDownloadURL();
+      }
+      
+      await dbRef.child('users').child(user.uid).update(updateData);
+      return true;
+    } catch (e) {
+      debugPrint("Error finalizing upgrade: $e");
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error saving profile: $e")));
+      return false;
+    }
   }
 
   void _buySubscription() {
@@ -124,71 +169,42 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     }
 
     final PurchaseParam purchaseParam = PurchaseParam(productDetails: _products.first);
-    
-    // buyNonConsumable is used for subscriptions
     _inAppPurchase.buyNonConsumable(purchaseParam: purchaseParam);
   }
 
-  /// Updates the user's Pro status in Firebase.
-  /// Returns the current userType ('normal' or 'worker')
-  Future<String?> _updateUserProStatus(bool isPro) async {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser != null) {
-      final dbRef = FirebaseDatabase.instanceFor(
-          app: FirebaseAuth.instance.app,
-          databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-      ).ref();
-
-      final snapshot = await dbRef.child('users').child(currentUser.uid).get();
-      if (snapshot.exists) {
-        final data = Map<String, dynamic>.from(snapshot.value as Map);
-        final String userType = data['userType'] ?? 'normal';
-
-        // If user is already a worker, we update isSubscribed and isPro immediately
-        if (userType == 'worker') {
-          await dbRef.child('users').child(currentUser.uid).update({
-            'isPro': isPro,
-            'isSubscribed': isPro,
-            'subscriptionDate': ServerValue.timestamp,
-            'lastStatusCheck': ServerValue.timestamp,
-          });
-        }
-        // If userType is 'normal', we wait for them to complete the worker profile 
-        // which will set userType to 'worker' and isSubscribed to true.
-        // But we can set isPro: true now if we want, or handle it all in the profile page.
-        
-        return userType;
-      }
-    }
-    return null;
-  }
-
-  void _showSuccessDialog(bool shouldCompleteProfile) {
+  void _showSuccessDialog(bool dummy, {required bool isNewReg}) {
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('Success!'),
-        content: Text(shouldCompleteProfile 
-          ? 'Subscription confirmed. Please complete your professional profile to start working!'
+        title: const Text('Payment Successful!'),
+        content: Text(isNewReg 
+          ? 'Payment confirmed. Now, let\'s verify your phone number to complete your profile.'
           : 'Subscription confirmed. You are now a Pro Worker!'),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.pop(context); // Close dialog
-              if (shouldCompleteProfile) {
-                // Navigate to complete profile page
-                Navigator.pushReplacement(
+              if (isNewReg) {
+                // Return to SignUpPage to finish Phone Auth with the paid status
+                Navigator.pushAndRemoveUntil(
                   context,
-                  MaterialPageRoute(builder: (context) => const CompleteWorkerProfilePage()),
-                ).then((value) {
-                  if (mounted) Navigator.pop(context, true);
-                });
+                  MaterialPageRoute(builder: (context) => SignUpPage(
+                    pendingWorkerData: widget.pendingUserData,
+                    pendingWorkerImage: widget.pendingImage,
+                    startAtStep: 1, // Step.phone
+                  )),
+                  (route) => false,
+                );
               } else {
-                Navigator.pop(context, true); // Return to previous screen
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (context) => const MyHomePage()),
+                  (route) => false
+                );
               }
             },
-            child: const Text('Let\'s Go!'),
+            child: const Text('Continue'),
           )
         ],
       ),
@@ -203,7 +219,9 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         backgroundColor: const Color(0xFF1976D2),
         foregroundColor: Colors.white,
       ),
-      body: SingleChildScrollView(
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator())
+        : SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -216,38 +234,29 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-
-            if (_isLoading)
-              const Center(child: CircularProgressIndicator())
-            else ...[
-              ElevatedButton(
-                onPressed: _buySubscription,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1976D2),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                ),
-                child: Text(
-                  _products.isNotEmpty 
-                    ? 'Subscribe Now - ${_products.first.price}' 
-                    : 'Subscription Unavailable',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
+            ElevatedButton(
+              onPressed: _buySubscription,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1976D2),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
               ),
-              const SizedBox(height: 12),
-              
-              // This button is critical for when a user cancels then re-subscribes,
-              // or moves to a new device.
-              TextButton.icon(
-                onPressed: () async {
-                  await _inAppPurchase.restorePurchases();
-                },
-                icon: const Icon(Icons.sync),
-                label: const Text("Restore / Sync Subscription Status"),
+              child: Text(
+                _products.isNotEmpty 
+                  ? 'Subscribe Now - ${_products.first.price}' 
+                  : 'Subscribe Now - 100 ₪',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-            ],
-
+            ),
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: () async {
+                await _inAppPurchase.restorePurchases();
+              },
+              icon: const Icon(Icons.sync),
+              label: const Text("Restore / Sync Subscription Status"),
+            ),
             const SizedBox(height: 24),
             Text(
               'Securely managed by ${Platform.isAndroid ? 'Google Play' : 'Apple App Store'}. Your subscription will renew automatically.',

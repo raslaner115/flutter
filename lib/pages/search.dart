@@ -130,24 +130,40 @@ class _SearchPageState extends State<SearchPage> {
 
   void _applyFilters() {
     setState(() {
+      final query = _searchController.text.toLowerCase();
+      
       _filteredWorkers = _allWorkers.where((worker) {
         bool matchesTrade = true;
         if (_selectedTrade != null) {
-          List<String> workerProfessions = [];
-          if (worker['professions'] is List) {
-            workerProfessions = (worker['professions'] as List).map((e) => e.toString().toLowerCase()).toList();
-          } else if (worker['profession'] != null) {
-            workerProfessions = [worker['profession'].toString().toLowerCase()];
-          }
+          List<String> workerProfessions = _getProfessionsList(worker).map((e) => e.toLowerCase()).toList();
           matchesTrade = workerProfessions.contains(_selectedTrade!.toLowerCase());
         }
 
         bool matchesSearch = true;
-        if (_searchController.text.isNotEmpty) {
+        if (query.isNotEmpty) {
           final name = (worker['name'] ?? '').toString().toLowerCase();
           final town = (worker['town'] ?? '').toString().toLowerCase();
-          matchesSearch = name.contains(_searchController.text.toLowerCase()) || 
-                         town.contains(_searchController.text.toLowerCase());
+          
+          // Multilingual Profession Search
+          List<String> workerProfessions = _getProfessionsList(worker);
+          bool matchesProfessionInAnyLanguage = false;
+          
+          for (var prof in workerProfessions) {
+            // Check original (English)
+            if (prof.toLowerCase().contains(query)) {
+              matchesProfessionInAnyLanguage = true;
+              break;
+            }
+            // Check all translations
+            if (_matchesProfessionTranslation(prof, query)) {
+              matchesProfessionInAnyLanguage = true;
+              break;
+            }
+          }
+
+          matchesSearch = name.contains(query) || 
+                         town.contains(query) || 
+                         matchesProfessionInAnyLanguage;
         }
 
         return matchesTrade && matchesSearch;
@@ -159,6 +175,37 @@ class _SearchPageState extends State<SearchPage> {
         _filteredWorkers.sort((a, b) => (a['name'] ?? '').toString().compareTo(b['name'] ?? ''));
       }
     });
+  }
+
+  bool _matchesProfessionTranslation(String prof, String query) {
+    const Map<String, Map<String, String>> translations = {
+      'Plumber': {'he': 'אינסטלטור', 'ar': 'سباك', 'ru': 'Сантехник', 'am': 'ቧንቧ ሰራተኛ'},
+      'Carpenter': {'he': 'נגר', 'ar': 'نجار', 'ru': 'Плотник', 'am': 'አናጺ'},
+      'Electrician': {'he': 'חשמלאי', 'ar': 'كهربائي', 'ru': 'Электрик', 'am': 'ኤሌክትሪሻን'},
+      'Painter': {'he': 'צבע', 'ar': 'دهان', 'ru': 'Маляр', 'am': 'ቀለም ቀבי'},
+      'Cleaner': {'he': 'ניקיון', 'ar': 'تنظيف', 'ru': 'Уборка', 'am': 'ፅዳት'},
+      'Handyman': {'he': 'הנדימן', 'ar': 'عامل صيانة', 'ru': 'Мастер на час', 'am': 'ጥገና'},
+      'Landscaper': {'he': 'גנן נוף', 'ar': 'منסق حدائق', 'ru': 'Ландшафтный дизайнер', 'am': 'አትክልተኛ'},
+      'HVAC': {'he': 'טכנאי מיזוג', 'ar': 'فני تكييف', 'ru': 'Кондиционеры', 'am': 'ኤሲ ጥገና'},
+      'Locksmith': {'he': 'מנעולן', 'ar': 'أقفال', 'ru': 'Сለሳር', 'am': 'መነጽር ሰራተኛ'}, // Fixed Amharic/Locksmith for search if needed
+      'Gardener': {'he': 'גנן', 'ar': 'بستاني', 'ru': 'Садовник', 'am': 'አትክልተኛ'},
+      'Mechanic': {'he': 'מכונאי', 'ar': 'ميكانيكي', 'ru': 'Механик', 'am': 'መካኒክ'},
+      'Photographer': {'he': 'צלם', 'ar': 'مصور', 'ru': 'Фотограф', 'am': 'ፎቶግራፍ አንሺ'},
+      'Tutor': {'he': 'מורה פרטי', 'ar': 'مدرس خصوصي', 'ru': 'Репетитор', 'am': 'የግል መምህር'},
+      'Tailor': {'he': 'חייט', 'ar': 'خياط', 'ru': 'Портной', 'am': 'ልብስ ሰፊ'},
+      'Mover': {'he': 'מוביל', 'ar': 'شركة نقل', 'ru': 'Грузчик', 'am': 'ዕቃ አጓጓዥ'},
+      'Interior Designer': {'he': 'מעצב פנים', 'ar': 'مصمم ديكور', 'ru': 'Дизайнер интерьера', 'am': 'የውስጥ ዲዛይነር'},
+      'Beautician': {'he': 'קוסמטיקאית', 'ar': 'خبير تجميل', 'ru': 'Косметолог', 'am': 'የውበት ባለሙያ'},
+      'Pet Groomer': {'he': 'ספרית כלבים', 'ar': 'حلاقة حيوانات', 'ru': 'Грумер', 'am': 'የቤት እንስሳት ፀጉር አስተካካይ'},
+    };
+
+    final profTranslations = translations[prof];
+    if (profTranslations == null) return false;
+
+    for (var translated in profTranslations.values) {
+      if (translated.toLowerCase().contains(query)) return true;
+    }
+    return false;
   }
 
   Map<String, dynamic> _getLocalizedStrings(BuildContext context) {
@@ -178,7 +225,7 @@ class _SearchPageState extends State<SearchPage> {
     switch (locale) {
       case 'he':
         return {
-          'search': 'חפש מקצוען או עיר...',
+          'search': 'חפש מקצוען, עיר או מקצוע...',
           'filters': 'פילטרים',
           'trade': 'סוג שירות',
           'found': 'נמצאו ${_filteredWorkers.length} תוצאות',
@@ -191,7 +238,7 @@ class _SearchPageState extends State<SearchPage> {
         };
       case 'ar':
         return {
-          'search': 'ابحث عن محترف أو مدينة...',
+          'search': 'ابحث عن محترف، مدينة أو مهنة...',
           'filters': 'الفلاتر',
           'trade': 'نوع الخدمة',
           'found': 'تم العثور على ${_filteredWorkers.length} نتيجة',
@@ -204,7 +251,7 @@ class _SearchPageState extends State<SearchPage> {
         };
       case 'ru':
         return {
-          'search': 'Найти профессионала или город...',
+          'search': 'Найти профессионала, город или профессию...',
           'filters': 'Фильтры',
           'trade': 'Тип услуги',
           'found': 'Найдено ${_filteredWorkers.length} результатов',
@@ -217,7 +264,7 @@ class _SearchPageState extends State<SearchPage> {
         };
       case 'am':
         return {
-          'search': 'ባለሙያ ወይም ከተማ ይፈልጉ...',
+          'search': 'ባለሙያ፣ ከተማ ወይም ሙያ ይፈልጉ...',
           'filters': 'ማጣሪያዎች',
           'trade': 'የአገልግሎት ዓይነት',
           'found': '${_filteredWorkers.length} ውጤቶች ተገኝተዋል',
@@ -230,7 +277,7 @@ class _SearchPageState extends State<SearchPage> {
         };
       default:
         return {
-          'search': 'Search pro or city...',
+          'search': 'Search pro, city or profession...',
           'filters': 'Filters',
           'trade': 'Service Type',
           'found': '${_filteredWorkers.length} results found',
@@ -249,13 +296,13 @@ class _SearchPageState extends State<SearchPage> {
       'Plumber': {'he': 'אינסטלטור', 'ar': 'سباك', 'ru': 'Сантехник', 'am': 'ቧንቧ ሰራተኛ'},
       'Carpenter': {'he': 'נגר', 'ar': 'نجار', 'ru': 'Плотник', 'am': 'አናጺ'},
       'Electrician': {'he': 'חשמלאי', 'ar': 'كهربائي', 'ru': 'Электрик', 'am': 'ኤሌክትሪሻን'},
-      'Painter': {'he': 'צבע', 'ar': 'دهان', 'ru': 'Маляр', 'am': 'ቀለም ቀቢ'},
+      'Painter': {'he': 'צבע', 'ar': 'دهאן', 'ru': 'Маляр', 'am': 'ቀለም ቀቢ'},
       'Cleaner': {'he': 'ניקיון', 'ar': 'تنظيف', 'ru': 'Уборка', 'am': 'ፅዳት'},
       'Handyman': {'he': 'הנדימן', 'ar': 'عامل صيانة', 'ru': 'Мастер на час', 'am': 'ጥገና'},
-      'Landscaper': {'he': 'גנן נוף', 'ar': 'منسق حدائق', 'ru': 'Ландшафтный дизайнер', 'am': 'አትክልተኛ'},
+      'Landscaper': {'he': 'גנן נוף', 'ar': 'منסق حدائق', 'ru': 'Ландшафтный дизайнер', 'am': 'አትክልተኛ'},
       'HVAC': {'he': 'טכנאי מיזוג', 'ar': 'فني تكييف', 'ru': 'Кондиционеры', 'am': 'ኤሲ ጥገና'},
-      'Locksmith': {'he': 'מנעולן', 'ar': 'أقفال', 'ru': 'Слесарь', 'am': 'መנעול ሰራተኛ'},
-      'Gardener': {'he': 'גנן', 'ar': 'بستاني', 'ru': 'Садовник', 'am': 'አትክልተኛ'},
+      'Locksmith': {'he': 'מנעולן', 'ar': 'أقفال', 'ru': 'Слесарь', 'am': 'መነጽር ሰራተኛ'},
+      'Gardener': {'he': 'גנן', 'ar': 'بستانי', 'ru': 'Садовник', 'am': 'አትክልተኛ'},
       'Mechanic': {'he': 'מכונאי', 'ar': 'ميكانيكي', 'ru': 'Механик', 'am': 'መካኒክ'},
       'Photographer': {'he': 'צלם', 'ar': 'مصور', 'ru': 'Фотограф', 'am': 'ፎቶግራፍ አንሺ'},
       'Tutor': {'he': 'מורה פרטי', 'ar': 'مدرس خصوصي', 'ru': 'Репетитор', 'am': 'የግል መምህር'},
@@ -263,7 +310,7 @@ class _SearchPageState extends State<SearchPage> {
       'Mover': {'he': 'מוביל', 'ar': 'شركة نقل', 'ru': 'Грузчик', 'am': 'ዕቃ አጓጓዥ'},
       'Interior Designer': {'he': 'מעצב פנים', 'ar': 'مصمم ديكור', 'ru': 'Дизайнер интерьера', 'am': 'የውስጥ ዲዛይነር'},
       'Beautician': {'he': 'קוסמטיקאית', 'ar': 'خبير تجميل', 'ru': 'Косметолог', 'am': 'የውበት ባለሙያ'},
-      'Pet Groomer': {'he': 'ספרית כלבים', 'ar': 'حلاقة حيوانات', 'ru': 'Грумер', 'am': 'የቤት እንስሳት ፀጉር አስተካካይ'},
+      'Pet Groomer': {'he': 'ספרית כלבים', 'ar': 'חلاقة حيوانات', 'ru': 'Грумер', 'am': 'የቤት እንስሳት ፀጉር አስተካካይ'},
     };
     return translations[prof]?[locale] ?? prof;
   }

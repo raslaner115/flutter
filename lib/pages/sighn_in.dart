@@ -5,146 +5,208 @@ import 'package:provider/provider.dart';
 import 'package:untitled1/language_provider.dart';
 import 'package:untitled1/pages/sighn_up.dart';
 import 'package:untitled1/auth_service.dart';
-import 'package:untitled1/pages/phone_auth_page.dart';
 import '../main.dart';
 
 class SignInPage extends StatefulWidget {
-  final String? initialEmail;
-  const SignInPage({super.key, this.initialEmail});
-
-  static Route route() {
-    return MaterialPageRoute(builder: (_) => const SignInPage());
-  }
+  const SignInPage({super.key});
 
   @override
   State<SignInPage> createState() => _SignInPageState();
 }
 
 class _SignInPageState extends State<SignInPage> {
-  final _formKey = GlobalKey<FormState>();
-  late TextEditingController _emailCtrl;
-  late TextEditingController _passwordCtrl;
-  bool _loading = false;
-  bool _obscure = true;
-
+  final _phoneController = TextEditingController();
+  final _codeController = TextEditingController();
   final AuthService _authService = AuthService();
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
-      app: FirebaseAuth.instance.app,
-      databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-  ).ref();
+  
+  String _verificationId = "";
+  bool _codeSent = false;
+  bool _loading = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _emailCtrl = TextEditingController(text: widget.initialEmail);
-    _passwordCtrl = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _emailCtrl.dispose();
-    _passwordCtrl.dispose();
-    super.dispose();
-  }
-
-  Map<String, String> _getLocalizedStrings(BuildContext context, {bool listen = true}) {
-    final locale = Provider.of<LanguageProvider>(context, listen: listen).locale.languageCode;
+  Map<String, String> _getLocalizedStrings(BuildContext context) {
+    final locale = Provider.of<LanguageProvider>(context, listen: false).locale.languageCode;
     switch (locale) {
       case 'he':
         return {
-          'welcome': 'ברוכים\nהבאים',
-          'email': 'אימייל',
-          'password': 'סיסמה',
-          'forgot': 'שכחת סיסמה?',
-          'signin': 'התחברות',
-          'no_account': 'אין לך חשבון? ',
-          'signup': 'הרשמה',
-          'email_required': 'אימייל שדה חובה',
-          'valid_email': 'הכנס אימייל תקין',
-          'pass_required': 'סיסמה שדה חובה',
-          'success': 'התחברת בהצלחה',
-          'or': 'או התחבר באמצעות',
+          'welcome': 'ברוכים הבאים',
+          'phone_label': 'מספר טלפון',
+          'phone_hint': 'לדוגמה: 0501234567',
+          'get_code': 'שלח קוד אימות',
+          'enter_code': 'הכנס קוד אימות',
+          'verify': 'אמת והתחבר',
+          'or': 'או',
           'guest': 'המשך כאורח',
-          'phone': 'התחבר עם טלפון',
-        };
-      case 'ar':
-        return {
-          'welcome': 'أهلاً\nبكم',
-          'email': 'البريد الإلكتروني',
-          'password': 'كلمة المرور',
-          'forgot': 'نسيت كلمة المرور؟',
-          'signin': 'تسجيل الدخول',
-          'no_account': 'ليس لديك حساب؟ ',
-          'signup': 'إنشاء حساب',
-          'email_required': 'البريد الإلكتروني مطلوب',
-          'valid_email': 'أدخل بريداً إلكترونياً صالحاً',
-          'pass_required': 'كلمة المرور مطلوبة',
-          'success': 'تم تسجيل الدخول بنجاح',
-          'or': 'أو سجل الدخول عبر',
-          'guest': 'الدخول كضيف',
-          'phone': 'رقم الهاتف',
+          'signup': 'הרשמה',
+          'no_account': 'אין לך חשבון? ',
+          'not_registered_title': 'משתמש לא רשום',
+          'not_registered_body': 'מספר הטלפון שהוזן אינו רשום. האם תרצה להירשם?',
+          'ok': 'אישור',
+          'invalid_phone': 'אנא הכנס מספר טלפון ישראלי תקין (05XXXXXXXX)',
         };
       default:
         return {
-          'welcome': 'Welcome\nBack',
-          'email': 'Email',
-          'password': 'Password',
-          'forgot': 'Forgot Password?',
-          'signin': 'Sign In',
-          'no_account': "Don't have an account? ",
-          'signup': 'Sign Up',
-          'email_required': 'Email is required',
-          'valid_email': 'Enter a valid email',
-          'pass_required': 'Password is required',
-          'success': 'Signed in successfully',
-          'or': 'Or sign in with',
+          'welcome': 'Welcome Back',
+          'phone_label': 'Phone Number',
+          'phone_hint': 'e.g. 0501234567',
+          'get_code': 'Get Verification Code',
+          'enter_code': 'Enter SMS Code',
+          'verify': 'Verify & Sign In',
+          'or': 'OR',
           'guest': 'Continue as Guest',
-          'phone': 'Phone Number',
+          'signup': 'Sign Up',
+          'no_account': "Don't have an account? ",
+          'not_registered_title': 'User Not Registered',
+          'not_registered_body': 'The phone number you entered is not registered. Would you like to sign up?',
+          'ok': 'OK',
+          'invalid_phone': 'Please enter a valid Israeli phone number (05XXXXXXXX)',
         };
     }
   }
 
-  Future<void> _handleSocialSignIn(Future<User?> Function() signInMethod) async {
+  String _normalizePhone(String input) {
+    String digits = input.replaceAll(RegExp(r'\D'), ''); 
+    if (digits.startsWith('972')) {
+      digits = digits.substring(3);
+    }
+    while (digits.startsWith('0')) {
+      digits = digits.substring(1);
+    }
+    return '+972$digits';
+  }
+
+  Future<void> _sendCode() async {
+    final strings = _getLocalizedStrings(context);
+    String input = _phoneController.text.trim();
+    if (input.isEmpty) return;
+
+    String phone = _normalizePhone(input);
+    final regExp = RegExp(r'^\+9725\d{8}$');
+    
+    if (!regExp.hasMatch(phone)) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['invalid_phone']!)));
+      return;
+    }
+
     setState(() => _loading = true);
-    final user = await signInMethod();
-    if (user != null && mounted) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MyHomePage()));
-    } else if (mounted) {
-      setState(() => _loading = false);
+    try {
+      await FirebaseAuth.instance.verifyPhoneNumber(
+        phoneNumber: phone,
+        verificationCompleted: (PhoneAuthCredential credential) async {
+          await _signInAndCheckRegistration(credential);
+        },
+        verificationFailed: (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Verification Failed: ${e.message}")));
+            setState(() => _loading = false);
+          }
+        },
+        codeSent: (verificationId, resendToken) {
+          if (mounted) {
+            setState(() {
+              _verificationId = verificationId;
+              _codeSent = true;
+              _loading = false;
+            });
+          }
+        },
+        codeAutoRetrievalTimeout: (verificationId) {
+          _verificationId = verificationId;
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+      }
     }
   }
 
-  Future<void> _submit() async {
-    final strings = _getLocalizedStrings(context, listen: false);
-    if (!_formKey.currentState!.validate()) return;
+  Future<void> _verifyCode() async {
+    if (_codeController.text.isEmpty) return;
     setState(() => _loading = true);
-
     try {
-      UserCredential userCredential = await _auth.signInWithEmailAndPassword(
-        email: _emailCtrl.text.trim(),
-        password: _passwordCtrl.text,
-      );
-
-      if (userCredential.user != null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['success']!)));
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const MyHomePage()));
+      final credential = PhoneAuthProvider.credential(verificationId: _verificationId, smsCode: _codeController.text.trim());
+      await _signInAndCheckRegistration(credential);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invalid code or an error occurred")));
+        setState(() => _loading = false);
       }
-    } on FirebaseAuthException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message ?? 'Authentication failed')));
-    } finally {
-      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _signInAndCheckRegistration(PhoneAuthCredential credential) async {
+    final strings = _getLocalizedStrings(context);
+    try {
+      final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+      final user = userCredential.user;
+      
+      if (user != null) {
+        final dbRef = FirebaseDatabase.instanceFor(
+          app: FirebaseAuth.instance.app,
+          databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
+        ).ref();
+
+        // Check by UID instead of phone for more reliability
+        final snapshot = await dbRef.child('users').child(user.uid).get();
+
+        if (snapshot.exists) {
+          if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MyHomePage()));
+        } else {
+          // User is authenticated but NOT in our database
+          await FirebaseAuth.instance.signOut();
+          if (mounted) {
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: Text(strings['not_registered_title']!),
+                content: Text(strings['not_registered_body']!),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(strings['ok']!),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const SignUpPage()));
+                    },
+                    child: Text(strings['signup']!),
+                  ),
+                ],
+              ),
+            );
+            setState(() {
+              _loading = false;
+              _codeSent = false;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("SIGN IN ERROR: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Sign in error: $e")));
+        setState(() => _loading = false);
+      }
+    }
+  }
+
+  Future<void> _handleGuestSignIn() async {
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const MyHomePage()),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final strings = _getLocalizedStrings(context);
-    final isRtl = Provider.of<LanguageProvider>(context).locale.languageCode == 'he' || 
-                  Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
-    
+    final isRtl = Provider.of<LanguageProvider>(context).locale.languageCode == 'he' ||
+        Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
+
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
@@ -154,27 +216,23 @@ class _SignInPageState extends State<SignInPage> {
             children: [
               _buildHeader(strings),
               Padding(
-                padding: const EdgeInsets.all(24),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    children: [
-                      _buildEmailField(strings),
-                      const SizedBox(height: 20),
-                      _buildPasswordField(strings),
-                      _buildForgotPassword(strings, isRtl),
-                      const SizedBox(height: 32),
-                      _buildSignInButton(strings),
-                      const SizedBox(height: 24),
-                      _buildSocialDivider(strings),
-                      const SizedBox(height: 24),
-                      _buildSocialButtons(),
-                      const SizedBox(height: 24),
-                      _buildGuestAndPhone(strings),
-                      const SizedBox(height: 24),
-                      _buildSignUpLink(strings),
-                    ],
-                  ),
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  children: [
+                    if (!_codeSent)
+                      _buildPhoneInput(strings)
+                    else
+                      _buildCodeInput(strings),
+                    const SizedBox(height: 32),
+                    _buildDivider(strings),
+                    const SizedBox(height: 24),
+                    TextButton(
+                      onPressed: _loading ? null : _handleGuestSignIn,
+                      child: Text(strings['guest']!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    ),
+                    const SizedBox(height: 32),
+                    _buildSignUpLink(strings),
+                  ],
                 ),
               ),
             ],
@@ -211,99 +269,63 @@ class _SignInPageState extends State<SignInPage> {
     );
   }
 
-  Widget _buildEmailField(Map<String, String> strings) {
-    return TextFormField(
-      controller: _emailCtrl,
-      decoration: InputDecoration(
-        labelText: strings['email'],
-        prefixIcon: const Icon(Icons.email_outlined, color: Color(0xFF1976D2)),
-        filled: true,
-        fillColor: const Color(0xFFF8FAFC),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-      ),
-      validator: (v) => (v == null || v.isEmpty) ? strings['email_required'] : null,
+  Widget _buildPhoneInput(Map<String, String> strings) {
+    return Column(
+      children: [
+        TextField(
+          controller: _phoneController,
+          keyboardType: TextInputType.phone,
+          decoration: InputDecoration(
+            labelText: strings['phone_label'],
+            hintText: strings['phone_hint'],
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          height: 50,
+          child: ElevatedButton(
+            onPressed: _loading ? null : _sendCode,
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1976D2), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+            child: _loading ? const CircularProgressIndicator(color: Colors.white) : Text(strings['get_code']!, style: const TextStyle(color: Colors.white, fontSize: 16)),
+          ),
+        ),
+      ],
     );
   }
 
-  Widget _buildPasswordField(Map<String, String> strings) {
-    return TextFormField(
-      controller: _passwordCtrl,
-      obscureText: _obscure,
-      decoration: InputDecoration(
-        labelText: strings['password'],
-        prefixIcon: const Icon(Icons.lock_outline_rounded, color: Color(0xFF1976D2)),
-        suffixIcon: IconButton(icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility), onPressed: () => setState(() => _obscure = !_obscure)),
-        filled: true,
-        fillColor: const Color(0xFFF8FAFC),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-      ),
-      validator: (v) => (v == null || v.isEmpty) ? strings['pass_required'] : null,
+  Widget _buildCodeInput(Map<String, String> strings) {
+    return Column(
+      children: [
+        TextField(
+          controller: _codeController,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            labelText: strings['enter_code'],
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          height: 50,
+          child: ElevatedButton(
+            onPressed: _loading ? null : _verifyCode,
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1976D2), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+            child: _loading ? const CircularProgressIndicator(color: Colors.white) : Text(strings['verify']!, style: const TextStyle(color: Colors.white, fontSize: 16)),
+          ),
+        ),
+      ],
     );
   }
 
-  Widget _buildForgotPassword(Map<String, String> strings, bool isRtl) {
-    return Align(
-      alignment: isRtl ? Alignment.centerLeft : Alignment.centerRight,
-      child: TextButton(onPressed: () {}, child: Text(strings['forgot']!, style: const TextStyle(color: Color(0xFF64748B)))),
-    );
-  }
-
-  Widget _buildSignInButton(Map<String, String> strings) {
-    return SizedBox(
-      width: double.infinity,
-      height: 60,
-      child: ElevatedButton(
-        onPressed: _loading ? null : _submit,
-        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1976D2), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-        child: _loading ? const CircularProgressIndicator(color: Colors.white) : Text(strings['signin']!, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-      ),
-    );
-  }
-
-  Widget _buildSocialDivider(Map<String, String> strings) {
+  Widget _buildDivider(Map<String, String> strings) {
     return Row(
       children: [
         const Expanded(child: Divider()),
         Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text(strings['or']!, style: const TextStyle(color: Colors.grey))),
         const Expanded(child: Divider()),
-      ],
-    );
-  }
-
-  Widget _buildSocialButtons() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        _buildSocialIcon('assets/icon/google.png', () => _handleSocialSignIn(_authService.signInWithGoogle)),
-        _buildSocialIcon('assets/icon/facebook.png', () => _handleSocialSignIn(_authService.signInWithFacebook)),
-        _buildSocialIcon('assets/icon/apple.png', () => _handleSocialSignIn(_authService.signInWithApple)),
-      ],
-    );
-  }
-
-  Widget _buildSocialIcon(String iconPath, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(12)),
-        child: Image.asset(iconPath, height: 30, width: 30, errorBuilder: (c, e, s) => const Icon(Icons.login)),
-      ),
-    );
-  }
-
-  Widget _buildGuestAndPhone(Map<String, String> strings) {
-    return Column(
-      children: [
-        TextButton.icon(
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PhoneAuthPage())),
-          icon: const Icon(Icons.phone),
-          label: Text(strings['phone']!),
-        ),
-        TextButton(
-          onPressed: () => _handleSocialSignIn(_authService.signInAnonymously),
-          child: Text(strings['guest']!, style: const TextStyle(fontWeight: FontWeight.bold)),
-        ),
       ],
     );
   }
