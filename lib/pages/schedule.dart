@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:table_calendar/table_calendar.dart';
 import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/pages/send_request.dart';
 
 class SchedulePage extends StatefulWidget {
   final String workerId;
@@ -15,49 +17,193 @@ class SchedulePage extends StatefulWidget {
 }
 
 class _SchedulePageState extends State<SchedulePage> {
-  DateTime _selectedDate = DateTime.now();
-  String? _selectedSlot;
+  DateTime _focusedDay = DateTime.now();
+  DateTime _selectedDay = DateTime.now();
   bool _isLoading = false;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  final List<String> _allSlots = [
-    '08:00', '09:00', '10:00', '11:00', '12:00',
-    '13:00', '14:00', '15:00', '16:00', '17:00'
-  ];
-
-  List<String> _bookedSlots = [];
+  List<Map<String, dynamic>> _reminders = [];
+  List<String> _availableDates = []; 
+  List<String> _reminderDates = []; 
+  Map<String, Map<String, String>> _partialWorkDays = {}; 
+  List<Map<String, String>> _vacations = [];
+  
+  bool _isOwnSchedule = false;
+  bool _hideScheduleFromOthers = false;
+  List<int> _permanentlyDisabledDays = []; // 1=Mon, 7=Sun
 
   @override
   void initState() {
     super.initState();
-    _fetchBookedSlots();
+    _checkOwnership();
+    _fetchWorkerScheduleConfig();
+    _fetchReminders();
   }
 
-  Future<void> _fetchBookedSlots() async {
-    setState(() => _isLoading = true);
-    final dateStr = "${_selectedDate.year}-${_selectedDate.month}-${_selectedDate.day}";
-    
+  void _checkOwnership() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && user.uid == widget.workerId) {
+      setState(() => _isOwnSchedule = true);
+    }
+  }
+
+  Future<void> _fetchWorkerScheduleConfig() async {
     try {
-      final dbRef = FirebaseDatabase.instanceFor(
-        app: FirebaseAuth.instance.app,
-        databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-      ).ref();
-
-      final snapshot = await dbRef
-          .child('schedules')
-          .child(widget.workerId)
-          .child(dateStr)
-          .get();
-
-      if (snapshot.exists && snapshot.value != null) {
-        final Map<dynamic, dynamic> data = snapshot.value as Map;
+      final doc = await _firestore.collection('users').doc(widget.workerId).get();
+      if (doc.exists) {
+        final data = doc.data()!;
         setState(() {
-          _bookedSlots = data.keys.map((e) => e.toString()).toList();
+          _hideScheduleFromOthers = data['hideSchedule'] ?? false;
+          _permanentlyDisabledDays = List<int>.from(data['disabledDays'] ?? []);
+          
+          if (data.containsKey('availableDates')) {
+            _availableDates = List<String>.from(data['availableDates']);
+          }
+          if (data.containsKey('reminderDates')) {
+            _reminderDates = List<String>.from(data['reminderDates']);
+          }
+          if (data.containsKey('partialWorkDays')) {
+            _partialWorkDays = Map<String, Map<String, String>>.from(
+              (data['partialWorkDays'] as Map).map((k, v) => MapEntry(k.toString(), Map<String, String>.from(v)))
+            );
+          }
+          if (data.containsKey('vacations')) {
+            _vacations = List<Map<String, String>>.from(
+              (data['vacations'] as List).map((v) => Map<String, String>.from(v))
+            );
+          }
         });
-      } else {
-        setState(() => _bookedSlots = []);
+        
+        if (_isOwnSchedule) {
+          await _cleanupPastData();
+        }
       }
     } catch (e) {
-      debugPrint("Error fetching slots: $e");
+      debugPrint("Error fetching worker config: $e");
+    }
+  }
+
+  Future<void> _cleanupPastData() async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final oneWeekAgo = today.subtract(const Duration(days: 7));
+    
+    bool docChanged = false;
+    List<String> newAvailableDates = List.from(_availableDates);
+    List<String> newReminderDates = List.from(_reminderDates);
+    Map<String, Map<String, String>> newPartialDays = Map.from(_partialWorkDays);
+    List<Map<String, String>> newVacations = List.from(_vacations);
+    List<String> collectionsToFullyDelete = [];
+
+    newAvailableDates.removeWhere((dateStr) {
+      try {
+        final parts = dateStr.split('-');
+        final date = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+        if (date.isBefore(today)) {
+          docChanged = true;
+          return true;
+        }
+      } catch (_) {}
+      return false;
+    });
+
+    newPartialDays.removeWhere((dateStr, _) {
+      try {
+        final parts = dateStr.split('-');
+        final date = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+        return date.isBefore(today);
+      } catch (_) {}
+      return false;
+    });
+
+    newReminderDates.removeWhere((dateStr) {
+      try {
+        final parts = dateStr.split('-');
+        final date = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+        if (!date.isAfter(oneWeekAgo)) {
+          docChanged = true;
+          collectionsToFullyDelete.add(dateStr);
+          return true;
+        }
+      } catch (_) {}
+      return false;
+    });
+
+    newVacations.removeWhere((v) {
+      try {
+        final endParts = v['end']!.split('-');
+        final endDate = DateTime(int.parse(endParts[0]), int.parse(endParts[1]), int.parse(endParts[2]));
+        if (endDate.isBefore(today)) {
+          docChanged = true;
+          return true;
+        }
+      } catch (_) {}
+      return false;
+    });
+
+    if (docChanged) {
+      setState(() {
+        _availableDates = newAvailableDates;
+        _reminderDates = newReminderDates;
+        _partialWorkDays = newPartialDays;
+        _vacations = newVacations;
+      });
+
+      await _firestore.collection('users').doc(widget.workerId).update({
+        'availableDates': _availableDates,
+        'reminderDates': _reminderDates,
+        'partialWorkDays': _partialWorkDays,
+        'vacations': _vacations,
+      });
+
+      for (String dStr in collectionsToFullyDelete) {
+        try {
+          final items = await _firestore.collection('schedules').doc(widget.workerId).collection(dStr).get();
+          final batch = _firestore.batch();
+          for (var doc in items.docs) batch.delete(doc.reference);
+          await batch.commit();
+        } catch (_) {}
+      }
+    }
+  }
+
+  Future<void> _fetchReminders() async {
+    setState(() => _isLoading = true);
+    final dateStr = "${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}";
+    
+    try {
+      final doc = await _firestore
+          .collection('schedules')
+          .doc(widget.workerId)
+          .collection(dateStr)
+          .orderBy('timestamp', descending: false)
+          .get();
+
+      final loadedReminders = doc.docs.map((e) {
+        final data = e.data();
+        data['id'] = e.id;
+        return data;
+      }).toList();
+
+      setState(() {
+        _reminders = loadedReminders;
+      });
+
+      if (_isOwnSchedule) {
+        if (loadedReminders.isEmpty && _reminderDates.contains(dateStr)) {
+          setState(() => _reminderDates.remove(dateStr));
+          await _firestore.collection('users').doc(widget.workerId).update({
+            'reminderDates': FieldValue.arrayRemove([dateStr]),
+          });
+        } else if (loadedReminders.isNotEmpty && !_reminderDates.contains(dateStr)) {
+          setState(() => _reminderDates.add(dateStr));
+          await _firestore.collection('users').doc(widget.workerId).update({
+            'reminderDates': FieldValue.arrayUnion([dateStr]),
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error fetching reminders: $e");
     } finally {
       setState(() => _isLoading = false);
     }
@@ -68,314 +214,519 @@ class _SchedulePageState extends State<SchedulePage> {
     switch (locale) {
       case 'he':
         return {
-          'title': 'קביעת תור',
-          'select_date': 'בחר תאריך',
-          'select_time': 'בחר שעה',
-          'book_now': 'הזמן עכשיו',
-          'success': 'התור נקבע בהצלחה!',
-          'error': 'שגיאה בקביעת התור',
-          'booked': 'תפוס',
-          'available': 'פנוי',
-          'guest_msg': 'עליך להירשם כדי לקבוע תור',
-          'summary': 'סיכום הזמנה',
-          'worker': 'בעל מקצוע',
-          'date': 'תאריך',
-          'time': 'שעה',
+          'title': 'לוח זמנים',
+          'manage_title': 'ניהול לוח זמנים',
+          'add_reminder': 'הוסף תזכורת',
+          'reminder_hint': 'כתוב כאן את התזכורת...',
+          'no_reminders': 'אין תזכורות ליום זה',
+          'set_working': 'סמן כיום עבודה',
+          'remove_working': 'בטל יום עבודה',
+          'set_partial': 'שעות עבודה חלקיות',
+          'partial_title': 'בחר שעות עבודה',
+          'from': 'מ-',
+          'to': 'עד',
+          'save': 'שמור',
+          'cancel': 'ביטול',
+          'ok': 'אישור',
+          'confirm_msg': 'ביטול יום העבודה ימחק את כל התזכורות של יום זה. האם להמשיך?',
+          'not_working': 'אין פעילות ביום זה',
+          'working_hours': 'שעות עבודה',
+          'hidden_msg': 'לוח הזמנים של בעל המקצוע מוסתר',
+          'request_work': 'בקש מהמקצוען לעבוד ביום זה',
+          'request_hours': 'בקש שעות עבודה נוספות',
+          'set_vacation': 'קבע חופשה',
+          'on_vacation': 'בחופשה',
+          'cancel_vacation': 'בטל חופשה',
+          'vacation_confirm': 'האם אתה בטוח שברצונך לבטל חופשה זו?',
+          'permanent_off': 'יום חופש קבוע',
+          'weekend_msg': 'לא ניתן לשלוח בקשות ביום חופש קבוע של המקצוען.',
+          'vacation_conflict': 'לא ניתן לסמן יום עבודה בזמן חופשה.',
+          'work_conflict': 'לא ניתן לקבוע חופשה ביום עבודה קיים. בטל את יום העבודה קודם.',
         };
       default:
         return {
-          'title': 'Schedule Appointment',
-          'select_date': 'Select Date',
-          'select_time': 'Select Time Slot',
-          'book_now': 'Book Appointment',
-          'success': 'Appointment booked successfully!',
-          'error': 'Error booking appointment',
-          'booked': 'Booked',
-          'available': 'Available',
-          'guest_msg': 'You must sign up to book an appointment',
-          'summary': 'Booking Summary',
-          'worker': 'Professional',
-          'date': 'Date',
-          'time': 'Time',
+          'title': 'Schedule',
+          'manage_title': 'Manage Schedule',
+          'add_reminder': 'Add Reminder',
+          'reminder_hint': 'Write reminder here...',
+          'no_reminders': 'No reminders for this day',
+          'set_working': 'Set as Working Day',
+          'remove_working': 'Remove Working Day',
+          'set_partial': 'Partial Working Hours',
+          'partial_title': 'Select Working Hours',
+          'from': 'From',
+          'to': 'To',
+          'save': 'Save',
+          'cancel': 'Cancel',
+          'ok': 'OK',
+          'confirm_msg': 'Canceling the working day will delete all reminders for this day. Continue?',
+          'not_working': 'No activity on this day',
+          'working_hours': 'Working Hours',
+          'hidden_msg': 'Professional schedule is private',
+          'request_work': 'Request pro to work this day',
+          'request_hours': 'Request extra working hours',
+          'set_vacation': 'Set Vacation',
+          'on_vacation': 'On Vacation',
+          'cancel_vacation': 'Cancel Vacation',
+          'vacation_confirm': 'Are you sure you want to cancel this vacation?',
+          'permanent_off': 'Permanent day off',
+          'weekend_msg': 'Cannot send requests on professional\'s permanent day off.',
+          'vacation_conflict': 'Cannot set working day during vacation.',
+          'work_conflict': 'Cannot set vacation on an existing working day. Cancel working day first.',
         };
     }
   }
 
-  Future<void> _bookAppointment() async {
-    if (_selectedSlot == null) return;
+  bool _isVacation(DateTime date) {
+    final d = DateTime(date.year, date.month, date.day);
+    for (var v in _vacations) {
+      try {
+        final startParts = v['start']!.split('-');
+        final endParts = v['end']!.split('-');
+        final start = DateTime(int.parse(startParts[0]), int.parse(startParts[1]), int.parse(startParts[2]));
+        final end = DateTime(int.parse(endParts[0]), int.parse(endParts[1]), int.parse(endParts[2]));
+        if (d.isAtSameMomentAs(start) || d.isAtSameMomentAs(end) || (d.isAfter(start) && d.isBefore(end))) {
+          return true;
+        }
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  Future<void> _cancelVacation(DateTime date) async {
+    final strings = _getLocalizedStrings(context);
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(strings['cancel_vacation']!),
+        content: Text(strings['vacation_confirm']!),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(strings['cancel']!)),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: Text(strings['ok']!)),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    final d = DateTime(date.year, date.month, date.day);
+    setState(() {
+      _vacations.removeWhere((v) {
+        try {
+          final startParts = v['start']!.split('-');
+          final endParts = v['end']!.split('-');
+          final start = DateTime(int.parse(startParts[0]), int.parse(startParts[1]), int.parse(startParts[2]));
+          final end = DateTime(int.parse(endParts[0]), int.parse(endParts[1]), int.parse(endParts[2]));
+          return (d.isAtSameMomentAs(start) || d.isAtSameMomentAs(end) || (d.isAfter(start) && d.isBefore(end)));
+        } catch (_) {
+          return false;
+        }
+      });
+    });
+
+    await _firestore.collection('users').doc(widget.workerId).update({
+      'vacations': _vacations,
+    });
+  }
+
+  Future<void> _showVacationDialog() async {
+    final strings = _getLocalizedStrings(context);
+    DateTimeRange? picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+
+    if (picked != null) {
+      for (DateTime d = picked.start; d.isBefore(picked.end.add(const Duration(days: 1))); d = d.add(const Duration(days: 1))) {
+        final dStr = "${d.year}-${d.month}-${d.day}";
+        if (_availableDates.contains(dStr)) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['work_conflict']!)));
+          return;
+        }
+      }
+
+      final startStr = "${picked.start.year}-${picked.start.month}-${picked.start.day}";
+      final endStr = "${picked.end.year}-${picked.end.month}-${picked.end.day}";
+      
+      setState(() {
+        _vacations.add({'start': startStr, 'end': endStr});
+      });
+
+      await _firestore.collection('users').doc(widget.workerId).update({
+        'vacations': FieldValue.arrayUnion([{'start': startStr, 'end': endStr}]),
+      });
+    }
+  }
+
+  Future<void> _addReminder(String text) async {
+    if (text.isEmpty) return;
+    final dateStr = "${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}";
     
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null || user.isAnonymous) {
-      final strings = _getLocalizedStrings(context);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['guest_msg']!)));
+    try {
+      await _firestore.collection('schedules').doc(widget.workerId).collection(dateStr).add({
+        'text': text,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+      _fetchReminders();
+    } catch (e) {
+      debugPrint("Error adding reminder: $e");
+    }
+  }
+
+  Future<void> _deleteReminder(String id) async {
+    final dateStr = "${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}";
+    try {
+      await _firestore.collection('schedules').doc(widget.workerId).collection(dateStr).doc(id).delete();
+      _fetchReminders();
+    } catch (e) {
+      debugPrint("Error deleting reminder: $e");
+    }
+  }
+
+  Future<void> _toggleWorkingDay() async {
+    final strings = _getLocalizedStrings(context);
+    final dateStr = "${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}";
+    final isWorking = _availableDates.contains(dateStr);
+
+    if (_isVacation(_selectedDay)) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['vacation_conflict']!)));
       return;
     }
 
-    setState(() => _isLoading = true);
-    final dateStr = "${_selectedDate.year}-${_selectedDate.month}-${_selectedDate.day}";
-    final strings = _getLocalizedStrings(context);
+    if (isWorking) {
+      final bool? confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(strings['remove_working']!),
+          content: Text(strings['confirm_msg']!),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: Text(strings['cancel']!)),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: Text(strings['ok']!),
+            ),
+          ],
+        ),
+      );
 
-    try {
-      final dbRef = FirebaseDatabase.instanceFor(
-        app: FirebaseAuth.instance.app,
-        databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-      ).ref();
+      if (confirm != true) return;
 
-      // 1. Add to worker's schedule
-      await dbRef.child('schedules').child(widget.workerId).child(dateStr).child(_selectedSlot!).set({
-        'userId': user.uid,
-        'userName': user.displayName ?? 'Client',
-        'timestamp': ServerValue.timestamp,
+      setState(() {
+        _availableDates.remove(dateStr);
+        _partialWorkDays.remove(dateStr);
       });
 
-      // 2. Add to user's appointments
-      await dbRef.child('appointments').child(user.uid).push().set({
-        'workerId': widget.workerId,
-        'workerName': widget.workerName,
-        'date': dateStr,
-        'time': _selectedSlot,
-        'timestamp': ServerValue.timestamp,
+      await _firestore.collection('users').doc(widget.workerId).update({
+        'availableDates': FieldValue.arrayRemove([dateStr]),
+        'partialWorkDays.$dateStr': FieldValue.delete(),
       });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(strings['success']!),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-        ));
-        Navigator.pop(context);
+      final items = await _firestore.collection('schedules').doc(widget.workerId).collection(dateStr).get();
+      final batch = _firestore.batch();
+      for (var doc in items.docs) {
+        batch.delete(doc.reference);
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${strings['error']!}: $e")));
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      await batch.commit();
+      _fetchReminders();
+      
+    } else {
+      setState(() => _availableDates.add(dateStr));
+      await _firestore.collection('users').doc(widget.workerId).update({
+        'availableDates': FieldValue.arrayUnion([dateStr]),
+      });
     }
+  }
+
+  Future<void> _setPartialHours() async {
+    final strings = _getLocalizedStrings(context);
+    final dateStr = "${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}";
+    
+    if (_isVacation(_selectedDay)) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['vacation_conflict']!)));
+      return;
+    }
+
+    TimeOfDay from = const TimeOfDay(hour: 08, minute: 00);
+    TimeOfDay to = const TimeOfDay(hour: 16, minute: 00);
+
+    if (_partialWorkDays.containsKey(dateStr)) {
+      final current = _partialWorkDays[dateStr]!;
+      from = TimeOfDay(hour: int.parse(current['from']!.split(':')[0]), minute: int.parse(current['from']!.split(':')[1]));
+      to = TimeOfDay(hour: int.parse(current['to']!.split(':')[0]), minute: int.parse(current['to']!.split(':')[1]));
+    }
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(strings['partial_title']!),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                title: Text("${strings['from']}: ${from.format(context)}"),
+                trailing: const Icon(Icons.access_time),
+                onTap: () async {
+                  final picked = await showTimePicker(context: context, initialTime: from);
+                  if (picked != null) setDialogState(() => from = picked);
+                },
+              ),
+              ListTile(
+                title: Text("${strings['to']}: ${to.format(context)}"),
+                trailing: const Icon(Icons.access_time),
+                onTap: () async {
+                  final picked = await showTimePicker(context: context, initialTime: to);
+                  if (picked != null) setDialogState(() => to = picked);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: Text(strings['cancel']!)),
+            ElevatedButton(
+              onPressed: () {
+                final fStr = "${from.hour.toString().padLeft(2, '0')}:${from.minute.toString().padLeft(2, '0')}";
+                final tStr = "${to.hour.toString().padLeft(2, '0')}:${to.minute.toString().padLeft(2, '0')}";
+                
+                setState(() {
+                  if (!_availableDates.contains(dateStr)) _availableDates.add(dateStr);
+                  _partialWorkDays[dateStr] = {'from': fStr, 'to': tStr};
+                });
+
+                _firestore.collection('users').doc(widget.workerId).update({
+                  'availableDates': FieldValue.arrayUnion([dateStr]),
+                  'partialWorkDays.$dateStr': {'from': fStr, 'to': tStr},
+                });
+                Navigator.pop(context);
+              },
+              child: Text(strings['save']!),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final strings = _getLocalizedStrings(context);
-    final isRtl = Provider.of<LanguageProvider>(context).locale.languageCode == 'he';
+    final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
+    final isRtl = locale == 'he' || locale == 'ar';
+    final dateStr = "${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}";
+    
+    final isWorkingDay = _availableDates.contains(dateStr);
+    final isPermanentOff = _permanentlyDisabledDays.contains(_selectedDay.weekday);
+    final onVacation = _isVacation(_selectedDay);
+    final isPast = _selectedDay.isBefore(DateTime.now().subtract(const Duration(days: 1)));
 
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         backgroundColor: const Color(0xFFF8FAFC),
-        appBar: AppBar(
-          title: Text(strings['title']!, style: const TextStyle(fontWeight: FontWeight.bold)),
-          backgroundColor: const Color(0xFF1976D2),
-          foregroundColor: Colors.white,
-          elevation: 0,
-          centerTitle: true,
-        ),
-        body: Column(
-          children: [
-            _buildCalendarCard(strings),
-            Expanded(
-              child: _isLoading 
-                ? const Center(child: CircularProgressIndicator())
-                : _buildTimeSlotsSection(strings),
+        body: CustomScrollView(
+          slivers: [
+            SliverAppBar(
+              automaticallyImplyLeading: false,
+              pinned: true,
+              expandedHeight: 100,
+              backgroundColor: const Color(0xFF1E3A8A),
+              flexibleSpace: FlexibleSpaceBar(
+                title: Text(strings['title']!, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+                background: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Color(0xFF1E3A8A), Color(0xFF1976D2)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                ),
+              ),
             ),
-            _buildBookingSummary(strings),
+            SliverToBoxAdapter(
+              child: Container(
+                margin: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 15, offset: const Offset(0, 5))],
+                ),
+                child: TableCalendar(
+                  firstDay: DateTime.now().subtract(const Duration(days: 365)),
+                  lastDay: DateTime.now().add(const Duration(days: 365)),
+                  focusedDay: _focusedDay,
+                  selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+                  onDaySelected: (selectedDay, focusedDay) {
+                    setState(() {
+                      _selectedDay = selectedDay;
+                      _focusedDay = focusedDay;
+                    });
+                    _fetchReminders();
+                  },
+                  calendarStyle: CalendarStyle(
+                    todayDecoration: BoxDecoration(color: const Color(0xFF1976D2).withOpacity(0.2), shape: BoxShape.circle),
+                    todayTextStyle: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold),
+                    selectedDecoration: const BoxDecoration(color: Color(0xFF1976D2), shape: BoxShape.circle),
+                    markerDecoration: const BoxDecoration(color: Colors.orange, shape: BoxShape.circle),
+                  ),
+                  headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
+                  eventLoader: (day) {
+                    final dStr = "${day.year}-${day.month}-${day.day}";
+                    return _reminderDates.contains(dStr) ? ['reminder'] : [];
+                  },
+                  calendarBuilders: CalendarBuilders(
+                    defaultBuilder: (context, day, focusedDay) {
+                      final dStr = "${day.year}-${day.month}-${day.day}";
+                      if (_isVacation(day)) return _dayCircle(day, Colors.red);
+                      if (_availableDates.contains(dStr)) return _dayCircle(day, Colors.green);
+                      if (_permanentlyDisabledDays.contains(day.weekday)) return _dayCircle(day, Colors.grey.shade300, isTextGrey: true);
+                      return null;
+                    },
+                  ),
+                ),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _isLoading 
+                  ? const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator()))
+                  : _isOwnSchedule 
+                    ? _buildOwnerView(strings)
+                    : _buildUserView(strings, isWorkingDay, isPermanentOff, onVacation, isPast),
+              ),
+            ),
+            const SliverPadding(padding: EdgeInsets.only(bottom: 100)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildCalendarCard(Map<String, String> strings) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1976D2),
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(32)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(strings['select_date']!, style: const TextStyle(fontSize: 16, color: Colors.white70, fontWeight: FontWeight.w500)),
-          const SizedBox(height: 12),
-          InkWell(
-            onTap: () async {
-              final picked = await showDatePicker(
-                context: context,
-                initialDate: _selectedDate,
-                firstDate: DateTime.now(),
-                lastDate: DateTime.now().add(const Duration(days: 30)),
-                builder: (context, child) {
-                  return Theme(
-                    data: Theme.of(context).copyWith(
-                      colorScheme: const ColorScheme.light(
-                        primary: Color(0xFF1976D2),
-                        onPrimary: Colors.white,
-                        onSurface: Color(0xFF1E293B),
-                      ),
-                    ),
-                    child: child!,
-                  );
-                },
-              );
-              if (picked != null) {
-                setState(() {
-                  _selectedDate = picked;
-                  _selectedSlot = null;
-                });
-                _fetchBookedSlots();
-              }
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white24),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.calendar_month_rounded, color: Colors.white),
-                  const SizedBox(width: 16),
-                  Text(
-                    "${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}",
-                    style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                  const Spacer(),
-                  const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white70, size: 16),
-                ],
-              ),
-            ),
-          ),
-        ],
+  Widget _dayCircle(DateTime day, Color color, {bool isTextGrey = false}) {
+    return Center(
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle, border: Border.all(color: color.withOpacity(0.5))),
+        child: Center(child: Text("${day.day}", style: TextStyle(color: isTextGrey ? Colors.grey : color, fontWeight: FontWeight.bold, fontSize: 12))),
       ),
     );
   }
 
-  Widget _buildTimeSlotsSection(Map<String, String> strings) {
-    return Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(strings['select_time']!, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
-              const Spacer(),
-              _buildLegend(strings['available']!, Colors.green),
-              const SizedBox(width: 12),
-              _buildLegend(strings['booked']!, Colors.red),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Expanded(
-            child: GridView.builder(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                childAspectRatio: 2.0,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-              ),
-              itemCount: _allSlots.length,
-              itemBuilder: (context, index) {
-                final slot = _allSlots[index];
-                final isBooked = _bookedSlots.contains(slot);
-                final isSelected = _selectedSlot == slot;
+  Widget _buildOwnerView(Map<String, String> strings) {
+    final dateStr = "${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}";
+    final isWorkingDay = _availableDates.contains(dateStr);
+    final onVacation = _isVacation(_selectedDay);
 
-                return InkWell(
-                  onTap: isBooked ? null : () => setState(() => _selectedSlot = slot),
-                  borderRadius: BorderRadius.circular(16),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    decoration: BoxDecoration(
-                      color: isBooked 
-                          ? Colors.red.withOpacity(0.05) 
-                          : isSelected ? const Color(0xFF1976D2) : Colors.white,
-                      border: Border.all(
-                        color: isBooked 
-                            ? Colors.red.withOpacity(0.1) 
-                            : isSelected ? const Color(0xFF1976D2) : const Color(0xFFE2E8F0),
-                        width: 2,
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: isSelected ? [BoxShadow(color: const Color(0xFF1976D2).withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))] : [],
-                    ),
-                    child: Center(
-                      child: Text(
-                        slot,
-                        style: TextStyle(
-                          color: isBooked 
-                              ? Colors.red[300] 
-                              : isSelected ? Colors.white : const Color(0xFF475569),
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLegend(String label, Color color) {
-    return Row(
+    return Column(
       children: [
-        Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        const SizedBox(width: 4),
-        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600], fontWeight: FontWeight.w500)),
+        _buildOwnerControls(strings, isWorkingDay, onVacation, dateStr),
+        const SizedBox(height: 20),
+        _buildRemindersList(strings),
+        _buildAddReminderInput(strings),
       ],
     );
   }
 
-  Widget _buildBookingSummary(Map<String, String> strings) {
+  Widget _buildOwnerControls(Map<String, String> strings, bool isWorking, bool onVac, String dateStr) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _controlBtn(Icons.work_rounded, strings['set_working']!, isWorking, Colors.green, _toggleWorkingDay),
+          _controlBtn(Icons.more_time_rounded, strings['set_partial']!, _partialWorkDays.containsKey(dateStr), Colors.orange, _setPartialHours),
+          _controlBtn(Icons.beach_access_rounded, onVac ? strings['on_vacation']! : strings['set_vacation']!, onVac, Colors.red, onVac ? () => _cancelVacation(_selectedDay) : _showVacationDialog),
+        ],
+      ),
+    );
+  }
+
+  Widget _controlBtn(IconData icon, String label, bool active, Color color, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: active ? color : Colors.white, shape: BoxShape.circle, border: Border.all(color: active ? color : Colors.grey.shade200), boxShadow: [if(active) BoxShadow(color: color.withOpacity(0.3), blurRadius: 8)]),
+            child: Icon(icon, color: active ? Colors.white : Colors.grey, size: 24),
+          ),
+          const SizedBox(height: 8),
+          Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: active ? color : Colors.grey)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRemindersList(Map<String, String> strings) {
+    if (_reminders.isEmpty) return Padding(padding: const EdgeInsets.all(20), child: Text(strings['no_reminders']!, style: const TextStyle(color: Colors.grey)));
+    return Column(
+      children: _reminders.map((r) => Card(
+        margin: const EdgeInsets.only(bottom: 8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: ListTile(
+          title: Text(r['text'], style: const TextStyle(fontSize: 14)),
+          trailing: IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20), onPressed: () => _deleteReminder(r['id'])),
+        ),
+      )).toList(),
+    );
+  }
+
+  Widget _buildAddReminderInput(Map<String, String> strings) {
+    final controller = TextEditingController();
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: TextField(
+        controller: controller,
+        onSubmitted: (v) { _addReminder(v); controller.clear(); },
+        decoration: InputDecoration(
+          hintText: strings['add_reminder'],
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+          suffixIcon: IconButton(icon: const Icon(Icons.add_circle, color: Color(0xFF1976D2)), onPressed: () { _addReminder(controller.text); controller.clear(); }),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUserView(Map<String, String> strings, bool isWorking, bool isOff, bool isVac, bool isPast) {
+    if (_hideScheduleFromOthers) return _emptyState(Icons.lock_outline, strings['hidden_msg']!);
+    final dateStr = "${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}";
+
     return Container(
       padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, -5))],
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          if (_selectedSlot != null) ...[
-            _buildSummaryRow(strings['worker']!, widget.workerName),
-            const SizedBox(height: 12),
-            _buildSummaryRow(strings['date']!, "${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}"),
-            const SizedBox(height: 12),
-            _buildSummaryRow(strings['time']!, _selectedSlot!),
-            const SizedBox(height: 24),
-          ],
-          ElevatedButton(
-            onPressed: _selectedSlot == null || _isLoading ? null : _bookAppointment,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1976D2),
-              foregroundColor: Colors.white,
-              minimumSize: const Size(double.infinity, 60),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              elevation: 0,
-            ),
-            child: _isLoading 
-              ? const CircularProgressIndicator(color: Colors.white)
-              : Text(strings['book_now']!, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          Icon(isVac ? Icons.beach_access : (isWorking ? Icons.work : (isOff ? Icons.weekend : Icons.work_off)), size: 48, color: isVac ? Colors.red : (isWorking ? Colors.green : Colors.grey)),
+          const SizedBox(height: 16),
+          Text(
+            isVac ? strings['on_vacation']! : isWorking 
+              ? (_partialWorkDays.containsKey(dateStr) ? "${strings['working_hours']}: ${_partialWorkDays[dateStr]!['from']} - ${_partialWorkDays[dateStr]!['to']}" : strings['set_working']!)
+              : (isOff ? strings['permanent_off']! : strings['not_working']!),
+            textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
           ),
+          if (!isPast && !isVac && !isOff) ...[
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () {
+                final partial = isWorking ? _partialWorkDays[dateStr] : null;
+                Navigator.push(context, MaterialPageRoute(builder: (context) => SendRequestPage(workerId: widget.workerId, workerName: widget.workerName, selectedDay: _selectedDay, isExtraHours: isWorking, initialFrom: partial?['from'], initialTo: partial?['to'])));
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1976D2), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+              child: Text(isWorking ? strings['request_hours']! : strings['request_work']!),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildSummaryRow(String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: const TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.w500)),
-        Text(value, style: const TextStyle(color: Color(0xFF1E293B), fontWeight: FontWeight.bold)),
-      ],
-    );
-  }
+  Widget _emptyState(IconData icon, String msg) => Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, size: 48, color: Colors.grey), const SizedBox(height: 16), Text(msg)]));
 }

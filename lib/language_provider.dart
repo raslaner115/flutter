@@ -19,28 +19,11 @@ class LanguageProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> setLocale(String language) async {
+  /// Sets the locale using a language code (e.g., 'en', 'he', 'ar')
+  Future<void> setLocale(String languageCode) async {
     final prefs = await SharedPreferences.getInstance();
-    switch (language) {
-      case 'English':
-        _locale = const Locale('en');
-        break;
-      case 'עברית':
-        _locale = const Locale('he');
-        break;
-      case 'عربي':
-        _locale = const Locale('ar');
-        break;
-      case 'русский ':
-        _locale = const Locale('ru');
-        break;
-      case 'አማርኛ':
-        _locale = const Locale('am');
-        break;
-      default:
-        _locale = const Locale('he');
-    }
-    await prefs.setString('language_code', _locale.languageCode);
+    _locale = Locale(languageCode);
+    await prefs.setString('language_code', languageCode);
     notifyListeners();
   }
 }

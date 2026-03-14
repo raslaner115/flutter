@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:untitled1/language_provider.dart';
 import 'package:untitled1/pages/sighn_up.dart';
@@ -142,15 +142,12 @@ class _SignInPageState extends State<SignInPage> {
       final user = userCredential.user;
       
       if (user != null) {
-        final dbRef = FirebaseDatabase.instanceFor(
-          app: FirebaseAuth.instance.app,
-          databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-        ).ref();
+        final firestore = FirebaseFirestore.instance;
 
         // Check by UID instead of phone for more reliability
-        final snapshot = await dbRef.child('users').child(user.uid).get();
+        final userDoc = await firestore.collection('users').doc(user.uid).get();
 
-        if (snapshot.exists) {
+        if (userDoc.exists) {
           if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MyHomePage()));
         } else {
           // User is authenticated but NOT in our database

@@ -4,8 +4,12 @@ import 'package:provider/provider.dart';
 import 'package:untitled1/language_provider.dart';
 import '../main.dart';
 
+/// A page that handles phone number authentication using Firebase Auth.
 class PhoneAuthPage extends StatefulWidget {
-  const PhoneAuthPage({super.key});
+  final bool isReauth;
+  final Function(String)? onVerified;
+
+  const PhoneAuthPage({super.key, this.isReauth = false, this.onVerified});
 
   @override
   State<PhoneAuthPage> createState() => _PhoneAuthPageState();
@@ -18,6 +22,7 @@ class _PhoneAuthPageState extends State<PhoneAuthPage> {
   bool _codeSent = false;
   bool _loading = false;
 
+  /// Returns localized strings based on the current app locale.
   Map<String, String> _getLocalizedStrings(BuildContext context) {
     final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
     switch (locale) {
@@ -25,60 +30,114 @@ class _PhoneAuthPageState extends State<PhoneAuthPage> {
         return {
           'title': 'אימות טלפוני',
           'phone_label': 'מספר טלפון',
-          'phone_hint': 'הכנס את מספר הטלפון שלך',
+          'phone_hint': '05X-XXXXXXX',
           'send_code': 'שלח קוד',
           'code_label': 'קוד אימות',
           'code_hint': 'הכנס את הקוד שקיבלת',
           'verify': 'אמת והתחבר',
+          'verify_reauth': 'אמת ועדכן',
+          'invalid_phone': 'מספר טלפון לא תקין',
         };
       case 'am':
         return {
           'title': 'የስልክ ማረጋገጫ',
           'phone_label': 'የስልክ ቁጥር',
-          'phone_hint': 'የስልክ ቁጥርዎን ያስገቡ',
+          'phone_hint': '05X-XXXXXXX',
           'send_code': 'ኮድ ላክ',
           'code_label': 'የማረጋገጫ ኮድ',
           'code_hint': 'የተቀበሉትን ኮድ ያስገቡ',
           'verify': 'አረጋግጥ እና ግባ',
+          'verify_reauth': 'አረጋግጥ እና አዘምን',
+          'invalid_phone': 'ትክክለኛ ያልሆነ የስልክ ቁጥር',
         };
       default:
         return {
           'title': 'Phone Authentication',
           'phone_label': 'Phone Number',
-          'phone_hint': 'Enter your phone number',
+          'phone_hint': '05X-XXXXXXX',
           'send_code': 'Send Code',
           'code_label': 'Verification Code',
           'code_hint': 'Enter the code you received',
           'verify': 'Verify & Sign In',
+          'verify_reauth': 'Verify & Update',
+          'invalid_phone': 'Invalid phone number',
         };
     }
   }
 
-  Future<void> _verifyPhone() async {
-    setState(() => _loading = true);
-    await FirebaseAuth.instance.verifyPhoneNumber(
-      phoneNumber: _phoneController.text.trim(),
-      verificationCompleted: (PhoneAuthCredential credential) async {
-        await FirebaseAuth.instance.signInWithCredential(credential);
-        if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MyHomePage()));
-      },
-      verificationFailed: (FirebaseAuthException e) {
-        setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message ?? "Verification Failed")));
-      },
-      codeSent: (String verificationId, int? resendToken) {
-        setState(() {
-          _verificationId = verificationId;
-          _codeSent = true;
-          _loading = false;
-        });
-      },
-      codeAutoRetrievalTimeout: (String verificationId) {
-        _verificationId = verificationId;
-      },
-    );
+  /// Sanitizes and formats the phone number for Firebase.
+  /// Handles formats: +9725XXXXXXXX, 05XXXXXXXX, +97205XXXXXXXX
+  String _formatPhoneNumber(String phone) {
+    phone = phone.replaceAll(RegExp(r'[\s\-]'), ''); // Remove spaces and dashes
+    
+    if (phone.startsWith('0')) {
+      return '+972${phone.substring(1)}';
+    }
+    
+    if (phone.startsWith('+9720')) {
+      return '+972${phone.substring(5)}';
+    }
+    
+    if (RegExp(r'^\d{9}$').hasMatch(phone)) {
+      // If 9 digits provided without leading 0 or prefix
+      return '+972$phone';
+    }
+
+    if (!phone.startsWith('+')) {
+      return '+$phone';
+    }
+    
+    return phone;
   }
 
+  /// Initiates the phone number verification process.
+  Future<void> _verifyPhone() async {
+    final rawPhone = _phoneController.text.trim();
+    if (rawPhone.isEmpty) return;
+
+    final formattedPhone = _formatPhoneNumber(rawPhone);
+    
+    setState(() => _loading = true);
+    
+    try {
+      await FirebaseAuth.instance.verifyPhoneNumber(
+        phoneNumber: formattedPhone,
+        verificationCompleted: (PhoneAuthCredential credential) async {
+          if (widget.isReauth) {
+             if (widget.onVerified != null) {
+                widget.onVerified!(formattedPhone);
+             }
+             return;
+          }
+          await FirebaseAuth.instance.signInWithCredential(credential);
+          if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MyHomePage()));
+        },
+        verificationFailed: (FirebaseAuthException e) {
+          setState(() => _loading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.message ?? "Verification Failed")),
+          );
+        },
+        codeSent: (String verificationId, int? resendToken) {
+          setState(() {
+            _verificationId = verificationId;
+            _codeSent = true;
+            _loading = false;
+          });
+        },
+        codeAutoRetrievalTimeout: (String verificationId) {
+          _verificationId = verificationId;
+        },
+      );
+    } catch (e) {
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error: ${e.toString()}")),
+      );
+    }
+  }
+
+  /// Signs the user in or verifies the code for re-authentication.
   Future<void> _signInWithCode() async {
     setState(() => _loading = true);
     try {
@@ -86,11 +145,24 @@ class _PhoneAuthPageState extends State<PhoneAuthPage> {
         verificationId: _verificationId,
         smsCode: _codeController.text.trim(),
       );
-      await FirebaseAuth.instance.signInWithCredential(credential);
-      if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MyHomePage()));
+      
+      if (widget.isReauth) {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          await user.updatePhoneNumber(credential);
+          if (widget.onVerified != null) {
+             // Pass back the formatted phone number
+             final formattedPhone = _formatPhoneNumber(_phoneController.text.trim());
+             widget.onVerified!(formattedPhone);
+          }
+        }
+      } else {
+        await FirebaseAuth.instance.signInWithCredential(credential);
+        if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MyHomePage()));
+      }
     } catch (e) {
       setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invalid Code")));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: ${e.toString()}")));
     }
   }
 
@@ -104,6 +176,8 @@ class _PhoneAuthPageState extends State<PhoneAuthPage> {
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         backgroundColor: Colors.white,
+        appBar: widget.isReauth ? AppBar(backgroundColor: Colors.transparent, elevation: 0, iconTheme: const IconThemeData(color: Colors.white)) : null,
+        extendBodyBehindAppBar: true,
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : SingleChildScrollView(
@@ -222,7 +296,7 @@ class _PhoneAuthPageState extends State<PhoneAuthPage> {
             padding: const EdgeInsets.symmetric(vertical: 16),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
-          child: Text(strings['verify']!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          child: Text(widget.isReauth ? strings['verify_reauth']! : strings['verify']!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ),
       ],
     );

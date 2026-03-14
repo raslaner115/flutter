@@ -3,8 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:untitled1/language_provider.dart';
 import 'package:untitled1/pages/sighn_in.dart';
+import 'package:untitled1/pages/about.dart';
+import 'package:untitled1/pages/account_settings.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({Key? key}) : super(key: key);
@@ -15,6 +19,97 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _notificationsEnabled = true;
+  bool _hideSchedule = false;
+  List<int> _disabledDays = []; // 1 = Monday, 7 = Sunday
+  bool _isLoadingSettings = true;
+  Map<String, dynamic>? _userData;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) {
+      setState(() => _isLoadingSettings = false);
+      return;
+    }
+
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      if (doc.exists) {
+        final data = doc.data()!;
+        // Check actual system permission status as well
+        final status = await Permission.notification.status;
+        setState(() {
+          _userData = data;
+          _hideSchedule = data['hideSchedule'] ?? false;
+          _disabledDays = List<int>.from(data['disabledDays'] ?? []);
+          // Sync with Firestore, but also respect system setting if permanently denied
+          _notificationsEnabled = (data['notificationsEnabled'] ?? true) && !status.isPermanentlyDenied;
+          _isLoadingSettings = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading settings: $e");
+      setState(() => _isLoadingSettings = false);
+    }
+  }
+
+  Future<void> _updateSetting(String key, dynamic value) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
+      key: value,
+    });
+  }
+
+  Future<void> _toggleNotifications(bool value) async {
+    if (value) {
+      // Request permission when enabling
+      final status = await Permission.notification.request();
+      if (status.isGranted) {
+        setState(() => _notificationsEnabled = true);
+        await _updateSetting('notificationsEnabled', true);
+      } else if (status.isPermanentlyDenied) {
+        // If permanently denied, show a dialog to open settings
+        if (mounted) {
+          _showPermissionDialog();
+        }
+        setState(() => _notificationsEnabled = false);
+      } else {
+        setState(() => _notificationsEnabled = false);
+      }
+    } else {
+      // Just disable in Firestore/UI
+      setState(() => _notificationsEnabled = false);
+      await _updateSetting('notificationsEnabled', false);
+    }
+  }
+
+  void _showPermissionDialog() {
+    final strings = _getLocalizedStrings(context, listen: false);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(strings['notifications']!),
+        content: Text(strings['permission_denied']!),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(strings['cancel']!)),
+          TextButton(
+            onPressed: () {
+              openAppSettings();
+              Navigator.pop(context);
+            },
+            child: Text(strings['settings']!),
+          ),
+        ],
+      ),
+    );
+  }
 
   Map<String, String> _getLocalizedStrings(BuildContext context, {bool listen = true}) {
     final locale = Provider.of<LanguageProvider>(context, listen: listen).locale.languageCode;
@@ -30,6 +125,14 @@ class _SettingsPageState extends State<SettingsPage> {
           'help': 'עזרה',
           'logout': 'התנתקות',
           'appearance': 'מראה',
+          'schedule': 'לוח זמנים',
+          'hide_schedule': 'הסתר לוח זמנים מאחרים',
+          'work_days': 'ימי עבודה',
+          'select_off_days': 'בחר ימי חופש קבועים',
+          'days': 'א,ב,ג,ד,ה,ו,ש',
+          'permission_denied': 'התראות חסומות בהגדרות המכשיר. האם תרצה לפתוח את ההגדרות?',
+          'settings': 'הגדרות',
+          'cancel': 'ביטול',
         };
       case 'ar':
         return {
@@ -42,30 +145,14 @@ class _SettingsPageState extends State<SettingsPage> {
           'help': 'المساعدة',
           'logout': 'تسجيل الخروج',
           'appearance': 'المظهر',
-        };
-      case 'ru':
-        return {
-          'title': 'Настройки',
-          'notifications': 'Уведомления',
-          'language': 'Язык',
-          'about': 'О приложении',
-          'account': 'Аккаунт',
-          'privacy': 'Конфиденциальность',
-          'help': 'Помощь',
-          'logout': 'Выйти',
-          'appearance': 'Внешний вид',
-        };
-      case 'am':
-        return {
-          'title': 'ቅንብሮች',
-          'notifications': 'ማሳወቂያዎች',
-          'language': 'ቋንቋ',
-          'about': 'ስለ እኛ',
-          'account': 'መለያ',
-          'privacy': 'ግላዊነት',
-          'help': 'እርዳታ',
-          'logout': 'ውጣ',
-          'appearance': 'ገጽታ',
+          'schedule': 'الجدول الزمني',
+          'hide_schedule': 'إخفاء الجدول عن الآخرين',
+          'work_days': 'أيام العمل',
+          'select_off_days': 'اختر أيام العطلة الثابتة',
+          'days': 'ن,ث,ر,خ,ج,س,ح',
+          'permission_denied': 'الإشعارات محظورة في إعدادات الجهاز. هل تريد فتح الإعدادات؟',
+          'settings': 'الإعدادات',
+          'cancel': 'إلغاء',
         };
       default:
         return {
@@ -78,6 +165,14 @@ class _SettingsPageState extends State<SettingsPage> {
           'help': 'Help & Support',
           'logout': 'Logout',
           'appearance': 'Appearance',
+          'schedule': 'Schedule',
+          'hide_schedule': 'Hide schedule from others',
+          'work_days': 'Working Days',
+          'select_off_days': 'Select fixed days off',
+          'days': 'M,T,W,T,F,S,S',
+          'permission_denied': 'Notifications are blocked in system settings. Would you like to open settings?',
+          'settings': 'Settings',
+          'cancel': 'Cancel',
         };
     }
   }
@@ -89,6 +184,20 @@ class _SettingsPageState extends State<SettingsPage> {
       MaterialPageRoute(builder: (context) => const SignInPage()),
           (route) => false,
     );
+  }
+
+  void _goToAccountSettings() async {
+    if (_userData == null) return;
+    
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AccountSettingsPage(userData: _userData!),
+      ),
+    );
+
+    // Refresh when coming back in case data changed
+    _loadSettings();
   }
 
   @override
@@ -104,9 +213,74 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  Widget _buildScheduleSection(Map<String, String> strings) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) return const SizedBox.shrink();
+    if (_isLoadingSettings) return const Center(child: CupertinoActivityIndicator());
+
+    final dayNames = strings['days']!.split(',');
+    
+    return _buildGalaxySection(strings['schedule']!, [
+      _buildGalaxySwitchTile(
+        Icons.calendar_view_day_rounded, 
+        strings['hide_schedule']!, 
+        _hideSchedule, 
+        (v) {
+          setState(() => _hideSchedule = v);
+          _updateSetting('hideSchedule', v);
+        }
+      ),
+      const Divider(height: 1, indent: 50),
+      Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(strings['select_off_days']!, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: List.generate(7, (index) {
+                final dayNum = index + 1;
+                final isOff = _disabledDays.contains(dayNum);
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      if (isOff) _disabledDays.remove(dayNum);
+                      else _disabledDays.add(dayNum);
+                    });
+                    _updateSetting('disabledDays', _disabledDays);
+                  },
+                  child: Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: isOff ? Colors.red.withOpacity(0.1) : const Color(0xFF1976D2).withOpacity(0.1),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: isOff ? Colors.red : const Color(0xFF1976D2), width: 1.5),
+                    ),
+                    child: Center(
+                      child: Text(
+                        dayNames[index],
+                        style: TextStyle(
+                          color: isOff ? Colors.red : const Color(0xFF1976D2),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ],
+        ),
+      )
+    ]);
+  }
+
   // --- ANDROID (Galaxy / One UI) DESIGN ---
   Widget _buildAndroidSettings(BuildContext context, Map<String, String> strings, bool isRtl) {
-    final theme = Theme.of(context);
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
@@ -132,26 +306,35 @@ class _SettingsPageState extends State<SettingsPage> {
                   child: Column(
                     children: [
                       _buildGalaxySection(strings['account']!, [
-                        _buildGalaxyTile(Icons.person_outline_rounded, strings['account']!),
-                        _buildGalaxyTile(Icons.lock_outline_rounded, strings['privacy']!),
+                        _buildGalaxyTile(Icons.person_outline_rounded, strings['account']!, _goToAccountSettings),
+                        _buildGalaxyTile(Icons.lock_outline_rounded, strings['privacy']!, () {}),
                       ]),
                       const SizedBox(height: 16),
+                      _buildScheduleSection(strings),
+                      const SizedBox(height: 16),
                       _buildGalaxySection(strings['notifications']!, [
-                        _buildGalaxySwitchTile(Icons.notifications_none_rounded, strings['notifications']!, _notificationsEnabled, (v) => setState(() => _notificationsEnabled = v)),
+                        _buildGalaxySwitchTile(
+                          Icons.notifications_none_rounded, 
+                          strings['notifications']!, 
+                          _notificationsEnabled, 
+                          _toggleNotifications,
+                        ),
                       ]),
                       const SizedBox(height: 16),
                       _buildGalaxySection(strings['language']!, [
                         ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                          leading: Icon(Icons.language_rounded, color: theme.colorScheme.primary),
+                          leading: const Icon(Icons.language_rounded, color: Color(0xFF1976D2)),
                           title: Text(strings['language']!, style: const TextStyle(fontWeight: FontWeight.w600)),
                           trailing: const LanguageDropDown(),
                         ),
                       ]),
                       const SizedBox(height: 16),
                       _buildGalaxySection(strings['help']!, [
-                        _buildGalaxyTile(Icons.help_outline_rounded, strings['help']!),
-                        _buildGalaxyTile(Icons.info_outline_rounded, strings['about']!),
+                        _buildGalaxyTile(Icons.help_outline_rounded, strings['help']!, () {}),
+                        _buildGalaxyTile(Icons.info_outline_rounded, strings['about']!, () {
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutPage()));
+                        }),
                       ]),
                       const SizedBox(height: 32),
                       SizedBox(
@@ -199,12 +382,12 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildGalaxyTile(IconData icon, String title) {
+  Widget _buildGalaxyTile(IconData icon, String title, VoidCallback onTap) {
     return ListTile(
       leading: Icon(icon, color: const Color(0xFF1976D2)),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
       trailing: const Icon(Icons.chevron_right_rounded, size: 20),
-      onTap: () {},
+      onTap: onTap,
     );
   }
 
@@ -240,7 +423,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   leading: const Icon(CupertinoIcons.person, color: CupertinoColors.systemBlue),
                   title: Text(strings['account']!),
                   trailing: const CupertinoListTileChevron(),
-                  onTap: () {},
+                  onTap: _goToAccountSettings,
                 ),
                 CupertinoListTile(
                   leading: const Icon(CupertinoIcons.lock, color: CupertinoColors.systemBlue),
@@ -251,6 +434,57 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
             ),
             CupertinoListSection.insetGrouped(
+              header: Text(strings['schedule']!),
+              children: [
+                CupertinoListTile(
+                  leading: const Icon(CupertinoIcons.calendar, color: CupertinoColors.systemIndigo),
+                  title: Text(strings['hide_schedule']!),
+                  trailing: CupertinoSwitch(
+                    value: _hideSchedule,
+                    onChanged: (v) {
+                      setState(() => _hideSchedule = v);
+                      _updateSetting('hideSchedule', v);
+                    },
+                  ),
+                ),
+                // Days off row for iOS
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: List.generate(7, (index) {
+                      final dayNum = index + 1;
+                      final isOff = _disabledDays.contains(dayNum);
+                      return GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            if (isOff) _disabledDays.remove(dayNum);
+                            else _disabledDays.add(dayNum);
+                          });
+                          _updateSetting('disabledDays', _disabledDays);
+                        },
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: isOff ? CupertinoColors.systemRed.withOpacity(0.1) : CupertinoColors.systemBlue.withOpacity(0.1),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: isOff ? CupertinoColors.systemRed : CupertinoColors.systemBlue),
+                          ),
+                          child: Center(
+                            child: Text(
+                              strings['days']!.split(',')[index],
+                              style: TextStyle(color: isOff ? CupertinoColors.systemRed : CupertinoColors.systemBlue, fontSize: 10, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                )
+              ],
+            ),
+            CupertinoListSection.insetGrouped(
               header: Text(strings['notifications']!),
               children: [
                 CupertinoListTile(
@@ -258,7 +492,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: Text(strings['notifications']!),
                   trailing: CupertinoSwitch(
                     value: _notificationsEnabled,
-                    onChanged: (v) => setState(() => _notificationsEnabled = v),
+                    onChanged: _toggleNotifications,
                   ),
                 ),
               ],
@@ -286,7 +520,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   leading: const Icon(CupertinoIcons.info, color: CupertinoColors.systemGrey),
                   title: Text(strings['about']!),
                   trailing: const CupertinoListTileChevron(),
-                  onTap: () {},
+                  onTap: () {
+                    Navigator.push(context, CupertinoPageRoute(builder: (_) => const AboutPage()));
+                  },
                 ),
               ],
             ),
@@ -316,51 +552,28 @@ class LanguageDropDown extends StatelessWidget {
     String current = 'English';
     if (locale.languageCode == 'he') current = 'עברית';
     else if (locale.languageCode == 'ar') current = 'عربي';
-    else if (locale.languageCode == 'ru') current = 'русский';
+    else if (locale.languageCode == 'ru') current = 'Русский';
     else if (locale.languageCode == 'am') current = 'አማርኛ';
 
-    if (Platform.isIOS) {
-      return CupertinoButton(
-        padding: EdgeInsets.zero,
-        child: Text(current, style: const TextStyle(fontSize: 14)),
-        onPressed: () => _showIosLocalePicker(context),
-      );
-    }
-
-    return DropdownButton<String>(
-      value: current,
-      underline: const SizedBox(),
-      icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF64748B)),
-      items: ['English', 'עברית', 'عربي', 'русский', 'አማርኛ'].map((String value) {
-        return DropdownMenuItem<String>(
-          value: value,
-          child: Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-        );
-      }).toList(),
-      onChanged: (String? newValue) {
-        if (newValue != null) {
-          Provider.of<LanguageProvider>(context, listen: false).setLocale(newValue);
-        }
+    return PopupMenuButton<String>(
+      onSelected: (code) {
+        Provider.of<LanguageProvider>(context, listen: false).setLocale(code);
       },
-    );
-  }
 
-  void _showIosLocalePicker(BuildContext context) {
-    showCupertinoModalPopup(
-      context: context,
-      builder: (context) => CupertinoActionSheet(
-        actions: ['English', 'עברית', 'عربي', 'русский', 'አማርኛ'].map((lang) => CupertinoActionSheetAction(
-          onPressed: () {
-            Provider.of<LanguageProvider>(context, listen: false).setLocale(lang);
-            Navigator.pop(context);
-          },
-          child: Text(lang),
-        )).toList(),
-        cancelButton: CupertinoActionSheetAction(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(current, style: const TextStyle(color: Colors.grey)),
+          const Icon(Icons.arrow_drop_down, color: Colors.grey),
+        ],
       ),
+      itemBuilder: (context) => [
+        const PopupMenuItem(value: 'en', child: Text('English')),
+        const PopupMenuItem(value: 'he', child: Text('עברית')),
+        const PopupMenuItem(value: 'ar', child: Text('عربي')),
+        const PopupMenuItem(value: 'ru', child: Text('Русский')),
+        const PopupMenuItem(value: 'am', child: Text('አማርኛ')),
+      ],
     );
   }
 }

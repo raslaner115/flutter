@@ -1,11 +1,12 @@
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:untitled1/language_provider.dart';
 import 'package:untitled1/pages/search.dart';
 import 'package:untitled1/pages/ptofile.dart';
+import 'package:untitled1/pages/notifications.dart';
+import 'package:untitled1/widgets/skeleton.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -14,64 +15,66 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
-    app: FirebaseAuth.instance.app,
-    databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-  ).ref();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   List<Map<String, dynamic>> _topRatedWorkers = [];
   bool _isTopRatedLoading = true;
+  String? _cachedName;
 
   @override
   void initState() {
     super.initState();
     _fetchTopRatedWorkers();
+    _fetchCurrentUserName();
+  }
+
+  Future<void> _fetchCurrentUserName() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && !user.isAnonymous) {
+      if (user.displayName == null || user.displayName!.isEmpty) {
+        try {
+          final doc = await _firestore.collection('users').doc(user.uid).get();
+          if (doc.exists && mounted) {
+            setState(() {
+              _cachedName = doc.data()?['name']?.toString().split(' ').first;
+            });
+          }
+        } catch (e) {
+          debugPrint("Error fetching user name: $e");
+        }
+      }
+    }
   }
 
   Future<void> _fetchTopRatedWorkers() async {
     try {
-      final usersSnapshot = await _dbRef.child('users').get();
-      if (!usersSnapshot.exists) {
-        if (mounted) setState(() => _isTopRatedLoading = false);
-        return;
-      }
-
-      final dynamic data = usersSnapshot.value;
+      final snapshot = await _firestore.collection('users')
+          .where('userType', isEqualTo: 'worker')
+          .get();
+      
       List<Map<String, dynamic>> workers = [];
 
-      void processUserData(String key, dynamic value) {
-        if (value is Map) {
-          var userData = Map<String, dynamic>.from(value);
-          if (userData['userType'] == 'worker') {
-            userData['uid'] = key;
-            
-            double totalStars = 0;
-            int reviewCount = 0;
-            
-            if (userData['reviews'] != null && userData['reviews'] is Map) {
-              final Map<dynamic, dynamic> reviews = userData['reviews'] as Map;
-              reviewCount = reviews.length;
-              reviews.forEach((k, v) {
-                if (v is Map) {
-                  final reviewData = Map<String, dynamic>.from(v);
-                  totalStars += (reviewData['stars'] as num).toDouble();
-                }
-              });
+      for (var doc in snapshot.docs) {
+        var userData = doc.data();
+        userData['uid'] = doc.id;
+        
+        double totalStars = 0;
+        int reviewCount = 0;
+        
+        if (userData['reviews'] != null && userData['reviews'] is Map) {
+          final Map<String, dynamic> reviews = Map<String, dynamic>.from(userData['reviews']);
+          reviewCount = reviews.length;
+          reviews.forEach((k, v) {
+            if (v is Map) {
+              final reviewData = Map<String, dynamic>.from(v);
+              totalStars += (reviewData['stars'] as num).toDouble();
             }
-            
-            userData['avgRating'] = reviewCount > 0 ? totalStars / reviewCount : 0.0;
-            userData['reviewCount'] = reviewCount;
-            workers.add(userData);
-          }
+          });
         }
-      }
-
-      if (data is Map) {
-        data.forEach((key, value) => processUserData(key.toString(), value));
-      } else if (data is List) {
-        for (int i = 0; i < data.length; i++) {
-          if (data[i] != null) processUserData(i.toString(), data[i]);
-        }
+        
+        userData['avgRating'] = reviewCount > 0 ? totalStars / reviewCount : 0.0;
+        userData['reviewCount'] = reviewCount;
+        workers.add(userData);
       }
 
       workers.sort((a, b) => (b['avgRating'] as double).compareTo(a['avgRating'] as double));
@@ -149,7 +152,10 @@ class _HomePageState extends State<HomePage> {
       child: Scaffold(
         backgroundColor: const Color(0xFFF8FAFC),
         body: RefreshIndicator(
-          onRefresh: _fetchTopRatedWorkers,
+          onRefresh: () async {
+            await _fetchTopRatedWorkers();
+            await _fetchCurrentUserName();
+          },
           child: CustomScrollView(
             slivers: [
               _buildSliverAppBar(localized, theme, user),
@@ -175,7 +181,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildSliverAppBar(Map<String, dynamic> strings, ThemeData theme, User? user) {
-    String displayName = user?.displayName?.split(' ').first ?? strings['guest'];
+    String displayName = _cachedName ?? user?.displayName?.split(' ').first ?? strings['guest'];
     
     return SliverAppBar(
       expandedHeight: 250,
@@ -183,6 +189,39 @@ class _HomePageState extends State<HomePage> {
       pinned: true,
       elevation: 0,
       backgroundColor: const Color(0xFF1976D2),
+      actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 12, left: 12),
+          child: StreamBuilder<QuerySnapshot>(
+            stream: (user != null && !user.isAnonymous)
+                ? _firestore.collection('users').doc(user.uid).collection('notifications').where('status', isEqualTo: 'pending').snapshots()
+                : const Stream.empty(),
+            builder: (context, snapshot) {
+              int count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.notifications_none_rounded, color: Colors.white, size: 28),
+                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsPage())),
+                  ),
+                  if (count > 0)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                        constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                        child: Text('$count', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                      ),
+                    ),
+                ],
+              );
+            }
+          ),
+        ),
+      ],
       flexibleSpace: FlexibleSpaceBar(
         background: Container(
           decoration: const BoxDecoration(
@@ -327,7 +366,6 @@ class _HomePageState extends State<HomePage> {
                         style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
                         textAlign: TextAlign.center,
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -360,143 +398,122 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
-        if (_isTopRatedLoading)
-          const Padding(
-            padding: EdgeInsets.all(40),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_topRatedWorkers.isEmpty)
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.all(40),
-              child: Column(
-                children: [
-                  Icon(Icons.search_off_rounded, size: 64, color: Colors.grey[300]),
-                  const SizedBox(height: 16),
-                  Text("No pros available right now.", style: TextStyle(color: Colors.grey[500])),
-                ],
-              ),
-            ),
-          )
-        else
-          SizedBox(
-            height: 280,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: _topRatedWorkers.length,
-              itemBuilder: (context, index) {
-                return _buildTopRatedCard(_topRatedWorkers[index], theme);
-              },
-            ),
-          ),
+        SizedBox(
+          height: 220,
+          child: _isTopRatedLoading
+            ? ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: 5,
+                itemBuilder: (context, index) => _buildWorkerSkeleton(),
+              )
+            : _topRatedWorkers.isEmpty
+              ? const Center(child: Padding(padding: EdgeInsets.all(32), child: Text("No pros found")))
+              : ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _topRatedWorkers.length,
+                  itemBuilder: (context, index) {
+                    final worker = _topRatedWorkers[index];
+                    return GestureDetector(
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => profile(userId: worker['uid']))),
+                      child: Container(
+                        width: 160,
+                        margin: const EdgeInsets.symmetric(horizontal: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ClipRRect(
+                              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                              child: (worker['profileImageUrl'] != null && worker['profileImageUrl'].toString().isNotEmpty)
+                                ? Image.network(worker['profileImageUrl'], height: 110, width: 160, fit: BoxFit.cover)
+                                : Container(height: 110, width: 160, color: const Color(0xFFE2E8F0), child: const Icon(Icons.person, size: 40, color: Colors.white)),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    worker['name'] ?? 'Worker',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E293B)),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    (worker['professions'] as List?)?.join(', ') ?? 'Service',
+                                    style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        worker['avgRating'].toStringAsFixed(1),
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF1E293B)),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        "(${worker['reviewCount']})",
+                                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
       ],
     );
   }
 
-  Widget _buildTopRatedCard(Map<String, dynamic> worker, ThemeData theme) {
+  Widget _buildWorkerSkeleton() {
     return Container(
-      width: 260,
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      width: 160,
+      margin: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Skeleton(height: 110, width: 160, borderRadius: 20),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Skeleton(height: 16, width: 100),
+                const SizedBox(height: 8),
+                const Skeleton(height: 12, width: 120),
+                const SizedBox(height: 16),
+                Row(
+                  children: const [
+                    Skeleton(height: 16, width: 16, borderRadius: 8),
+                    SizedBox(width: 8),
+                    Skeleton(height: 14, width: 40),
+                  ],
+                ),
+              ],
+            ),
           ),
         ],
-      ),
-      child: InkWell(
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => profile(userId: worker['uid']))),
-        borderRadius: BorderRadius.circular(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              height: 120,
-              decoration: BoxDecoration(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                image: worker['profileImageUrl'] != null && worker['profileImageUrl'].toString().isNotEmpty
-                    ? DecorationImage(image: NetworkImage(worker['profileImageUrl']), fit: BoxFit.cover)
-                    : null,
-                color: const Color(0xFFF1F5F9),
-              ),
-              child: Stack(
-                children: [
-                  if (worker['profileImageUrl'] == null || worker['profileImageUrl'].toString().isEmpty)
-                    const Center(child: Icon(Icons.person_rounded, size: 50, color: Color(0xFF94A3B8))),
-                  Positioned(
-                    top: 12,
-                    left: 12,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.6),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.star_rounded, color: Colors.amber, size: 14),
-                          const SizedBox(width: 4),
-                          Text(
-                            (worker['avgRating'] as double).toStringAsFixed(1),
-                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    worker['name'] ?? 'Worker',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1E293B)),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    (worker['professions'] is List && (worker['professions'] as List).isNotEmpty)
-                        ? (worker['professions'] as List).join(', ')
-                        : 'Professional',
-                    style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      const Icon(Icons.location_on_rounded, color: Color(0xFF94A3B8), size: 14),
-                      const SizedBox(width: 4),
-                      Text(worker['town'] ?? '', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
-                      const Spacer(),
-                      if (worker['isPro'] == true)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEEF2FF),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: const Color(0xFFC7D2FE)),
-                          ),
-                          child: const Text('PRO', style: TextStyle(color: Color(0xFF4F46E5), fontSize: 10, fontWeight: FontWeight.bold)),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

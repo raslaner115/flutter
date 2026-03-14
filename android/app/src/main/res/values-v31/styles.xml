@@ -2,10 +2,10 @@
 <resources>
     <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">@drawable/launch_background</item>
-        <!-- On Android 12+ (API 31), the splash screen is controlled by the system.
-             To "hide" the icon, we can set it to a transparent color. -->
         <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
         <item name="android:windowSplashScreenBackground">@android:color/white</item>
+        <!-- This disables the native splash screen entirely on Android 12+ -->
+        <item name="android:windowDisablePreview">true</item>
     </style>
 
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">

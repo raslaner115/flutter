@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:untitled1/language_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -12,7 +13,8 @@ import 'package:untitled1/pages/edit_profile.dart';
 import 'package:untitled1/pages/sighn_in.dart';
 import 'package:untitled1/pages/schedule.dart';
 import 'package:untitled1/pages/average_prices.dart';
-import 'package:untitled1/pages/complete_worker_profile.dart';
+import 'package:untitled1/pages/settings.dart';
+import 'package:untitled1/pages/subscription.dart';
 
 class profile extends StatefulWidget {
   final String? userId; 
@@ -26,6 +28,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final ImagePicker _picker = ImagePicker();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   
   String _userName = "";
   String _bio = "";
@@ -46,6 +49,11 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) {
+        setState(() {});
+      }
+    });
     _fetchUserData();
   }
 
@@ -66,40 +74,32 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
     }
 
     try {
-      final DatabaseReference dbRef = FirebaseDatabase.instanceFor(
-        app: FirebaseAuth.instance.app,
-        databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-      ).ref();
-      
-      final userSnapshot = await dbRef.child('users').child(targetUid).get();
-      if (userSnapshot.exists && mounted) {
-        final dynamic userDataValue = userSnapshot.value;
-        if (userDataValue is Map) {
-          final data = Map<String, dynamic>.from(userDataValue);
-          setState(() {
-            _userName = data['name']?.toString() ?? "";
-            _bio = data['description']?.toString() ?? "";
-            _phoneNumber = data['phone']?.toString() ?? "";
-            _altPhoneNumber = data['optionalPhone']?.toString() ?? "";
-            _email = data['email']?.toString() ?? "";
-            _town = data['town']?.toString() ?? "";
-            _profileImageUrl = data['profileImageUrl']?.toString() ?? "";
-            _userType = data['userType']?.toString() ?? "normal";
-            
-            if (data['professions'] is List) {
-              _userProfessions = List<String>.from(data['professions']);
-            } else if (data['profession'] != null) {
-              _userProfessions = [data['profession'].toString()];
-            } else {
-              _userProfessions = [];
-            }
-          });
+      final userDoc = await _firestore.collection('users').doc(targetUid).get();
+      if (userDoc.exists && mounted) {
+        final data = userDoc.data()!;
+        setState(() {
+          _userName = data['name']?.toString() ?? "";
+          _bio = data['description']?.toString() ?? "";
+          _phoneNumber = data['phone']?.toString() ?? "";
+          _altPhoneNumber = data['optionalPhone']?.toString() ?? "";
+          _email = data['email']?.toString() ?? "";
+          _town = data['town']?.toString() ?? "";
+          _profileImageUrl = data['profileImageUrl']?.toString() ?? "";
+          _userType = data['userType']?.toString() ?? "normal";
+          
+          if (data['professions'] is List) {
+            _userProfessions = List<String>.from(data['professions']);
+          } else if (data['profession'] != null) {
+            _userProfessions = [data['profession'].toString()];
+          } else {
+            _userProfessions = [];
+          }
+        });
 
-          _userReviews = _processDataList(data['reviews']);
-          _projects = _processDataList(data['projects']);
+        _userReviews = await _fetchSubcollection(targetUid, 'reviews');
+        _projects = await _fetchSubcollection(targetUid, 'projects');
 
-          if (mounted) setState(() => _isLoading = false);
-        }
+        if (mounted) setState(() => _isLoading = false);
       } else {
         if (mounted) setState(() => _isLoading = false);
       }
@@ -109,28 +109,13 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
     }
   }
 
-  List<Map<String, dynamic>> _processDataList(dynamic source) {
-    List<Map<String, dynamic>> results = [];
-    if (source != null) {
-      if (source is Map) {
-        source.forEach((key, value) {
-          if (value is Map) {
-            final Map<String, dynamic> itemMap = Map<String, dynamic>.from(value);
-            itemMap['id'] = key.toString();
-            results.add(itemMap);
-          }
-        });
-      } else if (source is List) {
-        for (int i = 0; i < source.length; i++) {
-          if (source[i] != null && source[i] is Map) {
-            final Map<String, dynamic> itemMap = Map<String, dynamic>.from(source[i]);
-            itemMap['id'] = i.toString();
-            results.add(itemMap);
-          }
-        }
-      }
-    }
-    return results;
+  Future<List<Map<String, dynamic>>> _fetchSubcollection(String uid, String collectionName) async {
+    final snapshot = await _firestore.collection('users').doc(uid).collection(collectionName).get();
+    return snapshot.docs.map((doc) {
+      final data = Map<String, dynamic>.from(doc.data());
+      data['id'] = doc.id;
+      return data;
+    }).toList();
   }
 
   @override
@@ -171,6 +156,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           'price_guide': 'מחירון מומלץ',
           'report': 'דווח',
           'add_review': 'הוסף ביקורת',
+          'edit_review': 'ערוך ביקורת',
           'report_success': 'הדיווח נשלח בהצלחה',
           'please_login': 'אנא התחבר כדי לצפות בפרופיל שלך',
           'upgrade_pro': 'שדרוג לבעל מקצוע',
@@ -181,6 +167,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           'delete_project': 'מחיקת פרויקט',
           'confirm_delete': 'האם אתה בטוח שברצונך למחוק פרויקט זה?',
           'delete': 'מחק',
+          'settings': 'הגדרות',
         };
       default:
         return {
@@ -215,6 +202,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           'price_guide': 'Price Guide',
           'report': 'Report',
           'add_review': 'Add Review',
+          'edit_review': 'Edit Review',
           'report_success': 'Report sent successfully',
           'please_login': 'Please log in to view your profile',
           'error': 'Upload Error',
@@ -223,6 +211,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           'write_on_image': 'Write on image (Optional)',
           'delete_project_title': 'Delete Project',
           'confirm_delete': 'Are you sure you want to delete this project?',
+          'settings': 'Settings',
         };
     }
   }
@@ -298,15 +287,10 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
       await storageRef.putFile(File(pickedFile.path));
       final downloadUrl = await storageRef.getDownloadURL();
 
-      final dbRef = FirebaseDatabase.instanceFor(
-        app: FirebaseAuth.instance.app,
-        databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-      ).ref();
-
-      await dbRef.child('users').child(user.uid).child('projects').push().set({
+      await _firestore.collection('users').doc(user.uid).collection('projects').add({
         'imageUrl': downloadUrl,
         'description': descriptionController.text.trim(),
-        'timestamp': ServerValue.timestamp,
+        'timestamp': FieldValue.serverTimestamp(),
       });
 
       await _fetchUserData();
@@ -334,8 +318,12 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
             onPressed: () async {
               final targetUid = widget.userId;
               if (targetUid == null) return;
-              await FirebaseDatabase.instanceFor(app: FirebaseAuth.instance.app, databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com').ref()
-                  .child('reports').push().set({'reporterId': FirebaseAuth.instance.currentUser!.uid, 'reportedId': targetUid, 'reason': reasonController.text, 'timestamp': ServerValue.timestamp});
+              await _firestore.collection('reports').add({
+                'reporterId': FirebaseAuth.instance.currentUser!.uid,
+                'reportedId': targetUid,
+                'reason': reasonController.text,
+                'timestamp': FieldValue.serverTimestamp(),
+              });
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['report_success']!)));
             },
@@ -346,15 +334,17 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
     );
   }
 
-  Future<void> _showReviewDialog(Map<String, String> strings) async {
+  Future<void> _showReviewDialog(Map<String, String> strings, {Map<String, dynamic>? existingReview}) async {
     if (_isGuest()) { _showGuestDialog(context, strings); return; }
-    double selectedStars = 5;
-    final commentController = TextEditingController();
+    
+    double selectedStars = existingReview != null ? (existingReview['stars'] as num).toDouble() : 5.0;
+    final commentController = TextEditingController(text: existingReview != null ? existingReview['comment'] : "");
+    
     await showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text(strings['rating_title']!),
+          title: Text(existingReview != null ? strings['edit_review']! : strings['rating_title']!),
           content: Column(mainAxisSize: MainAxisSize.min, children: [
             Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(5, (i) => IconButton(icon: Icon(i < selectedStars ? Icons.star : Icons.star_border, color: Colors.amber), onPressed: () => setDialogState(() => selectedStars = i + 1.0)))),
             TextField(controller: commentController, decoration: InputDecoration(hintText: strings['rating_hint']), maxLines: 3),
@@ -366,15 +356,33 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
                 final targetUid = widget.userId;
                 if (targetUid == null) return;
                 
-                String authorName = FirebaseAuth.instance.currentUser!.displayName ?? "User";
+                final currentUser = FirebaseAuth.instance.currentUser!;
+                String authorName = currentUser.displayName ?? "User";
                 if (authorName == "User") {
-                   final nameSnap = await FirebaseDatabase.instanceFor(app: FirebaseAuth.instance.app, databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com').ref()
-                      .child('users').child(FirebaseAuth.instance.currentUser!.uid).child('name').get();
-                   if (nameSnap.exists) authorName = nameSnap.value.toString();
+                   final userDoc = await _firestore.collection('users').doc(currentUser.uid).get();
+                   if (userDoc.exists) authorName = userDoc.data()?['name'] ?? "User";
                 }
 
-                await FirebaseDatabase.instanceFor(app: FirebaseAuth.instance.app, databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com').ref()
-                    .child('users').child(targetUid).child('reviews').push().set({'userId': FirebaseAuth.instance.currentUser!.uid, 'userName': authorName, 'stars': selectedStars, 'comment': commentController.text, 'timestamp': ServerValue.timestamp});
+                final reviewData = {
+                  'userId': currentUser.uid,
+                  'userName': authorName,
+                  'stars': selectedStars,
+                  'comment': commentController.text,
+                  'timestamp': FieldValue.serverTimestamp(),
+                };
+
+                if (existingReview != null) {
+                  // Update existing review
+                  await _firestore.collection('users').doc(targetUid).collection('reviews').doc(existingReview['id']).update(reviewData);
+                } else {
+                  // Check again if review exists to prevent duplicates
+                  final existing = await _firestore.collection('users').doc(targetUid).collection('reviews').where('userId', isEqualTo: currentUser.uid).get();
+                  if (existing.docs.isNotEmpty) {
+                    await existing.docs.first.reference.update(reviewData);
+                  } else {
+                    await _firestore.collection('users').doc(targetUid).collection('reviews').add(reviewData);
+                  }
+                }
 
                 Navigator.pop(context);
                 _fetchUserData();
@@ -400,10 +408,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           userId: targetUid,
           localizedStrings: strings,
           onDelete: _isOwnProfile ? () async {
-            await FirebaseDatabase.instanceFor(
-              app: FirebaseAuth.instance.app,
-              databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-            ).ref().child('users').child(targetUid).child('projects').child(project['id']).remove();
+            await _firestore.collection('users').doc(targetUid).collection('projects').doc(project['id']).delete();
             _fetchUserData();
           } : null,
         ),
@@ -435,11 +440,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
       setState(() => _isLoading = true);
       try {
         final targetUid = FirebaseAuth.instance.currentUser!.uid;
-        await FirebaseDatabase.instanceFor(
-          app: FirebaseAuth.instance.app,
-          databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-        ).ref().child('users').child(targetUid).child('projects').child(project['id']).remove();
-        
+        await _firestore.collection('users').doc(targetUid).collection('projects').doc(project['id']).delete();
         await _fetchUserData();
       } catch (e) {
         debugPrint("DELETE ERROR: $e");
@@ -468,12 +469,18 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
       );
     }
 
+    final currentUser = FirebaseAuth.instance.currentUser;
+    final existingReview = _userReviews.cast<Map<String, dynamic>?>().firstWhere(
+      (r) => r != null && r['userId'] == currentUser?.uid,
+      orElse: () => null,
+    );
+
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         key: _scaffoldKey,
-        body: DefaultTabController(
-          length: 4,
+        body: RefreshIndicator(
+          onRefresh: _fetchUserData,
           child: NestedScrollView(
             headerSliverBuilder: (context, innerBoxIsScrolled) => [
               SliverAppBar(
@@ -482,26 +489,45 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
                   IconButton(icon: const Icon(Icons.share_outlined), onPressed: () => _shareProfile(strings)),
                   if (!_isOwnProfile) IconButton(icon: const Icon(Icons.report_problem_outlined, color: Colors.white70), onPressed: () => _reportUser(strings)),
                   if (_isOwnProfile && !_isGuest())
-                    IconButton(icon: const Icon(Icons.settings_outlined), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EditProfilePage(userData: {'name': _userName, 'bio': _bio, 'phone': _phoneNumber, 'town': _town}))))
+                    IconButton(icon: const Icon(Icons.settings_outlined), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())))
                 ],
                 flexibleSpace: FlexibleSpaceBar(
                   background: Stack(fit: StackFit.expand, children: [
                     _profileImageUrl.isNotEmpty ? Image.network(_profileImageUrl, fit: BoxFit.cover) : Container(color: const Color(0xFF1E3A8A), child: const Icon(Icons.person, size: 100, color: Colors.white24)),
-                    Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black.withOpacity(0.8)]))),
+                    Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black.withValues(alpha: 0.8)]))),
                     Positioned(bottom: 60, left: 20, right: 20, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Row(children: [Text(_userName, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)), if (_userType == 'worker') const Padding(padding: EdgeInsets.only(left: 8), child: Icon(Icons.verified, color: Colors.blue, size: 20))]),
-                      if (_userProfessions.isNotEmpty) Text(_userProfessions.join(', '), style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 16)),
+                      if (_userProfessions.isNotEmpty) Text(_userProfessions.join(', '), style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 16)),
                       Row(children: [const Icon(Icons.location_on, color: Colors.white70, size: 16), Text(_town, style: const TextStyle(color: Colors.white70, fontSize: 14))]),
                     ])),
                   ]),
                 ),
               ),
-              SliverPersistentHeader(pinned: true, delegate: _SliverAppBarDelegate(TabBar(labelColor: const Color(0xFF1976D2), unselectedLabelColor: Colors.grey, indicatorColor: const Color(0xFF1976D2), tabs: [Tab(text: strings['projects']), Tab(text: strings['schedule']), Tab(text: strings['reviews']), Tab(text: strings['about'])]))),
+              SliverPersistentHeader(
+                pinned: true, 
+                delegate: _SliverAppBarDelegate(
+                  TabBar(
+                    controller: _tabController,
+                    labelColor: const Color(0xFF1976D2), 
+                    unselectedLabelColor: Colors.grey, 
+                    indicatorColor: const Color(0xFF1976D2), 
+                    tabs: [Tab(text: strings['projects']), Tab(text: strings['schedule']), Tab(text: strings['reviews']), Tab(text: strings['about'])]
+                  )
+                )
+              ),
             ],
-            body: TabBarView(children: [_buildProjectsGrid(strings), SchedulePage(workerId: widget.userId ?? FirebaseAuth.instance.currentUser?.uid ?? "", workerName: _userName), _buildReviewsTab(strings), _buildAboutTab(strings)]),
+            body: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildProjectsGrid(strings), 
+                SchedulePage(workerId: widget.userId ?? FirebaseAuth.instance.currentUser?.uid ?? "", workerName: _userName), 
+                _buildReviewsTab(strings, existingReview), 
+                _buildAboutTab(strings)
+              ]
+            ),
           ),
         ),
-        bottomNavigationBar: _buildBottomAction(strings),
+        bottomNavigationBar: (_tabController.index == 1 || (_isOwnProfile && _userType != 'normal')) ? null : _buildBottomAction(strings, existingReview),
       ),
     );
   }
@@ -524,12 +550,28 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
     );
   }
 
-  Widget _buildReviewsTab(Map<String, String> strings) {
+  Widget _buildReviewsTab(Map<String, String> strings, Map<String, dynamic>? existingReview) {
     if (_userReviews.isEmpty) return Center(child: Text(strings['no_reviews']!));
-    return ListView.builder(padding: const EdgeInsets.all(16), itemCount: _userReviews.length, itemBuilder: (context, index) {
-      final r = _userReviews[index];
-      return Card(margin: const EdgeInsets.only(bottom: 12), child: ListTile(title: Text(r['userName'] ?? "User"), subtitle: Text(r['comment'] ?? ""), trailing: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.star, color: Colors.amber, size: 16), Text("${r['stars']}")])));
-    });
+    return ListView.builder(
+      padding: const EdgeInsets.all(16), 
+      itemCount: _userReviews.length, 
+      itemBuilder: (context, index) {
+        final r = _userReviews[index];
+        final bool isMyReview = r['userId'] == FirebaseAuth.instance.currentUser?.uid;
+        
+        return GestureDetector(
+          onTap: isMyReview ? () => _showReviewDialog(strings, existingReview: existingReview) : null,
+          child: Card(
+            margin: const EdgeInsets.only(bottom: 12), 
+            child: ListTile(
+              title: Text(r['userName'] ?? "User"), 
+              subtitle: Text(r['comment'] ?? ""), 
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.star, color: Colors.amber, size: 16), Text("${r['stars']}")]),
+            ),
+          ),
+        );
+      }
+    );
   }
 
   Widget _buildAboutTab(Map<String, String> strings) {
@@ -543,16 +585,57 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
     ]));
   }
 
-  Widget _buildBottomAction(Map<String, String> strings) {
+  Widget _buildBottomAction(Map<String, String> strings, Map<String, dynamic>? existingReview) {
     if (_isOwnProfile && _userType == 'normal' && !_isGuest()) {
       return Container(
-        padding: const EdgeInsets.all(16),
-        color: Colors.white,
-        child: ElevatedButton.icon(
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CompleteWorkerProfilePage())),
-          icon: const Icon(Icons.upgrade_rounded, color: Colors.white),
-          label: Text(strings['upgrade_pro']!),
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.orange[800], minimumSize: const Size(double.infinity, 50)),
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, -5),
+            ),
+          ],
+        ),
+        child: InkWell(
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SubscriptionPage(email: _email))),
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            height: 56,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFF59E0B).withOpacity(0.3),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.stars_rounded, color: Colors.white, size: 24),
+                const SizedBox(width: 12),
+                Text(
+                  strings['upgrade_pro']!,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       );
     }
@@ -560,19 +643,93 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
     if (_isOwnProfile) return const SizedBox.shrink();
 
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))]),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Row(children: [
-          Expanded(child: ElevatedButton.icon(onPressed: () { if (_isGuest()) _showGuestDialog(context, strings); else launchUrl(Uri.parse("tel:$_phoneNumber")); }, icon: const Icon(Icons.call, color: Colors.white), label: Text(strings['call']!), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF16A34A)))),
-          const SizedBox(width: 12),
-          Expanded(child: ElevatedButton.icon(onPressed: () { if (_isGuest()) _showGuestDialog(context, strings); else launchUrl(Uri.parse("sms:$_phoneNumber")); }, icon: const Icon(Icons.message, color: Colors.white), label: Text(strings['message']!), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1976D2)))),
-        ]),
-        if (_userType == 'worker') ...[
-          const SizedBox(height: 12),
-          SizedBox(width: double.infinity, child: ElevatedButton.icon(onPressed: () => _showReviewDialog(strings), icon: const Icon(Icons.rate_review, color: Colors.white), label: Text(strings['add_review']!), style: ElevatedButton.styleFrom(backgroundColor: Colors.amber[700]))),
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 15,
+            offset: const Offset(0, -5),
+          ),
         ],
-      ]),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _buildActionBtn(
+                  onTap: () {
+                    if (_isGuest()) _showGuestDialog(context, strings);
+                    else launchUrl(Uri.parse("tel:$_phoneNumber"));
+                  },
+                  icon: Icons.phone_rounded,
+                  label: strings['call']!,
+                  color: const Color(0xFF16A34A),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildActionBtn(
+                  onTap: () {
+                    if (_isGuest()) _showGuestDialog(context, strings);
+                    else launchUrl(Uri.parse("sms:$_phoneNumber"));
+                  },
+                  icon: Icons.chat_bubble_rounded,
+                  label: strings['message']!,
+                  color: const Color(0xFF1976D2),
+                ),
+              ),
+            ],
+          ),
+          if (_userType == 'worker') ...[
+            const SizedBox(height: 12),
+            _buildActionBtn(
+              onTap: () => _showReviewDialog(strings, existingReview: existingReview),
+              icon: existingReview != null ? Icons.edit_note_rounded : Icons.star_rate_rounded,
+              label: existingReview != null ? strings['edit_review']! : strings['add_review']!,
+              color: const Color(0xFFF59E0B),
+              isFullWidth: true,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionBtn({
+    required VoidCallback onTap,
+    required IconData icon,
+    required String label,
+    required Color color,
+    bool isFullWidth = false,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        height: 52,
+        width: isFullWidth ? double.infinity : null,
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.3), width: 1.5),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -584,12 +741,12 @@ class ProjectDetailPage extends StatefulWidget {
   final VoidCallback? onDelete;
 
   const ProjectDetailPage({
-    Key? key,
+    super.key,
     required this.project,
     required this.userId,
     required this.localizedStrings,
     this.onDelete,
-  }) : super(key: key);
+  });
 
   @override
   State<ProjectDetailPage> createState() => _ProjectDetailPageState();
@@ -597,11 +754,9 @@ class ProjectDetailPage extends StatefulWidget {
 
 class _ProjectDetailPageState extends State<ProjectDetailPage> {
   final TextEditingController _commentController = TextEditingController();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   List<Map<String, dynamic>> _comments = [];
-  final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
-    app: FirebaseAuth.instance.app,
-    databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-  ).ref();
+  StreamSubscription? _commentsSubscription;
 
   @override
   void initState() {
@@ -609,20 +764,27 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     _listenToComments();
   }
 
+  @override
+  void dispose() {
+    _commentsSubscription?.cancel();
+    _commentController.dispose();
+    super.dispose();
+  }
+
   void _listenToComments() {
-    _dbRef.child('users').child(widget.userId).child('projects').child(widget.project['id']).child('comments').onValue.listen((event) {
-      final dynamic data = event.snapshot.value;
-      List<Map<String, dynamic>> loaded = [];
-      if (data != null && data is Map) {
-        data.forEach((key, value) {
-          if (value is Map) {
-            final comment = Map<String, dynamic>.from(value);
-            comment['id'] = key;
-            loaded.add(comment);
-          }
-        });
-        loaded.sort((a, b) => (b['timestamp'] ?? 0).compareTo(a['timestamp'] ?? 0));
-      }
+    _commentsSubscription = _firestore.collection('users')
+        .doc(widget.userId)
+        .collection('projects')
+        .doc(widget.project['id'])
+        .collection('comments')
+        .orderBy('timestamp', descending: true)
+        .snapshots()
+        .listen((snapshot) {
+      final loaded = snapshot.docs.map((doc) {
+        final data = Map<String, dynamic>.from(doc.data());
+        data['id'] = doc.id;
+        return data;
+      }).toList();
       if (mounted) setState(() => _comments = loaded);
     });
   }
@@ -634,15 +796,20 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
 
     String authorName = user.displayName ?? "User";
     if (authorName == "User") {
-      final nameSnap = await _dbRef.child('users').child(user.uid).child('name').get();
-      if (nameSnap.exists) authorName = nameSnap.value.toString();
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      if (userDoc.exists) authorName = userDoc.data()?['name'] ?? "User";
     }
 
-    await _dbRef.child('users').child(widget.userId).child('projects').child(widget.project['id']).child('comments').push().set({
+    await _firestore.collection('users')
+        .doc(widget.userId)
+        .collection('projects')
+        .doc(widget.project['id'])
+        .collection('comments')
+        .add({
       'userId': user.uid,
       'userName': authorName,
       'text': _commentController.text.trim(),
-      'timestamp': ServerValue.timestamp,
+      'timestamp': FieldValue.serverTimestamp(),
     });
     _commentController.clear();
   }

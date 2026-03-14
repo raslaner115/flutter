@@ -1,6 +1,11 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:untitled1/language_provider.dart';
 
@@ -15,27 +20,87 @@ class EditProfilePage extends StatefulWidget {
 class _EditProfilePageState extends State<EditProfilePage> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
-  late TextEditingController _bioController;
+  late TextEditingController _emailController;
   late TextEditingController _phoneController;
-  late TextEditingController _townController;
+  late TextEditingController _altPhoneController;
+  late TextEditingController _descriptionController;
+  TextEditingController? _professionsSearchController;
+  
+  String? _selectedTown;
+  List<String> _selectedProfessions = [];
+  File? _image;
   bool _isLoading = false;
+  final ImagePicker _picker = ImagePicker();
+  List<String> _israeliTowns = [];
+  
+  final List<String> _allProfessions = [
+    'Plumber', 'Carpenter', 'Electrician', 'Painter', 'Cleaner', 'Handyman',
+    'Landscaper', 'HVAC', 'Locksmith', 'Gardener', 'Mechanic', 'Photographer',
+    'Tutor', 'Tailor', 'Mover', 'Interior Designer', 'Beautician', 'Pet Groomer',
+    'Welder', 'Roofer', 'Flooring Expert', 'AC Technician', 'Pest Control'
+  ];
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.userData['name']);
-    _bioController = TextEditingController(text: widget.userData['bio']);
+    _emailController = TextEditingController(text: widget.userData['email']);
     _phoneController = TextEditingController(text: widget.userData['phone']);
-    _townController = TextEditingController(text: widget.userData['town']);
+    _altPhoneController = TextEditingController(text: widget.userData['optionalPhone']);
+    _descriptionController = TextEditingController(text: widget.userData['description'] ?? widget.userData['bio']);
+    _selectedTown = widget.userData['town'];
+    _selectedProfessions = List<String>.from(widget.userData['professions'] ?? []);
+    _loadCities();
+  }
+
+  Future<void> _loadCities() async {
+    try {
+      final String response = await rootBundle.loadString('assets/cities.json');
+      final Map<String, dynamic> data = json.decode(response);
+      final List citiesList = data['cities']['city'];
+      
+      final locale = Provider.of<LanguageProvider>(context, listen: false).locale.languageCode;
+      
+      setState(() {
+        _israeliTowns = citiesList.map((c) {
+          try {
+            final englishList = c['english_name'] as List?;
+            final hebrewList = c['hebrew_name'] as List?;
+            
+            final english = (englishList != null && englishList.isNotEmpty) 
+                ? englishList.first.toString().trim() : "";
+            final hebrew = (hebrewList != null && hebrewList.isNotEmpty) 
+                ? hebrewList.first.toString().trim() : "";
+            
+            if (locale == 'he') {
+              return hebrew.isNotEmpty ? hebrew : english;
+            }
+            return english.isNotEmpty ? english : hebrew;
+          } catch (e) {
+            return null;
+          }
+        }).whereType<String>().where((s) => s.isNotEmpty).toSet().toList();
+        
+        _israeliTowns.sort();
+      });
+    } catch (e) {
+      debugPrint("Error loading cities: $e");
+    }
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _bioController.dispose();
+    _emailController.dispose();
     _phoneController.dispose();
-    _townController.dispose();
+    _altPhoneController.dispose();
+    _descriptionController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickImage() async {
+    final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
+    if (picked != null) setState(() => _image = File(picked.path));
   }
 
   Future<void> _saveProfile() async {
@@ -46,26 +111,33 @@ class _EditProfilePageState extends State<EditProfilePage> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      final dbRef = FirebaseDatabase.instanceFor(
-        app: FirebaseAuth.instance.app,
-        databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-      ).ref();
-
-      await dbRef.child('users').child(user.uid).update({
-        'name': _nameController.text.trim(),
-        'description': _bioController.text.trim(),
-        'phone': _phoneController.text.trim(),
-        'town': _townController.text.trim(),
-      });
-
-      if (mounted) {
-        Navigator.pop(context, true);
+      String? imageUrl;
+      if (_image != null) {
+        final ref = FirebaseStorage.instance.ref().child('profile_pictures/${user.uid}.jpg');
+        await ref.putFile(_image!);
+        imageUrl = await ref.getDownloadURL();
       }
+
+      final updateData = {
+        'name': _nameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'town': _selectedTown,
+        'optionalPhone': _altPhoneController.text.trim(),
+        'description': _descriptionController.text.trim(),
+        'professions': _selectedProfessions,
+      };
+
+      if (imageUrl != null) {
+        updateData['profileImageUrl'] = imageUrl;
+      }
+
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).update(updateData);
+      await user.updateDisplayName(_nameController.text.trim());
+
+      if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving profile: $e')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error saving profile: $e')));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -79,28 +151,29 @@ class _EditProfilePageState extends State<EditProfilePage> {
         return {
           'title': 'עריכת פרופיל',
           'name': 'שם מלא',
-          'bio': 'תיאור',
+          'email': 'אימייל',
           'phone': 'מספר טלפון',
-          'town': 'עיר',
+          'town': 'בחר עיר',
+          'professions': 'בחר מקצועות',
+          'alt_phone': 'טלפון נוסף (אופציונלי)',
+          'desc': 'ספר על עצמך (אופציונלי)',
           'save': 'שמור שינויים',
-        };
-      case 'ar':
-        return {
-          'title': 'تعديل الملف الشخصي',
-          'name': 'الاسم الكامل',
-          'bio': 'الوصف',
-          'phone': 'رقم الهاتف',
-          'town': 'المدينة',
-          'save': 'حفظ التغييرات',
+          'req': 'שדה חובה',
+          'search': 'חפש...',
         };
       default:
         return {
           'title': 'Edit Profile',
           'name': 'Full Name',
-          'bio': 'Bio',
+          'email': 'Email',
           'phone': 'Phone Number',
-          'town': 'Town',
+          'town': 'Select City',
+          'professions': 'Select Professions',
+          'alt_phone': 'Alt Phone (Optional)',
+          'desc': 'Description (Optional)',
           'save': 'Save Changes',
+          'req': 'Required',
+          'search': 'Search...',
         };
     }
   }
@@ -108,61 +181,327 @@ class _EditProfilePageState extends State<EditProfilePage> {
   @override
   Widget build(BuildContext context) {
     final strings = _getLocalizedStrings();
-    final theme = Theme.of(context);
+    final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
+    final isRtl = locale == 'he' || locale == 'ar';
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(strings['title']!),
+    return Directionality(
+      textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
         backgroundColor: Colors.white,
-        elevation: 0,
-        foregroundColor: Colors.black,
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: Form(
-                key: _formKey,
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : SingleChildScrollView(
                 child: Column(
                   children: [
-                    TextFormField(
-                      controller: _nameController,
-                      decoration: InputDecoration(labelText: strings['name']),
-                      validator: (v) => v!.isEmpty ? 'Required' : null,
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _phoneController,
-                      decoration: InputDecoration(labelText: strings['phone']),
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _townController,
-                      decoration: InputDecoration(labelText: strings['town']),
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _bioController,
-                      decoration: InputDecoration(labelText: strings['bio']),
-                      maxLines: 3,
-                    ),
-                    const SizedBox(height: 32),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _saveProfile,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: theme.colorScheme.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                    _buildHeader(strings),
+                    Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          children: [
+                            _buildImagePicker(),
+                            const SizedBox(height: 32),
+                            _buildStyledTextField(
+                              controller: _nameController,
+                              labelText: strings['name']!,
+                              icon: Icons.person_outline,
+                              validator: (v) => v!.isEmpty ? strings['req'] : null,
+                            ),
+                            const SizedBox(height: 16),
+                            _buildStyledTextField(
+                              controller: _emailController,
+                              labelText: strings['email']!,
+                              icon: Icons.email_outlined,
+                              keyboardType: TextInputType.emailAddress,
+                            ),
+                            const SizedBox(height: 16),
+                            _buildSearchableAutocomplete(
+                              options: _israeliTowns,
+                              labelText: strings['town']!,
+                              icon: Icons.location_on_outlined,
+                              onSelected: (val) => setState(() => _selectedTown = val),
+                              initialValue: _selectedTown,
+                              strings: strings,
+                            ),
+                            const SizedBox(height: 16),
+                            _buildStyledTextField(
+                              controller: _phoneController,
+                              labelText: strings['phone']!,
+                              icon: Icons.phone_android_outlined,
+                              keyboardType: TextInputType.phone,
+                              enabled: false, // Remove changing number
+                            ),
+                            const SizedBox(height: 16),
+                            if (widget.userData['userType'] == 'worker') ...[
+                              _buildMultiSelectProfessions(strings),
+                              const SizedBox(height: 16),
+                              _buildStyledTextField(
+                                controller: _altPhoneController,
+                                labelText: strings['alt_phone']!,
+                                icon: Icons.phone_android_outlined,
+                                keyboardType: TextInputType.phone,
+                              ),
+                              const SizedBox(height: 16),
+                            ],
+                            _buildStyledTextField(
+                              controller: _descriptionController,
+                              labelText: strings['desc']!,
+                              icon: Icons.description_outlined,
+                              maxLines: 3,
+                            ),
+                            const SizedBox(height: 32),
+                            _buildSaveButton(strings),
+                            const SizedBox(height: 40),
+                          ],
                         ),
-                        child: Text(strings['save']!),
                       ),
                     ),
                   ],
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(Map<String, String> strings) {
+    return Container(
+      height: 180,
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(colors: [Color(0xFF1E3A8A), Color(0xFF1976D2)]),
+        borderRadius: BorderRadius.only(bottomLeft: Radius.circular(80)),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: 40,
+            left: 10,
+            child: IconButton(
+              icon: const Icon(Icons.arrow_back, color: Colors.white),
+              onPressed: () => Navigator.pop(context),
             ),
+          ),
+          Center(
+            child: Text(
+              strings['title']!,
+              style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImagePicker() {
+    return GestureDetector(
+      onTap: _pickImage,
+      child: Stack(
+        children: [
+          CircleAvatar(
+            radius: 60,
+            backgroundColor: const Color(0xFFF1F5F9),
+            backgroundImage: _image != null 
+                ? FileImage(_image!) 
+                : (widget.userData['profileImageUrl'] != null && widget.userData['profileImageUrl'].isNotEmpty
+                    ? NetworkImage(widget.userData['profileImageUrl']) 
+                    : null) as ImageProvider?,
+            child: _image == null && (widget.userData['profileImageUrl'] == null || widget.userData['profileImageUrl'].isEmpty)
+                ? Icon(Icons.person_rounded, size: 60, color: Colors.grey[400]) 
+                : null,
+          ),
+          Positioned(
+            bottom: 0, 
+            right: 0, 
+            child: Container(
+              padding: const EdgeInsets.all(8), 
+              decoration: const BoxDecoration(color: Color(0xFF1976D2), shape: BoxShape.circle), 
+              child: const Icon(Icons.camera_alt, color: Colors.white, size: 20)
+            )
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStyledTextField({
+    required TextEditingController controller,
+    required String labelText,
+    required IconData icon,
+    TextInputType? keyboardType,
+    int maxLines = 1,
+    String? Function(String?)? validator,
+    FocusNode? focusNode,
+    String? hintText,
+    bool enabled = true,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      maxLines: maxLines,
+      enabled: enabled,
+      focusNode: focusNode,
+      decoration: InputDecoration(
+        labelText: labelText,
+        hintText: hintText,
+        prefixIcon: Icon(icon, color: const Color(0xFF1976D2)),
+        filled: true,
+        fillColor: enabled ? const Color(0xFFF8FAFC) : const Color(0xFFE2E8F0),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      ),
+      validator: validator,
+    );
+  }
+
+  Widget _buildSearchableAutocomplete({
+    required List<String> options,
+    required String labelText,
+    required IconData icon,
+    required Function(String) onSelected,
+    String? initialValue,
+    required Map<String, String> strings,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) => Autocomplete<String>(
+        initialValue: TextEditingValue(text: initialValue ?? ''),
+        optionsBuilder: (TextEditingValue textEditingValue) {
+          if (textEditingValue.text.isEmpty) {
+            return options;
+          }
+          return options.where((String option) {
+            return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
+          });
+        },
+        onSelected: onSelected,
+        optionsViewBuilder: (context, onSelected, options) {
+          return Align(
+            alignment: Alignment.topLeft,
+            child: Material(
+              elevation: 4,
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: constraints.maxWidth,
+                height: 250,
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(8.0),
+                  itemCount: options.length,
+                  itemBuilder: (BuildContext context, int index) {
+                    final String option = options.elementAt(index);
+                    return ListTile(
+                      title: Text(option),
+                      onTap: () => onSelected(option),
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+        fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+          return _buildStyledTextField(
+            controller: controller,
+            labelText: labelText,
+            icon: icon,
+            focusNode: focusNode,
+            validator: (v) => v!.isEmpty ? strings['req'] : null,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildMultiSelectProfessions(Map<String, String> strings) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) => Autocomplete<String>(
+            optionsBuilder: (TextEditingValue textEditingValue) {
+              if (textEditingValue.text.isEmpty) {
+                return _allProfessions;
+              }
+              return _allProfessions.where((String option) {
+                return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
+              });
+            },
+            onSelected: (String selection) {
+              setState(() {
+                if (!_selectedProfessions.contains(selection)) {
+                  _selectedProfessions.add(selection);
+                }
+              });
+              _professionsSearchController?.clear();
+            },
+            optionsViewBuilder: (context, onSelected, options) {
+              return Align(
+                alignment: Alignment.topLeft,
+                child: Material(
+                  elevation: 4,
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    width: constraints.maxWidth,
+                    height: 250,
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(8.0),
+                      itemCount: options.length,
+                      itemBuilder: (BuildContext context, int index) {
+                        final String option = options.elementAt(index);
+                        return ListTile(
+                          title: Text(option),
+                          onTap: () => onSelected(option),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              );
+            },
+            fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+              _professionsSearchController = controller;
+              return _buildStyledTextField(
+                controller: controller,
+                labelText: strings['professions']!,
+                icon: Icons.work_outline,
+                focusNode: focusNode,
+                hintText: strings['search'],
+              );
+            },
+          ),
+        ),
+        if (_selectedProfessions.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: _selectedProfessions.map((prof) => Chip(
+              label: Text(prof),
+              onDeleted: () {
+                setState(() {
+                  _selectedProfessions.remove(prof);
+                });
+              },
+            )).toList(),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSaveButton(Map<String, String> strings) {
+    return SizedBox(
+      width: double.infinity,
+      height: 55,
+      child: ElevatedButton(
+        onPressed: _saveProfile,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF1976D2), 
+          foregroundColor: Colors.white, 
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          elevation: 2,
+        ),
+        child: Text(strings['save']!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      ),
     );
   }
 }

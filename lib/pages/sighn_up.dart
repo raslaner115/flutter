@@ -1,8 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:untitled1/language_provider.dart';
@@ -36,10 +39,16 @@ class _SignUpPageState extends State<SignUpPage> {
   final _emailController = TextEditingController();
   final _altPhoneController = TextEditingController();
   final _descriptionController = TextEditingController();
+  
+  // Controller to clear the professions search bar after selection
+  TextEditingController? _professionsSearchController;
 
   late SignUpStep _currentStep;
   late UserType _userType;
+  
   String? _selectedTown;
+  List<String> _selectedProfessions = [];
+  
   bool _loading = false;
   bool _agreedToPolicy = false;
   bool _codeSent = false;
@@ -47,17 +56,13 @@ class _SignUpPageState extends State<SignUpPage> {
   File? _image;
   final ImagePicker _picker = ImagePicker();
 
-  List<String> _selectedProfessions = [];
-
-  final List<String> _israeliTowns = [
-    'Jerusalem', 'Tel Aviv', 'Haifa', 'Rishon LeZion', 'Petah Tikva', 'Ashdod',
-    'Netanya', 'Beersheba', 'Holon', 'Bnei Brak', 'Ramat Gan', 'Rehovot',
-  ];
+  List<String> _israeliTowns = [];
 
   final List<String> _allProfessions = [
     'Plumber', 'Carpenter', 'Electrician', 'Painter', 'Cleaner', 'Handyman',
     'Landscaper', 'HVAC', 'Locksmith', 'Gardener', 'Mechanic', 'Photographer',
-    'Tutor', 'Tailor', 'Mover', 'Interior Designer', 'Beautician', 'Pet Groomer'
+    'Tutor', 'Tailor', 'Mover', 'Interior Designer', 'Beautician', 'Pet Groomer',
+    'Welder', 'Roofer', 'Flooring Expert', 'AC Technician', 'Pest Control'
   ];
 
   @override
@@ -74,9 +79,46 @@ class _SignUpPageState extends State<SignUpPage> {
       _selectedProfessions = List<String>.from(widget.pendingWorkerData!['professions'] ?? []);
       _altPhoneController.text = widget.pendingWorkerData!['optionalPhone'] ?? "";
       _descriptionController.text = widget.pendingWorkerData!['description'] ?? "";
-      _agreedToPolicy = true; // Assumed since they reached payment
+      _agreedToPolicy = true; 
     } else {
       _userType = UserType.normal;
+    }
+
+    _loadCities();
+  }
+
+  Future<void> _loadCities() async {
+    try {
+      final String response = await rootBundle.loadString('assets/cities.json');
+      final Map<String, dynamic> data = json.decode(response);
+      final List citiesList = data['cities']['city'];
+      
+      final locale = Provider.of<LanguageProvider>(context, listen: false).locale.languageCode;
+      
+      setState(() {
+        _israeliTowns = citiesList.map((c) {
+          try {
+            final englishList = c['english_name'] as List?;
+            final hebrewList = c['hebrew_name'] as List?;
+            
+            final english = (englishList != null && englishList.isNotEmpty) 
+                ? englishList.first.toString().trim() : "";
+            final hebrew = (hebrewList != null && hebrewList.isNotEmpty) 
+                ? hebrewList.first.toString().trim() : "";
+            
+            if (locale == 'he') {
+              return hebrew.isNotEmpty ? hebrew : english;
+            }
+            return english.isNotEmpty ? english : hebrew;
+          } catch (e) {
+            return null;
+          }
+        }).whereType<String>().where((s) => s.isNotEmpty).toSet().toList();
+        
+        _israeliTowns.sort();
+      });
+    } catch (e) {
+      debugPrint("Error loading cities: $e");
     }
   }
 
@@ -111,13 +153,22 @@ class _SignUpPageState extends State<SignUpPage> {
           'professions': 'בחר מקצועות',
           'alt_phone': 'טלפון נוסף (אופציונלי)',
           'desc_label': 'ספר על עצמך (אופציונלי)',
-          'policy': 'אני מסכים לתנאי השימוש והמדיניות',
+          'agree_prefix': 'אני מסכים ל-',
+          'and': ' ו-',
+          'terms_link': 'תנאי השימוש',
+          'privacy_link': 'מדיניות הפרטיות',
           'finish': 'המשך לאימות טלפון',
           'pay': 'המשך לתשלום מנוי',
           'req': 'שדה חובה',
-          'policy_err': 'עליך להסכים לתנאי השימוש',
+          'policy_err': 'עליך להסכים לתנאים',
           'invalid_phone': 'אנא הכנס מספר טלפון ישראלי תקין (05XXXXXXXX)',
           'error_verify': 'שגיאה באימות הקוד',
+          'search_hint': 'חפש...',
+          'terms_title': 'תנאי שימוש',
+          'terms_content': 'תנאי השימוש:\n\n1. השירות: האפליקציה משמשת כפלטפורמה המקשרת בין משתמשים לבעלי מקצוע. המפעיל אינו צד בעסקה ואינו מספק את השירותים בעצמו.\n2. אחריות: המפעיל אינו אחראי לטיב העבודה, ללוחות הזמנים, למחיר או לכל נזק שייגרם כתוצאה מההתקשרות בין הצדדים.\n3. התנהגות משתמש: הנך מתחייב לספק מידע אמיתי ומדויק. חל איסור על שימוש לרעה במערכת או פרסום תוכן פוגעני.\n4. קניין רוחני: כל הזכויות באפליקציה שמורות למפעיליה.\n5. שינוי תנאים: המפעיל רשאי לעדכן את תנאי השימוש בכל עת.',
+          'privacy_title': 'מדיניות פרטיות',
+          'privacy_content': 'מדיניות פרטיות:\n\n1. איסוף מידע: אנו אוספים פרטי זיהוי (שם, טלפון, אימייל) ונתוני מיקום לצורך תפעול ושיפור השירות.\n2. שימוש במידע: המידע משמש לחיבור בין משתמשים, ניהול חשבונות ושליחת עדכונים רלוונטיים.\n3. שיתוף מידע: פרטי הקשר של בעלי מקצוע מוצגים למשתמשים לצורך התקשרות עסקית בלבד. איננו מוכרים מידע לצד ג\'.\n4. אבטחה: המידע נשמר בטכנולוגיות ענן מאובטחות בתקנים מחמירים.\n5. זכויותיך: הנך רשאי לבקש לעיין במידע, לתקנו או למחוק את חשבונך בכל עת דרך הגדרות האפליקציה.',
+          'close': 'סגור',
         };
       default:
         return {
@@ -129,20 +180,29 @@ class _SignUpPageState extends State<SignUpPage> {
           'enter_code': 'Enter SMS Code',
           'name_label': 'Full Name',
           'email_label': 'Email (Optional)',
-          'town_label': 'Select Town',
+          'town_label': 'Select City',
           'user_type': 'User Type',
           'normal': 'Normal User',
           'pro': 'Professional',
           'professions': 'Select Professions',
           'alt_phone': 'Alt Phone (Optional)',
           'desc_label': 'Description (Optional)',
-          'policy': 'I agree to the Terms and Policy',
+          'agree_prefix': 'I agree to the ',
+          'and': ' and ',
+          'terms_link': 'Terms of Use',
+          'privacy_link': 'Privacy Policy',
           'finish': 'Continue to Phone Verification',
           'pay': 'Proceed to Subscription',
           'req': 'Required',
-          'policy_err': 'You must agree to the policy',
+          'policy_err': 'You must agree to the terms',
           'invalid_phone': 'Please enter a valid Israeli phone number (05XXXXXXXX)',
           'error_verify': 'Error verifying code',
+          'search_hint': 'Search...',
+          'terms_title': 'Terms of Use',
+          'terms_content': 'Terms of Use:\n\n1. Service: This app is a platform connecting users with service professionals. We are not a party to the actual contract between users.\n2. Liability: We are not responsible for the quality, legality, or any outcome of the services provided by professionals.\n3. User Conduct: You must provide accurate information and use the app in a lawful and respectful manner.\n4. Intellectual Property: All content and software are owned by the app operators.\n5. Modifications: We reserve the right to update these terms at any time without prior notice.',
+          'privacy_title': 'Privacy Policy',
+          'privacy_content': 'Privacy Policy:\n\n1. Data Collection: We collect name, phone number, email, and location data to facilitate our services.\n2. Data Usage: Your information is used to enable connections, manage accounts, and improve user experience.\n3. Data Sharing: Professional contact details are visible to users to enable business transactions. We do not sell your data.\n4. Security: We employ industry-standard security measures to protect your personal information.\n5. Your Rights: You can access, update, or request the deletion of your account and personal data at any time via the app settings.',
+          'close': 'Close',
         };
     }
   }
@@ -182,7 +242,7 @@ class _SignUpPageState extends State<SignUpPage> {
         verificationFailed: (e) {
           if (mounted) {
             setState(() => _loading = false);
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message ?? "Verification failed")));
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("SMS failed: ${e.message}")));
           }
         },
         codeSent: (verificationId, resendToken) {
@@ -201,7 +261,7 @@ class _SignUpPageState extends State<SignUpPage> {
     } catch (e) {
       if (mounted) {
         setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Auth Error: $e")));
       }
     }
   }
@@ -234,27 +294,29 @@ class _SignUpPageState extends State<SignUpPage> {
         return;
       }
 
-      final dbRef = FirebaseDatabase.instanceFor(
-          app: FirebaseAuth.instance.app,
-          databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-      ).ref();
-
+      final firestore = FirebaseFirestore.instance;
       String imageUrl = "";
+      String finalName = _nameController.text.trim();
+
       if (_image != null) {
-        final ref = FirebaseStorage.instance.ref().child('profile_pictures/${user.uid}.jpg');
-        await ref.putFile(_image!);
-        imageUrl = await ref.getDownloadURL();
+        try {
+          final ref = FirebaseStorage.instance.ref().child('profile_pictures/${user.uid}.jpg');
+          await ref.putFile(_image!).timeout(const Duration(seconds: 15));
+          imageUrl = await ref.getDownloadURL();
+        } catch (e) {
+          debugPrint("STORAGE ERROR: $e");
+        }
       }
 
       final userData = {
         'uid': user.uid,
-        'name': _nameController.text.trim(),
+        'name': finalName,
         'email': _emailController.text.trim(),
         'phone': _normalizePhone(_phoneController.text.trim()),
         'town': _selectedTown,
         'userType': _userType == UserType.worker ? 'worker' : 'normal',
         'profileImageUrl': imageUrl,
-        'createdAt': ServerValue.timestamp,
+        'createdAt': FieldValue.serverTimestamp(),
         'isAnonymous': user.isAnonymous,
       };
 
@@ -265,14 +327,19 @@ class _SignUpPageState extends State<SignUpPage> {
           'description': _descriptionController.text.trim(),
           'isSubscribed': true,
           'isPro': true,
-          'subscriptionDate': ServerValue.timestamp,
+          'subscriptionDate': FieldValue.serverTimestamp(),
         });
       }
 
-      await dbRef.child('users').child(user.uid).set(userData);
+      await firestore.collection('users').doc(user.uid).set(userData);
+      await user.updateDisplayName(finalName);
       
       if (_userType == UserType.worker) {
-        await dbRef.child('totalUsers').set(ServerValue.increment(1));
+        try {
+          await firestore.collection('metadata').doc('stats').set({
+            'totalWorkers': FieldValue.increment(1)
+          }, SetOptions(merge: true));
+        } catch (_) {} 
       }
 
       if (mounted) {
@@ -285,7 +352,9 @@ class _SignUpPageState extends State<SignUpPage> {
     } catch (e) {
       if (mounted) {
         setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error saving: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Database Error: $e"),
+        ));
       }
     }
   }
@@ -295,9 +364,43 @@ class _SignUpPageState extends State<SignUpPage> {
     if (picked != null) setState(() => _image = File(picked.path));
   }
 
+  void _showPolicyDialog(String title, String content) {
+    final strings = _getLocalizedStrings(context);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1E3A8A))),
+        content: SingleChildScrollView(
+          child: Text(
+            content,
+            style: const TextStyle(fontSize: 14, color: Color(0xFF334155), height: 1.5),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(strings['close']!, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1976D2))),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _submitProfile() {
     if (!_formKey.currentState!.validate()) return;
     final strings = _getLocalizedStrings(context);
+    
+    if (_selectedTown == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['town_label']!)));
+      return;
+    }
+
+    if (_userType == UserType.worker && _selectedProfessions.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['professions']!)));
+      return;
+    }
+
     if (!_agreedToPolicy) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['policy_err']!)));
       return;
@@ -500,19 +603,16 @@ class _SignUpPageState extends State<SignUpPage> {
                   keyboardType: TextInputType.emailAddress,
                 ),
                 const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  value: _selectedTown,
-                  decoration: InputDecoration(
-                    labelText: strings['town_label']!,
-                    prefixIcon: const Icon(Icons.location_on_outlined, color: Color(0xFF1976D2)),
-                    filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-                  ),
-                  items: _israeliTowns.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                  onChanged: (v) => setState(() => _selectedTown = v),
-                  validator: (v) => v == null ? strings['req'] : null,
+                
+                _buildSearchableAutocomplete(
+                  options: _israeliTowns,
+                  labelText: strings['town_label']!,
+                  icon: Icons.location_on_outlined,
+                  onSelected: (val) => setState(() => _selectedTown = val),
+                  initialValue: _selectedTown,
+                  strings: strings,
                 ),
+
                 const SizedBox(height: 24),
                 _buildTypeSelector(strings),
 
@@ -543,7 +643,27 @@ class _SignUpPageState extends State<SignUpPage> {
                       onChanged: (v) => setState(() => _agreedToPolicy = v!),
                       activeColor: const Color(0xFF1976D2),
                     ),
-                    Expanded(child: Text(strings['policy']!, style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)))),
+                    Expanded(
+                      child: RichText(
+                        text: TextSpan(
+                          style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+                          children: [
+                            TextSpan(text: strings['agree_prefix']!),
+                            TextSpan(
+                              text: strings['terms_link']!,
+                              style: const TextStyle(color: Color(0xFF1976D2), decoration: TextDecoration.underline, fontWeight: FontWeight.bold),
+                              recognizer: TapGestureRecognizer()..onTap = () => _showPolicyDialog(strings['terms_title']!, strings['terms_content']!),
+                            ),
+                            TextSpan(text: strings['and']!),
+                            TextSpan(
+                              text: strings['privacy_link']!,
+                              style: const TextStyle(color: Color(0xFF1976D2), decoration: TextDecoration.underline, fontWeight: FontWeight.bold),
+                              recognizer: TapGestureRecognizer()..onTap = () => _showPolicyDialog(strings['privacy_title']!, strings['privacy_content']!),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 32),
@@ -565,35 +685,139 @@ class _SignUpPageState extends State<SignUpPage> {
     );
   }
 
+  Widget _buildSearchableAutocomplete({
+    required List<String> options,
+    required String labelText,
+    required IconData icon,
+    required Function(String) onSelected,
+    String? initialValue,
+    required Map<String, String> strings,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) => Autocomplete<String>(
+        initialValue: TextEditingValue(text: initialValue ?? ''),
+        optionsBuilder: (TextEditingValue textEditingValue) {
+          if (textEditingValue.text.isEmpty) {
+            // Show all options when focused and empty
+            return options;
+          }
+          return options.where((String option) {
+            return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
+          });
+        },
+        onSelected: onSelected,
+        optionsViewBuilder: (context, onSelected, options) {
+          return Align(
+            alignment: Alignment.topLeft,
+            child: Material(
+              elevation: 4,
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: constraints.maxWidth,
+                height: 250,
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(8.0),
+                  itemCount: options.length,
+                  itemBuilder: (BuildContext context, int index) {
+                    final String option = options.elementAt(index);
+                    return ListTile(
+                      title: Text(option),
+                      onTap: () => onSelected(option),
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+        fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+          return _buildStyledTextField(
+            controller: controller,
+            labelText: labelText,
+            icon: icon,
+            focusNode: focusNode,
+            validator: (v) => v!.isEmpty ? strings['req'] : null,
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildMultiSelectProfessions(Map<String, String> strings) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(strings['professions']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E293B))),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: _allProfessions.map((prof) {
-            final isSelected = _selectedProfessions.contains(prof);
-            return FilterChip(
-              label: Text(prof, style: TextStyle(fontSize: 12, color: isSelected ? Colors.white : Colors.black87)),
-              selected: isSelected,
-              onSelected: (selected) {
+        LayoutBuilder(
+          builder: (context, constraints) => Autocomplete<String>(
+            optionsBuilder: (TextEditingValue textEditingValue) {
+              if (textEditingValue.text.isEmpty) {
+                return _allProfessions;
+              }
+              return _allProfessions.where((String option) {
+                return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
+              });
+            },
+            onSelected: (String selection) {
+              setState(() {
+                if (!_selectedProfessions.contains(selection)) {
+                  _selectedProfessions.add(selection);
+                }
+              });
+              // Clear the typing bar after selection
+              _professionsSearchController?.clear();
+            },
+            optionsViewBuilder: (context, onSelected, options) {
+              return Align(
+                alignment: Alignment.topLeft,
+                child: Material(
+                  elevation: 4,
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    width: constraints.maxWidth,
+                    height: 250,
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(8.0),
+                      itemCount: options.length,
+                      itemBuilder: (BuildContext context, int index) {
+                        final String option = options.elementAt(index);
+                        return ListTile(
+                          title: Text(option),
+                          onTap: () => onSelected(option),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              );
+            },
+            fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+              // Store a reference to the controller used by Autocomplete
+              _professionsSearchController = controller;
+              return _buildStyledTextField(
+                controller: controller,
+                labelText: strings['professions']!,
+                icon: Icons.work_outline,
+                focusNode: focusNode,
+                hintText: strings['search_hint'],
+              );
+            },
+          ),
+        ),
+        if (_selectedProfessions.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: _selectedProfessions.map((prof) => Chip(
+              label: Text(prof),
+              onDeleted: () {
                 setState(() {
-                  if (selected) {
-                    _selectedProfessions.add(prof);
-                  } else {
-                    _selectedProfessions.remove(prof);
-                  }
+                  _selectedProfessions.remove(prof);
                 });
               },
-              selectedColor: const Color(0xFF1976D2),
-              checkmarkColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            );
-          }).toList(),
-        ),
+            )).toList(),
+          ),
+        ],
       ],
     );
   }
@@ -634,12 +858,14 @@ class _SignUpPageState extends State<SignUpPage> {
     String? Function(String?)? validator,
     String? hintText,
     bool enabled = true,
+    FocusNode? focusNode,
   }) {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
       maxLines: maxLines,
       enabled: enabled,
+      focusNode: focusNode,
       decoration: InputDecoration(
         labelText: labelText,
         hintText: hintText,

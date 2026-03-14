@@ -1,27 +1,31 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:untitled1/language_provider.dart';
 import 'package:untitled1/pages/home.dart';
 import 'package:untitled1/pages/search.dart';
 import 'package:untitled1/pages/formu.dart';
 import 'package:untitled1/pages/ptofile.dart';
-import 'package:untitled1/pages/sighn_in.dart';
-import 'package:untitled1/pages/settings.dart';
 import 'package:untitled1/pages/splash_screen.dart';
+import 'package:untitled1/services/notification_service.dart';
 
+/// The entry point of the application.
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Hide the navigation bar and status bar for a full-screen experience
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
   await Firebase.initializeApp();
   
-  final database = FirebaseDatabase.instanceFor(
-      app: Firebase.app(),
-      databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-  );
-  
-  database.setPersistenceEnabled(false);
+  // Disable Firestore persistence as per requirement.
+  FirebaseFirestore.instance.settings = const Settings(persistenceEnabled: false);
+
+  // Initialize notifications
+  await NotificationService.init();
 
   runApp(
     ChangeNotifierProvider(
@@ -31,6 +35,7 @@ void main() async {
   );
 }
 
+/// The root widget of the application.
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -46,8 +51,12 @@ class MyApp extends StatelessWidget {
             return const Scaffold(body: Center(child: CircularProgressIndicator()));
           }
           if (snapshot.hasData) {
+            // Start listening for notifications when user is logged in
+            NotificationService.startListening();
             return const MyHomePage();
           }
+          // Stop listening when logged out
+          NotificationService.stopListening();
           return const SplashScreen();
         },
       ),
@@ -55,6 +64,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
+/// The main dashboard of the application containing the bottom navigation bar.
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
   @override
@@ -69,22 +79,21 @@ class _MyHomePageState extends State<MyHomePage> {
     const SearchPage(),
     const BlogPage(),
     const profile(),
-    const SettingsPage(),
   ];
 
   Map<String, String> _getLocalizedLabels(BuildContext context) {
     final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
     switch (locale) {
       case 'he':
-        return {'home': 'בית', 'search': 'חיפוש', 'blog': 'בלוג', 'profile': 'פרופיל', 'settings': 'הגדרות'};
+        return {'home': 'בית', 'search': 'חיפוש', 'blog': 'בלוג', 'profile': 'פרופיל'};
       case 'ar':
-        return {'home': 'الرئيسية', 'search': 'بحث', 'blog': 'مدونة', 'profile': 'الملف الشخصي', 'settings': 'الإعدادات'};
+        return {'home': 'الرئيسية', 'search': 'بحث', 'blog': 'مدونة', 'profile': 'الملف الشخصي'};
       case 'ru':
-        return {'home': 'Главная', 'search': 'Поиск', 'blog': 'Блог', 'profile': 'Профиль', 'settings': 'Настройки'};
+        return {'home': 'Главная', 'search': 'Поиск', 'blog': 'Блог', 'profile': 'Профиль'};
       case 'am':
-        return {'home': 'ዋና ገጽ', 'search': 'ፍለጋ', 'blog': 'ብሎግ', 'profile': 'ፕሮፋይል', 'settings': 'ቅንብሮች'};
+        return {'home': 'ዋና ገጽ', 'search': 'ፍለጋ', 'blog': 'ብሎግ', 'profile': 'ፕሮፋይል'};
       default:
-        return {'home': 'Home', 'search': 'Search', 'blog': 'Blog', 'profile': 'Profile', 'settings': 'Settings'};
+        return {'home': 'Home', 'search': 'Search', 'blog': 'Blog', 'profile': 'Profile'};
     }
   }
 
@@ -116,7 +125,6 @@ class _MyHomePageState extends State<MyHomePage> {
             BottomNavigationBarItem(icon: const Icon(Icons.search), label: labels['search']),
             BottomNavigationBarItem(icon: const Icon(Icons.article_outlined), label: labels['blog']),
             BottomNavigationBarItem(icon: const Icon(Icons.person_outline), label: labels['profile']),
-            BottomNavigationBarItem(icon: const Icon(Icons.settings_outlined), label: labels['settings']),
           ],
         ),
       ),

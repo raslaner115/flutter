@@ -1,8 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:untitled1/language_provider.dart';
@@ -17,13 +18,13 @@ class BlogPage extends StatefulWidget {
 }
 
 class _BlogPageState extends State<BlogPage> {
-  final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
-    app: FirebaseAuth.instance.app,
-    databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-  ).ref();
-
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final ScrollController _scrollController = ScrollController();
+  StreamSubscription? _postsSubscription;
   List<Map<String, dynamic>> _posts = [];
   bool _isLoading = true;
+  bool _isMoreLoading = false;
+  int _postLimit = 10;
   final Set<String> _hiddenPostIds = {};
   String _sortBy = 'newest'; // 'newest' or 'likes'
 
@@ -31,60 +32,85 @@ class _BlogPageState extends State<BlogPage> {
   void initState() {
     super.initState();
     _listenToPosts();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _postsSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      if (!_isMoreLoading && !_isLoading && _posts.length >= _postLimit) {
+        _loadMorePosts();
+      }
+    }
+  }
+
+  void _loadMorePosts() {
+    setState(() {
+      _isMoreLoading = true;
+      _postLimit += 10;
+    });
+    _listenToPosts();
   }
 
   void _listenToPosts() {
-    _dbRef.child('blog_posts').onValue.listen((event) {
-      final dynamic data = event.snapshot.value;
+    _postsSubscription?.cancel();
+    
+    Query query = _firestore.collection('blog_posts');
+    
+    if (_sortBy == 'newest') {
+      query = query.orderBy('timestamp', descending: true);
+    } else if (_sortBy == 'likes') {
+      query = query.orderBy('likes', descending: true);
+    }
+    
+    _postsSubscription = query.limit(_postLimit).snapshots().listen((snapshot) {
       List<Map<String, dynamic>> loadedPosts = [];
-      
-      if (data != null) {
-        if (data is Map) {
-          data.forEach((key, value) {
-            if (value is Map) {
-              final post = Map<String, dynamic>.from(value);
-              post['id'] = key.toString();
-              loadedPosts.add(post);
-            }
-          });
-        } else if (data is List) {
-          for (int i = 0; i < data.length; i++) {
-            if (data[i] != null && data[i] is Map) {
-              final post = Map<String, dynamic>.from(data[i]);
-              post['id'] = i.toString();
-              loadedPosts.add(post);
-            }
-          }
-        }
-        _sortPosts(loadedPosts);
+      for (var doc in snapshot.docs) {
+        final post = doc.data() as Map<String, dynamic>;
+        post['id'] = doc.id;
+        loadedPosts.add(post);
       }
 
       if (mounted) {
         setState(() {
           _posts = loadedPosts;
           _isLoading = false;
+          _isMoreLoading = false;
         });
       }
     }, onError: (error) {
       debugPrint("FETCH ERROR: $error");
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isMoreLoading = false;
+        });
+      }
     });
   }
 
-  void _sortPosts(List<Map<String, dynamic>> posts) {
-    if (_sortBy == 'newest') {
-      posts.sort((a, b) {
-        final tA = a['timestamp'] ?? 0;
-        final tB = b['timestamp'] ?? 0;
-        return (tB as num).compareTo(tA as num);
-      });
-    } else if (_sortBy == 'likes') {
-      posts.sort((a, b) {
-        final lA = a['likes'] ?? 0;
-        final lB = b['likes'] ?? 0;
-        return (lB as num).compareTo(lA as num);
-      });
-    }
+  Future<void> _onRefresh() async {
+    setState(() {
+      _isLoading = true;
+      _postLimit = 10;
+    });
+    _listenToPosts();
+    // Return a dummy future to satisfy RefreshIndicator
+    return Future.delayed(const Duration(milliseconds: 500));
+  }
+
+  void _sortPosts() {
+    setState(() {
+      _isLoading = true;
+      _postLimit = 10;
+    });
+    _listenToPosts();
   }
 
   Map<String, dynamic> _getLocalizedStrings(BuildContext context) {
@@ -291,8 +317,8 @@ class _BlogPageState extends State<BlogPage> {
                       String authorName = user.displayName ?? "User";
                       if (user.displayName == null || user.displayName!.isEmpty) {
                         try {
-                          final userSnap = await _dbRef.child('users').child(user.uid).child('name').get();
-                          if (userSnap.exists) authorName = userSnap.value.toString();
+                          final userDoc = await _firestore.collection('users').doc(user.uid).get();
+                          if (userDoc.exists) authorName = userDoc.data()?['name'] ?? "User";
                         } catch (_) {}
                       }
 
@@ -310,15 +336,15 @@ class _BlogPageState extends State<BlogPage> {
                         'imageUrl': imageUrl,
                         'authorUid': user.uid,
                         'authorName': authorName,
-                        'timestamp': existingPost?['timestamp'] ?? ServerValue.timestamp,
+                        'timestamp': existingPost?['timestamp'] ?? FieldValue.serverTimestamp(),
                         'likes': existingPost?['likes'] ?? 0,
                         'likedBy': existingPost?['likedBy'] ?? {},
                       };
 
                       if (existingPost == null) {
-                        await _dbRef.child('blog_posts').push().set(postData);
+                        await _firestore.collection('blog_posts').add(postData);
                       } else {
-                        await _dbRef.child('blog_posts').child(existingPost['id']).update(postData);
+                        await _firestore.collection('blog_posts').doc(existingPost['id']).update(postData);
                       }
                       
                       if (mounted) Navigator.pop(context);
@@ -354,7 +380,7 @@ class _BlogPageState extends State<BlogPage> {
 
   void _deletePost(String postId) async {
     try {
-      await _dbRef.child('blog_posts').child(postId).remove();
+      await _firestore.collection('blog_posts').doc(postId).delete();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error deleting post")));
     }
@@ -383,7 +409,7 @@ class _BlogPageState extends State<BlogPage> {
     }
 
     try {
-      await _dbRef.child('blog_posts').child(postId).update({
+      await _firestore.collection('blog_posts').doc(postId).update({
         'likes': likes,
         'likedBy': likedBy,
       });
@@ -409,12 +435,16 @@ class _BlogPageState extends State<BlogPage> {
           centerTitle: true,
           title: Text(strings['title'], style: const TextStyle(color: Color(0xFF1E293B), fontWeight: FontWeight.bold)),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh, color: Color(0xFF1976D2)),
+              onPressed: _onRefresh,
+            ),
             PopupMenuButton<String>(
               icon: const Icon(Icons.sort, color: Color(0xFF1976D2)),
               onSelected: (value) {
                 setState(() {
                   _sortBy = value;
-                  _sortPosts(_posts);
+                  _sortPosts();
                 });
               },
               itemBuilder: (context) => [
@@ -429,23 +459,37 @@ class _BlogPageState extends State<BlogPage> {
           backgroundColor: const Color(0xFF1976D2),
           child: const Icon(Icons.add, color: Colors.white),
         ),
-        body: _isLoading 
-          ? const Center(child: CircularProgressIndicator())
-          : visiblePosts.isEmpty 
-            ? Center(child: Text(strings['no_posts']))
-            : ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: visiblePosts.length,
-                itemBuilder: (context, index) => _BlogCard(
-                  post: visiblePosts[index],
-                  onLike: () => _toggleLike(visiblePosts[index]),
-                  onDelete: () => _deletePost(visiblePosts[index]['id']),
-                  onEdit: () => _showCreatePostSheet(context, existingPost: visiblePosts[index]),
-                  onHide: () => setState(() => _hiddenPostIds.add(visiblePosts[index]['id'])),
-                  localizedStrings: strings,
-                  onGuestDialog: () => _showGuestDialog(context, strings),
+        body: RefreshIndicator(
+          onRefresh: _onRefresh,
+          child: _isLoading 
+            ? const Center(child: CircularProgressIndicator())
+            : visiblePosts.isEmpty 
+              ? Center(child: ListView(children: [SizedBox(height: 200), Center(child: Text(strings['no_posts']))]))
+              : ListView.builder(
+                  controller: _scrollController,
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  itemCount: visiblePosts.length + (_isMoreLoading ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    if (index < visiblePosts.length) {
+                      return _BlogCard(
+                        post: visiblePosts[index],
+                        onLike: () => _toggleLike(visiblePosts[index]),
+                        onDelete: () => _deletePost(visiblePosts[index]['id']),
+                        onEdit: () => _showCreatePostSheet(context, existingPost: visiblePosts[index]),
+                        onHide: () => setState(() => _hiddenPostIds.add(visiblePosts[index]['id'])),
+                        localizedStrings: strings,
+                        onGuestDialog: () => _showGuestDialog(context, strings),
+                      );
+                    } else {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 32),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                  },
                 ),
-              ),
+        ),
       ),
     );
   }
@@ -593,12 +637,9 @@ class PostDetailPage extends StatefulWidget {
 
 class _PostDetailPageState extends State<PostDetailPage> {
   final TextEditingController _commentController = TextEditingController();
-  final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
-    app: FirebaseAuth.instance.app,
-    databaseURL: 'https://hire-hub-fe6c4-default-rtdb.firebaseio.com'
-  ).ref();
-
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   List<Map<String, dynamic>> _comments = [];
+  StreamSubscription? _commentsSubscription;
 
   @override
   void initState() {
@@ -606,33 +647,24 @@ class _PostDetailPageState extends State<PostDetailPage> {
     _listenToComments();
   }
 
+  @override
+  void dispose() {
+    _commentsSubscription?.cancel();
+    super.dispose();
+  }
+
   void _listenToComments() {
-    _dbRef.child('blog_posts').child(widget.post['id']).child('blog_comments').onValue.listen((event) {
-      final dynamic data = event.snapshot.value;
+    _commentsSubscription = _firestore.collection('blog_posts')
+        .doc(widget.post['id'])
+        .collection('blog_comments')
+        .orderBy('timestamp', descending: false)
+        .snapshots()
+        .listen((snapshot) {
       List<Map<String, dynamic>> loadedComments = [];
-      if (data != null) {
-        if (data is Map) {
-          data.forEach((key, value) {
-            if (value is Map) {
-              final comment = Map<String, dynamic>.from(value);
-              comment['id'] = key;
-              loadedComments.add(comment);
-            }
-          });
-        } else if (data is List) {
-          for (int i = 0; i < data.length; i++) {
-            if (data[i] != null && data[i] is Map) {
-              final comment = Map<String, dynamic>.from(data[i]);
-              comment['id'] = i.toString();
-              loadedComments.add(comment);
-            }
-          }
-        }
-        loadedComments.sort((a, b) {
-          final tA = a['timestamp'] ?? 0;
-          final tB = b['timestamp'] ?? 0;
-          return (tB as num).compareTo(tA as num);
-        });
+      for (var doc in snapshot.docs) {
+        final comment = doc.data();
+        comment['id'] = doc.id;
+        loadedComments.add(comment);
       }
       if (mounted) setState(() => _comments = loadedComments);
     });
@@ -651,10 +683,13 @@ class _PostDetailPageState extends State<PostDetailPage> {
       'text': _commentController.text.trim(),
       'authorName': user.displayName ?? 'Anonymous',
       'authorUid': user.uid,
-      'timestamp': ServerValue.timestamp,
+      'timestamp': FieldValue.serverTimestamp(),
     };
     try {
-      await _dbRef.child('blog_posts').child(widget.post['id']).child('blog_comments').push().set(commentData);
+      await _firestore.collection('blog_posts')
+          .doc(widget.post['id'])
+          .collection('blog_comments')
+          .add(commentData);
       _commentController.clear();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Permission denied: Update your rules.")));
@@ -663,7 +698,11 @@ class _PostDetailPageState extends State<PostDetailPage> {
 
   void _deleteComment(String commentId) async {
     try {
-      await _dbRef.child('blog_posts').child(widget.post['id']).child('blog_comments').child(commentId).remove();
+      await _firestore.collection('blog_posts')
+          .doc(widget.post['id'])
+          .collection('blog_comments')
+          .doc(commentId)
+          .delete();
     } catch (_) {}
   }
 
