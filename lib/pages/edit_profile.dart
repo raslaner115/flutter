@@ -7,6 +7,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:untitled1/language_provider.dart';
 
 class EditProfilePage extends StatefulWidget {
@@ -111,6 +112,20 @@ class _EditProfilePageState extends State<EditProfilePage> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
+      // Get Lat/Lng from town name
+      double? lat, lng;
+      if (_selectedTown != null && _selectedTown!.isNotEmpty) {
+        try {
+          List<Location> locations = await locationFromAddress("$_selectedTown, Israel");
+          if (locations.isNotEmpty) {
+            lat = locations.first.latitude;
+            lng = locations.first.longitude;
+          }
+        } catch (e) {
+          debugPrint("Geocoding error: $e");
+        }
+      }
+
       String? imageUrl;
       if (_image != null) {
         final ref = FirebaseStorage.instance.ref().child('profile_pictures/${user.uid}.jpg');
@@ -122,6 +137,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
         'name': _nameController.text.trim(),
         'email': _emailController.text.trim(),
         'town': _selectedTown,
+        'lat': lat,
+        'lng': lng,
         'optionalPhone': _altPhoneController.text.trim(),
         'description': _descriptionController.text.trim(),
         'professions': _selectedProfessions,

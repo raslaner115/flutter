@@ -416,7 +416,7 @@ class _HomePageState extends State<HomePage> {
                   itemBuilder: (context, index) {
                     final worker = _topRatedWorkers[index];
                     return GestureDetector(
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => profile(userId: worker['uid']))),
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => Profile(userId: worker['uid']))),
                       child: Container(
                         width: 160,
                         margin: const EdgeInsets.symmetric(horizontal: 8),

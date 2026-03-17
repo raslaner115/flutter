@@ -10,6 +10,7 @@ import 'package:untitled1/pages/search.dart';
 import 'package:untitled1/pages/formu.dart';
 import 'package:untitled1/pages/ptofile.dart';
 import 'package:untitled1/pages/splash_screen.dart';
+import 'package:untitled1/pages/inbox_page.dart';
 import 'package:untitled1/services/notification_service.dart';
 
 /// The entry point of the application.
@@ -21,8 +22,8 @@ void main() async {
 
   await Firebase.initializeApp();
   
-  // Disable Firestore persistence as per requirement.
-  FirebaseFirestore.instance.settings = const Settings(persistenceEnabled: false);
+  // Enable Firestore persistence to keep user info available offline/between restarts.
+  FirebaseFirestore.instance.settings = const Settings(persistenceEnabled: true);
 
   // Initialize notifications
   await NotificationService.init();
@@ -78,22 +79,23 @@ class _MyHomePageState extends State<MyHomePage> {
     const HomePage(),
     const SearchPage(),
     const BlogPage(),
-    const profile(),
+    const InboxPage(),
+    const Profile(),
   ];
 
   Map<String, String> _getLocalizedLabels(BuildContext context) {
     final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
     switch (locale) {
       case 'he':
-        return {'home': 'בית', 'search': 'חיפוש', 'blog': 'בלוג', 'profile': 'פרופיל'};
+        return {'home': 'בית', 'search': 'חיפוש', 'blog': 'בלוג', 'messages': 'הודעות', 'profile': 'פרופיל'};
       case 'ar':
-        return {'home': 'الرئيسية', 'search': 'بحث', 'blog': 'مدونة', 'profile': 'الملف الشخصي'};
+        return {'home': 'الرئيسية', 'search': 'بحث', 'blog': 'مدونة', 'messages': 'رسائل', 'profile': 'الملف الشخصي'};
       case 'ru':
-        return {'home': 'Главная', 'search': 'Поиск', 'blog': 'Блог', 'profile': 'Профиль'};
+        return {'home': 'Главная', 'search': 'Поиск', 'blog': 'Блог', 'messages': 'Сообщения', 'profile': 'Профиль'};
       case 'am':
-        return {'home': 'ዋና ገጽ', 'search': 'ፍለጋ', 'blog': 'ብሎግ', 'profile': 'ፕሮፋይል'};
+        return {'home': 'ዋና ገጽ', 'search': 'ፍለጋ', 'blog': 'ብሎግ', 'messages': 'መልእክቶች', 'profile': 'ፕሮፋይል'};
       default:
-        return {'home': 'Home', 'search': 'Search', 'blog': 'Blog', 'profile': 'Profile'};
+        return {'home': 'Home', 'search': 'Search', 'blog': 'Blog', 'messages': 'Messages', 'profile': 'Profile'};
     }
   }
 
@@ -124,6 +126,7 @@ class _MyHomePageState extends State<MyHomePage> {
             BottomNavigationBarItem(icon: const Icon(Icons.home_outlined), label: labels['home']),
             BottomNavigationBarItem(icon: const Icon(Icons.search), label: labels['search']),
             BottomNavigationBarItem(icon: const Icon(Icons.article_outlined), label: labels['blog']),
+            BottomNavigationBarItem(icon: const Icon(Icons.chat_bubble_outline), label: labels['messages']),
             BottomNavigationBarItem(icon: const Icon(Icons.person_outline), label: labels['profile']),
           ],
         ),
