@@ -35,6 +35,11 @@ dependencies:
   firebase_messaging: ^16.1.2
   flutter_local_notifications: ^21.0.0
   permission_handler: ^12.0.1
+  geocoding: ^4.0.0
+  printing: ^5.14.3
+  pdf: ^3.12.0
+  intl: ^0.20.2
+
 
 dev_dependencies:
   flutter_test:
@@ -47,6 +52,8 @@ flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
   image_path: "assets/icon/app_icon.png"
+  adaptive_icon_background: "#0f172a"
+  adaptive_icon_foreground: "assets/icon/app_icon.png"
 
 flutter_native_splash:
   color: "#0f172a"
@@ -61,3 +68,11 @@ flutter:
     - assets/apple_pay_config.json
     - assets/google_pay_config.json
     - assets/icon/
+    - assets/fonts/
+
+  fonts:
+    - family: Rubik
+      fonts:
+        - asset: assets/fonts/Rubik-Italic-VariableFont_wght.ttf
+        - asset: assets/fonts/Rubik-VariableFont_wght.ttf
+          weight: 700

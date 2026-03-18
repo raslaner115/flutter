@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:untitled1/language_provider.dart';
 import 'package:untitled1/pages/ptofile.dart';
 import 'package:untitled1/pages/average_prices.dart';
@@ -29,6 +30,7 @@ class _SearchPageState extends State<SearchPage> {
   Map<String, dynamic>? _selectedProfession;
   bool _showWorkerList = false;
   String _sortBy = 'rating';
+  Position? _currentPosition;
 
   @override
   void initState() {
@@ -100,6 +102,37 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
+  Future<void> _getCurrentLocation() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        // Location services are not enabled.
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          return;
+        }
+      }
+      
+      if (permission == LocationPermission.deniedForever) {
+        return;
+      } 
+
+      Position position = await Geolocator.getCurrentPosition();
+      setState(() {
+        _currentPosition = position;
+        _sortBy = 'distance';
+        _applyFilters();
+      });
+    } catch (e) {
+      debugPrint("Error getting location: $e");
+    }
+  }
+
   void _applyFilters() {
     final query = _searchController.text.toLowerCase();
     final locale = Provider.of<LanguageProvider>(
@@ -125,9 +158,27 @@ class _SearchPageState extends State<SearchPage> {
         }).toList();
 
         if (_sortBy == 'rating') {
+<<<<<<< HEAD
           _filteredWorkers.sort(
             (a, b) => (b['avgRating'] as num).compareTo(a['avgRating'] as num),
           );
+=======
+          _filteredWorkers.sort((a, b) => (b['avgRating'] as num).compareTo(a['avgRating'] as num));
+        } else if (_sortBy == 'distance' && _currentPosition != null) {
+          _filteredWorkers.sort((a, b) {
+            double latA = a['lat'] ?? 0.0;
+            double lngA = a['lng'] ?? 0.0;
+            double latB = b['lat'] ?? 0.0;
+            double lngB = b['lng'] ?? 0.0;
+            
+            if (latA == 0 && lngA == 0) return 1;
+            if (latB == 0 && lngB == 0) return -1;
+
+            double distA = Geolocator.distanceBetween(_currentPosition!.latitude, _currentPosition!.longitude, latA, lngA);
+            double distB = Geolocator.distanceBetween(_currentPosition!.latitude, _currentPosition!.longitude, latB, lngB);
+            return distA.compareTo(distB);
+          });
+>>>>>>> 7b713a42c7ae1f5bb5a752aedffb0ab40640f752
         } else {
           _filteredWorkers.sort(
             (a, b) => (a['name'] ?? '').compareTo(b['name'] ?? ''),
@@ -366,6 +417,17 @@ class _SearchPageState extends State<SearchPage> {
       itemCount: _filteredWorkers.length,
       itemBuilder: (context, index) {
         final w = _filteredWorkers[index];
+        
+        String distanceStr = "";
+        if (_sortBy == 'distance' && _currentPosition != null && w['lat'] != null && w['lng'] != null) {
+          double distance = Geolocator.distanceBetween(_currentPosition!.latitude, _currentPosition!.longitude, w['lat'], w['lng']);
+          if (distance < 1000) {
+            distanceStr = "${distance.toStringAsFixed(0)}m";
+          } else {
+            distanceStr = "${(distance / 1000).toStringAsFixed(1)}km";
+          }
+        }
+
         return Container(
           margin: const EdgeInsets.only(bottom: 16),
           decoration: BoxDecoration(
@@ -414,10 +476,18 @@ class _SearchPageState extends State<SearchPage> {
                       color: Colors.grey,
                     ),
                     const SizedBox(width: 4),
+<<<<<<< HEAD
                     Text(
                       w['town'] ?? '',
                       style: const TextStyle(color: Colors.grey, fontSize: 13),
                     ),
+=======
+                    Text(w['town'] ?? '', style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                    if (distanceStr.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Text(distanceStr, style: TextStyle(color: themeColor, fontSize: 12, fontWeight: FontWeight.bold)),
+                    ]
+>>>>>>> 7b713a42c7ae1f5bb5a752aedffb0ab40640f752
                   ],
                 ),
               ],
@@ -455,12 +525,16 @@ class _SearchPageState extends State<SearchPage> {
                 ),
               ],
             ),
+<<<<<<< HEAD
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) => profile(userId: w['uid']),
               ),
             ),
+=======
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => Profile(userId: w['uid']))),
+>>>>>>> 7b713a42c7ae1f5bb5a752aedffb0ab40640f752
           ),
         );
       },
@@ -488,6 +562,15 @@ class _SearchPageState extends State<SearchPage> {
                 setState(() => _sortBy = 'rating');
                 _applyFilters();
                 Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.my_location, color: themeColor),
+              title: Text(locale == 'he' ? 'הכי קרוב אלי' : 'Nearest to Me'),
+              trailing: _sortBy == 'distance' ? Icon(Icons.check_circle, color: themeColor) : null,
+              onTap: () {
+                Navigator.pop(context);
+                _getCurrentLocation();
               },
             ),
             ListTile(
