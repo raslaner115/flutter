@@ -28,6 +28,7 @@ class _BlogPageState extends State<BlogPage> {
   final Set<String> _hiddenPostIds = {};
   String _sortBy = 'newest'; // 'newest' or 'likes'
   int _selectedFilterIndex = 0; // 0 is "All"
+  bool _isGuideExpanded = true; // Added state for collapsible guide
 
   @override
   void initState() {
@@ -70,7 +71,6 @@ class _BlogPageState extends State<BlogPage> {
       query = query.where('category', isEqualTo: categories[_selectedFilterIndex]);
     }
 
-    // Order by isPinned first, then by the selected criteria
     query = query.orderBy('isPinned', descending: true);
 
     if (_sortBy == 'newest') {
@@ -98,12 +98,10 @@ class _BlogPageState extends State<BlogPage> {
       debugPrint("FETCH ERROR: $error");
       if (mounted) {
         setState(() {
-          _posts = []; // Clear posts on error to avoid showing stale data from other categories
+          _posts = [];
           _isLoading = false;
           _isMoreLoading = false;
         });
-        // If it's a missing index error, Firestore usually provides a link in the debug log.
-        // We can show a generic error to the user.
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(strings['error'] ?? "Error loading posts"),
         ));
@@ -115,7 +113,7 @@ class _BlogPageState extends State<BlogPage> {
     if (mounted) {
       setState(() {
         _isLoading = true;
-        _posts = []; // Force clear to show loading state properly
+        _posts = []; 
         _postLimit = 10;
       });
     }
@@ -419,7 +417,6 @@ class _BlogPageState extends State<BlogPage> {
                       }
                       
                       if (mounted) Navigator.pop(context);
-                      // Optionally reset filter to "All" to show the new post
                       setState(() {
                         _selectedFilterIndex = 0;
                         _isLoading = true;
@@ -458,7 +455,6 @@ class _BlogPageState extends State<BlogPage> {
 
   void _deletePost(String postId) async {
     try {
-      // Optimistic UI update: remove immediately from local list
       setState(() {
         _posts.removeWhere((post) => post['id'] == postId);
       });
@@ -467,7 +463,6 @@ class _BlogPageState extends State<BlogPage> {
       debugPrint("DELETE ERROR: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error deleting post")));
-        // Refresh to bring it back if delete failed
         _listenToPosts();
       }
     }
@@ -508,7 +503,6 @@ class _BlogPageState extends State<BlogPage> {
   Widget _buildExplanationCard(Map<String, dynamic> strings) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [Colors.blue.shade700, Colors.blue.shade900],
@@ -521,18 +515,34 @@ class _BlogPageState extends State<BlogPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.push_pin, color: Colors.white, size: 22),
-              const SizedBox(width: 8),
-              Text(strings['guide_title'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-            ],
+          InkWell(
+            onTap: () => setState(() => _isGuideExpanded = !_isGuideExpanded),
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  const Icon(Icons.push_pin, color: Colors.white, size: 22),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(strings['guide_title'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+                  ),
+                  Icon(
+                    _isGuideExpanded ? Icons.expand_less : Icons.expand_more,
+                    color: Colors.white,
+                  ),
+                ],
+              ),
+            ),
           ),
-          const SizedBox(height: 12),
-          Text(
-            strings['guide_content'],
-            style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6, fontWeight: FontWeight.w400),
-          ),
+          if (_isGuideExpanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: Text(
+                strings['guide_content'],
+                style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6, fontWeight: FontWeight.w400),
+              ),
+            ),
         ],
       ),
     );
@@ -574,7 +584,7 @@ class _BlogPageState extends State<BlogPage> {
                   setState(() {
                     _selectedFilterIndex = index;
                     _isLoading = true;
-                    _posts = []; // Clear list immediately to show loader and avoid stale data
+                    _posts = [];
                     _postLimit = 10;
                   });
                   _listenToPosts();

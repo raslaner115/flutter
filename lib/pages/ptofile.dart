@@ -558,7 +558,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                   stretchModes: const [StretchMode.zoomBackground, StretchMode.blurBackground],
                   background: Stack(fit: StackFit.expand, children: [
                     _profileImageUrl.isNotEmpty ? Image.network(_profileImageUrl, fit: BoxFit.cover) : Container(color: const Color(0xFF1E3A8A), child: const Icon(Icons.person, size: 100, color: Colors.white24)),
-                    Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black.withOpacity(0.4), Colors.black.withOpacity(0.9)]))),
+                    Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black.withValues(alpha: 0.4), Colors.black.withValues(alpha: 0.9)]))),
                     Positioned(bottom: 80, left: 24, right: 24, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Row(children: [
                         Flexible(child: Text(_userName, style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: -0.5))),
@@ -568,7 +568,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                       if (_userProfessions.isNotEmpty)
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
+                          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)),
                           child: Text(_userProfessions.join(' • '), style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
                         ),
                       const SizedBox(height: 12),
@@ -675,7 +675,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                 child: Hero(
                   tag: 'project_${project['id']}',
                   child: Container(
-                    decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))]),
+                    decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))]),
                     child: ClipRRect(borderRadius: BorderRadius.circular(20), child: Image.network(project['imageUrl'], fit: BoxFit.cover)),
                   ),
                 ),
@@ -809,12 +809,12 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
     if (_isOwnProfile && _userType == 'normal' && !_isGuest()) {
       return Container(
         padding: const EdgeInsets.fromLTRB(24, 10, 24, 30),
-        decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, -5))]),
+        decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 20, offset: const Offset(0, -5))]),
         child: InkWell(
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SubscriptionPage(email: _email))).then((_) => _fetchUserData()),
           child: Container(
             height: 60,
-            decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFF59E0B), Color(0xFFD97706)]), borderRadius: BorderRadius.circular(18), boxShadow: [BoxShadow(color: const Color(0xFFF59E0B).withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 5))]),
+            decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFF59E0B), Color(0xFFD97706)]), borderRadius: BorderRadius.circular(18), boxShadow: [BoxShadow(color: const Color(0xFFF59E0B).withValues(alpha: 0.3), blurRadius: 15, offset: const Offset(0, 5))]),
             child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
               const Icon(Icons.stars_rounded, color: Colors.white, size: 26),
               const SizedBox(width: 12),
@@ -829,7 +829,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
 
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 34),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: const BorderRadius.vertical(top: Radius.circular(30)), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, -10))]),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: const BorderRadius.vertical(top: Radius.circular(30)), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 20, offset: const Offset(0, -10))]),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Row(children: [
           Expanded(
@@ -870,7 +870,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
             onTap: () => _showReviewDialog(strings, existingReview: existingReview),
             child: Container(
               height: 56, width: double.infinity,
-              decoration: BoxDecoration(color: const Color(0xFFF59E0B).withOpacity(0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.3), width: 1.5)),
+              decoration: BoxDecoration(color: const Color(0xFFF59E0B).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.3), width: 1.5)),
               child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 Icon(existingReview != null ? Icons.edit_note_rounded : Icons.star_rounded, color: const Color(0xFFD97706), size: 24),
                 const SizedBox(width: 10),
