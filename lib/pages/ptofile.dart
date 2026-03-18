@@ -17,7 +17,7 @@ import 'package:untitled1/pages/settings.dart';
 import 'package:untitled1/pages/subscription.dart';
 
 class profile extends StatefulWidget {
-  final String? userId; 
+  final String? userId;
   const profile({super.key, this.userId});
 
   @override
@@ -29,7 +29,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final ImagePicker _picker = ImagePicker();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  
+
   String _userName = "";
   String _bio = "";
   String _phoneNumber = "";
@@ -41,7 +41,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
   List<String> _userProfessions = [];
   List<Map<String, dynamic>> _userReviews = [];
   List<Map<String, dynamic>> _projects = [];
-  
+
   bool _isOwnProfile = false;
   bool _isLoading = true;
 
@@ -63,7 +63,9 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
 
     if (mounted) {
       setState(() {
-        _isOwnProfile = (targetUid == null || (currentUser != null && targetUid == currentUser.uid));
+        _isOwnProfile =
+            (targetUid == null ||
+            (currentUser != null && targetUid == currentUser.uid));
         _isLoading = true;
       });
     }
@@ -86,7 +88,7 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           _town = data['town']?.toString() ?? "";
           _profileImageUrl = data['profileImageUrl']?.toString() ?? "";
           _userType = data['userType']?.toString() ?? "normal";
-          
+
           if (data['professions'] is List) {
             _userProfessions = List<String>.from(data['professions']);
           } else if (data['profession'] != null) {
@@ -109,8 +111,15 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _fetchSubcollection(String uid, String collectionName) async {
-    final snapshot = await _firestore.collection('users').doc(uid).collection(collectionName).get();
+  Future<List<Map<String, dynamic>>> _fetchSubcollection(
+    String uid,
+    String collectionName,
+  ) async {
+    final snapshot = await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection(collectionName)
+        .get();
     return snapshot.docs.map((doc) {
       final data = Map<String, dynamic>.from(doc.data());
       data['id'] = doc.id;
@@ -125,7 +134,10 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
   }
 
   Map<String, String> _getLocalizedStrings(BuildContext context) {
-    final locale = Provider.of<LanguageProvider>(context, listen: false).locale.languageCode;
+    final locale = Provider.of<LanguageProvider>(
+      context,
+      listen: false,
+    ).locale.languageCode;
     switch (locale) {
       case 'he':
         return {
@@ -216,7 +228,9 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
     }
   }
 
-  bool _isGuest() => FirebaseAuth.instance.currentUser == null || FirebaseAuth.instance.currentUser!.isAnonymous;
+  bool _isGuest() =>
+      FirebaseAuth.instance.currentUser == null ||
+      FirebaseAuth.instance.currentUser!.isAnonymous;
 
   void _showGuestDialog(BuildContext context, Map<String, String> strings) {
     showDialog(
@@ -224,11 +238,17 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
       builder: (context) => AlertDialog(
         title: Text(strings['guest_msg']!),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text(strings['cancel']!)),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(strings['cancel']!),
+          ),
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const SignInPage()));
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SignInPage()),
+              );
             },
             child: Text(strings['login']!),
           ),
@@ -238,7 +258,9 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
   }
 
   void _shareProfile(Map<String, String> strings) {
-    Share.share("${strings['user_name']}: $_userName\n${strings['bio']}: $_bio");
+    Share.share(
+      "${strings['user_name']}: $_userName\n${strings['bio']}: $_bio",
+    );
   }
 
   Future<void> _addProject() async {
@@ -247,8 +269,11 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
       _showGuestDialog(context, strings);
       return;
     }
-    
-    final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
+
+    final XFile? pickedFile = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 70,
+    );
     if (pickedFile == null) return;
 
     final descriptionController = TextEditingController();
@@ -271,8 +296,14 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(strings['cancel']!)),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: Text(strings['add']!)),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(strings['cancel']!),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(strings['add']!),
+          ),
         ],
       ),
     );
@@ -282,22 +313,30 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
     setState(() => _isLoading = true);
     try {
       final user = FirebaseAuth.instance.currentUser!;
-      final storageRef = FirebaseStorage.instance.ref().child('projects/${user.uid}/${DateTime.now().millisecondsSinceEpoch}.jpg');
-      
+      final storageRef = FirebaseStorage.instance.ref().child(
+        'projects/${user.uid}/${DateTime.now().millisecondsSinceEpoch}.jpg',
+      );
+
       await storageRef.putFile(File(pickedFile.path));
       final downloadUrl = await storageRef.getDownloadURL();
 
-      await _firestore.collection('users').doc(user.uid).collection('projects').add({
-        'imageUrl': downloadUrl,
-        'description': descriptionController.text.trim(),
-        'timestamp': FieldValue.serverTimestamp(),
-      });
+      await _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('projects')
+          .add({
+            'imageUrl': downloadUrl,
+            'description': descriptionController.text.trim(),
+            'timestamp': FieldValue.serverTimestamp(),
+          });
 
       await _fetchUserData();
     } catch (e) {
       debugPrint("UPLOAD ERROR: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${strings['error']}: $e")));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("${strings['error']}: $e")));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -305,15 +344,25 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
   }
 
   Future<void> _reportUser(Map<String, String> strings) async {
-    if (_isGuest()) { _showGuestDialog(context, strings); return; }
+    if (_isGuest()) {
+      _showGuestDialog(context, strings);
+      return;
+    }
     final reasonController = TextEditingController();
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(strings['report']!),
-        content: TextField(controller: reasonController, decoration: InputDecoration(hintText: strings['rating_hint']), maxLines: 3),
+        content: TextField(
+          controller: reasonController,
+          decoration: InputDecoration(hintText: strings['rating_hint']),
+          maxLines: 3,
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text(strings['cancel']!)),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(strings['cancel']!),
+          ),
           ElevatedButton(
             onPressed: () async {
               final targetUid = widget.userId;
@@ -325,7 +374,9 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
                 'timestamp': FieldValue.serverTimestamp(),
               });
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['report_success']!)));
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(strings['report_success']!)),
+              );
             },
             child: Text(strings['submit']!),
           ),
@@ -334,33 +385,74 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
     );
   }
 
-  Future<void> _showReviewDialog(Map<String, String> strings, {Map<String, dynamic>? existingReview}) async {
-    if (_isGuest()) { _showGuestDialog(context, strings); return; }
-    
-    double selectedStars = existingReview != null ? (existingReview['stars'] as num).toDouble() : 5.0;
-    final commentController = TextEditingController(text: existingReview != null ? existingReview['comment'] : "");
-    
+  Future<void> _showReviewDialog(
+    Map<String, String> strings, {
+    Map<String, dynamic>? existingReview,
+  }) async {
+    if (_isGuest()) {
+      _showGuestDialog(context, strings);
+      return;
+    }
+
+    double selectedStars = existingReview != null
+        ? (existingReview['stars'] as num).toDouble()
+        : 5.0;
+    final commentController = TextEditingController(
+      text: existingReview != null ? existingReview['comment'] : "",
+    );
+
     await showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text(existingReview != null ? strings['edit_review']! : strings['rating_title']!),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(5, (i) => IconButton(icon: Icon(i < selectedStars ? Icons.star : Icons.star_border, color: Colors.amber), onPressed: () => setDialogState(() => selectedStars = i + 1.0)))),
-            TextField(controller: commentController, decoration: InputDecoration(hintText: strings['rating_hint']), maxLines: 3),
-          ]),
+          title: Text(
+            existingReview != null
+                ? strings['edit_review']!
+                : strings['rating_title']!,
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(
+                  5,
+                  (i) => IconButton(
+                    icon: Icon(
+                      i < selectedStars ? Icons.star : Icons.star_border,
+                      color: Colors.amber,
+                    ),
+                    onPressed: () =>
+                        setDialogState(() => selectedStars = i + 1.0),
+                  ),
+                ),
+              ),
+              TextField(
+                controller: commentController,
+                decoration: InputDecoration(hintText: strings['rating_hint']),
+                maxLines: 3,
+              ),
+            ],
+          ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: Text(strings['cancel']!)),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(strings['cancel']!),
+            ),
             ElevatedButton(
               onPressed: () async {
                 final targetUid = widget.userId;
                 if (targetUid == null) return;
-                
+
                 final currentUser = FirebaseAuth.instance.currentUser!;
                 String authorName = currentUser.displayName ?? "User";
                 if (authorName == "User") {
-                   final userDoc = await _firestore.collection('users').doc(currentUser.uid).get();
-                   if (userDoc.exists) authorName = userDoc.data()?['name'] ?? "User";
+                  final userDoc = await _firestore
+                      .collection('users')
+                      .doc(currentUser.uid)
+                      .get();
+                  if (userDoc.exists)
+                    authorName = userDoc.data()?['name'] ?? "User";
                 }
 
                 final reviewData = {
@@ -373,14 +465,28 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
 
                 if (existingReview != null) {
                   // Update existing review
-                  await _firestore.collection('users').doc(targetUid).collection('reviews').doc(existingReview['id']).update(reviewData);
+                  await _firestore
+                      .collection('users')
+                      .doc(targetUid)
+                      .collection('reviews')
+                      .doc(existingReview['id'])
+                      .update(reviewData);
                 } else {
                   // Check again if review exists to prevent duplicates
-                  final existing = await _firestore.collection('users').doc(targetUid).collection('reviews').where('userId', isEqualTo: currentUser.uid).get();
+                  final existing = await _firestore
+                      .collection('users')
+                      .doc(targetUid)
+                      .collection('reviews')
+                      .where('userId', isEqualTo: currentUser.uid)
+                      .get();
                   if (existing.docs.isNotEmpty) {
                     await existing.docs.first.reference.update(reviewData);
                   } else {
-                    await _firestore.collection('users').doc(targetUid).collection('reviews').add(reviewData);
+                    await _firestore
+                        .collection('users')
+                        .doc(targetUid)
+                        .collection('reviews')
+                        .add(reviewData);
                   }
                 }
 
@@ -407,10 +513,17 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           project: project,
           userId: targetUid,
           localizedStrings: strings,
-          onDelete: _isOwnProfile ? () async {
-            await _firestore.collection('users').doc(targetUid).collection('projects').doc(project['id']).delete();
-            _fetchUserData();
-          } : null,
+          onDelete: _isOwnProfile
+              ? () async {
+                  await _firestore
+                      .collection('users')
+                      .doc(targetUid)
+                      .collection('projects')
+                      .doc(project['id'])
+                      .delete();
+                  _fetchUserData();
+                }
+              : null,
         ),
       ),
     );
@@ -419,17 +532,20 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
   Future<void> _confirmDeleteProject(Map<String, dynamic> project) async {
     if (!_isOwnProfile) return;
     final strings = _getLocalizedStrings(context);
-    
+
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(strings['delete_project']!),
         content: Text(strings['confirm_delete']!),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(strings['cancel']!)),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(strings['cancel']!),
+          ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(context, true), 
+            onPressed: () => Navigator.pop(context, true),
             child: Text(strings['delete']!),
           ),
         ],
@@ -440,7 +556,12 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
       setState(() => _isLoading = true);
       try {
         final targetUid = FirebaseAuth.instance.currentUser!.uid;
-        await _firestore.collection('users').doc(targetUid).collection('projects').doc(project['id']).delete();
+        await _firestore
+            .collection('users')
+            .doc(targetUid)
+            .collection('projects')
+            .doc(project['id'])
+            .delete();
         await _fetchUserData();
       } catch (e) {
         debugPrint("DELETE ERROR: $e");
@@ -453,27 +574,50 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final strings = _getLocalizedStrings(context);
-    final isRtl = Provider.of<LanguageProvider>(context).locale.languageCode == 'he' || Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
+    final isRtl =
+        Provider.of<LanguageProvider>(context).locale.languageCode == 'he' ||
+        Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
 
-    if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (_isLoading)
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
     if (_isOwnProfile && _isGuest() && widget.userId == null) {
       return Scaffold(
-        appBar: AppBar(title: Text(strings['title']!), backgroundColor: const Color(0xFF1976D2), foregroundColor: Colors.white),
-        body: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(Icons.person_outline, size: 80, color: Colors.grey[400]),
-          Text(strings['please_login']!, style: const TextStyle(color: Colors.grey)),
-          const SizedBox(height: 24),
-          ElevatedButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SignInPage())), child: Text(strings['login']!)),
-        ])),
+        appBar: AppBar(
+          title: Text(strings['title']!),
+          backgroundColor: const Color(0xFF1976D2),
+          foregroundColor: Colors.white,
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.person_outline, size: 80, color: Colors.grey[400]),
+              Text(
+                strings['please_login']!,
+                style: const TextStyle(color: Colors.grey),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SignInPage()),
+                ),
+                child: Text(strings['login']!),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
     final currentUser = FirebaseAuth.instance.currentUser;
-    final existingReview = _userReviews.cast<Map<String, dynamic>?>().firstWhere(
-      (r) => r != null && r['userId'] == currentUser?.uid,
-      orElse: () => null,
-    );
+    final existingReview = _userReviews
+        .cast<Map<String, dynamic>?>()
+        .firstWhere(
+          (r) => r != null && r['userId'] == currentUser?.uid,
+          orElse: () => null,
+        );
 
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
@@ -484,50 +628,157 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           child: NestedScrollView(
             headerSliverBuilder: (context, innerBoxIsScrolled) => [
               SliverAppBar(
-                expandedHeight: 400, pinned: true, stretch: true, backgroundColor: const Color(0xFF1976D2),
+                expandedHeight: 400,
+                pinned: true,
+                stretch: true,
+                backgroundColor: const Color(0xFF1976D2),
                 actions: [
-                  IconButton(icon: const Icon(Icons.share_outlined), onPressed: () => _shareProfile(strings)),
-                  if (!_isOwnProfile) IconButton(icon: const Icon(Icons.report_problem_outlined, color: Colors.white70), onPressed: () => _reportUser(strings)),
+                  IconButton(
+                    icon: const Icon(Icons.share_outlined),
+                    onPressed: () => _shareProfile(strings),
+                  ),
+                  if (!_isOwnProfile)
+                    IconButton(
+                      icon: const Icon(
+                        Icons.report_problem_outlined,
+                        color: Colors.white70,
+                      ),
+                      onPressed: () => _reportUser(strings),
+                    ),
                   if (_isOwnProfile && !_isGuest())
-                    IconButton(icon: const Icon(Icons.settings_outlined), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())))
+                    IconButton(
+                      icon: const Icon(Icons.settings_outlined),
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const SettingsPage()),
+                      ),
+                    ),
                 ],
                 flexibleSpace: FlexibleSpaceBar(
-                  background: Stack(fit: StackFit.expand, children: [
-                    _profileImageUrl.isNotEmpty ? Image.network(_profileImageUrl, fit: BoxFit.cover) : Container(color: const Color(0xFF1E3A8A), child: const Icon(Icons.person, size: 100, color: Colors.white24)),
-                    Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black.withValues(alpha: 0.8)]))),
-                    Positioned(bottom: 60, left: 20, right: 20, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Row(children: [Text(_userName, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)), if (_userType == 'worker') const Padding(padding: EdgeInsets.only(left: 8), child: Icon(Icons.verified, color: Colors.blue, size: 20))]),
-                      if (_userProfessions.isNotEmpty) Text(_userProfessions.join(', '), style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 16)),
-                      Row(children: [const Icon(Icons.location_on, color: Colors.white70, size: 16), Text(_town, style: const TextStyle(color: Colors.white70, fontSize: 14))]),
-                    ])),
-                  ]),
+                  background: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _profileImageUrl.isNotEmpty
+                          ? Image.network(_profileImageUrl, fit: BoxFit.cover)
+                          : Container(
+                              color: const Color(0xFF1E3A8A),
+                              child: const Icon(
+                                Icons.person,
+                                size: 100,
+                                color: Colors.white24,
+                              ),
+                            ),
+                      Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.8),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        bottom: 60,
+                        left: 20,
+                        right: 20,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  _userName,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                if (_userType == 'worker')
+                                  const Padding(
+                                    padding: EdgeInsets.only(left: 8),
+                                    child: Icon(
+                                      Icons.verified,
+                                      color: Colors.blue,
+                                      size: 20,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            if (_userProfessions.isNotEmpty)
+                              Text(
+                                _userProfessions.join(', '),
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.9),
+                                  fontSize: 16,
+                                ),
+                              ),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.location_on,
+                                  color: Colors.white70,
+                                  size: 16,
+                                ),
+                                Text(
+                                  _town,
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               SliverPersistentHeader(
-                pinned: true, 
+                pinned: true,
                 delegate: _SliverAppBarDelegate(
                   TabBar(
                     controller: _tabController,
-                    labelColor: const Color(0xFF1976D2), 
-                    unselectedLabelColor: Colors.grey, 
-                    indicatorColor: const Color(0xFF1976D2), 
-                    tabs: [Tab(text: strings['projects']), Tab(text: strings['schedule']), Tab(text: strings['reviews']), Tab(text: strings['about'])]
-                  )
-                )
+                    labelColor: const Color(0xFF1976D2),
+                    unselectedLabelColor: Colors.grey,
+                    indicatorColor: const Color(0xFF1976D2),
+                    tabs: [
+                      Tab(text: strings['projects']),
+                      Tab(text: strings['schedule']),
+                      Tab(text: strings['reviews']),
+                      Tab(text: strings['about']),
+                    ],
+                  ),
+                ),
               ),
             ],
             body: TabBarView(
               controller: _tabController,
               children: [
-                _buildProjectsGrid(strings), 
-                SchedulePage(workerId: widget.userId ?? FirebaseAuth.instance.currentUser?.uid ?? "", workerName: _userName), 
-                _buildReviewsTab(strings, existingReview), 
-                _buildAboutTab(strings)
-              ]
+                _buildProjectsGrid(strings),
+                SchedulePage(
+                  workerId:
+                      widget.userId ??
+                      FirebaseAuth.instance.currentUser?.uid ??
+                      "",
+                  workerName: _userName,
+                ),
+                _buildReviewsTab(strings, existingReview),
+                _buildAboutTab(strings),
+              ],
             ),
           ),
         ),
-        bottomNavigationBar: (_tabController.index == 1 || (_isOwnProfile && _userType != 'normal')) ? null : _buildBottomAction(strings, existingReview),
+        bottomNavigationBar:
+            (_tabController.index == 1 ||
+                (_isOwnProfile && _userType != 'normal'))
+            ? null
+            : _buildBottomAction(strings, existingReview),
       ),
     );
   }
@@ -536,56 +787,115 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
     bool canAdd = _isOwnProfile && !_isGuest();
     return GridView.builder(
       padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 12, mainAxisSpacing: 12),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+      ),
       itemCount: _projects.length + (canAdd ? 1 : 0),
       itemBuilder: (context, index) {
-        if (canAdd && index == 0) return InkWell(onTap: _addProject, child: Container(decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(16)), child: const Icon(Icons.add_a_photo_outlined, color: Color(0xFF1976D2), size: 32)));
+        if (canAdd && index == 0)
+          return InkWell(
+            onTap: _addProject,
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(
+                Icons.add_a_photo_outlined,
+                color: Color(0xFF1976D2),
+                size: 32,
+              ),
+            ),
+          );
         final project = _projects[canAdd ? index - 1 : index];
         return GestureDetector(
           onTap: () => _showProjectDetail(project),
           onLongPress: () => _confirmDeleteProject(project),
-          child: ClipRRect(borderRadius: BorderRadius.circular(16), child: Image.network(project['imageUrl'], fit: BoxFit.cover)),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Image.network(project['imageUrl'], fit: BoxFit.cover),
+          ),
         );
       },
     );
   }
 
-  Widget _buildReviewsTab(Map<String, String> strings, Map<String, dynamic>? existingReview) {
-    if (_userReviews.isEmpty) return Center(child: Text(strings['no_reviews']!));
+  Widget _buildReviewsTab(
+    Map<String, String> strings,
+    Map<String, dynamic>? existingReview,
+  ) {
+    if (_userReviews.isEmpty)
+      return Center(child: Text(strings['no_reviews']!));
     return ListView.builder(
-      padding: const EdgeInsets.all(16), 
-      itemCount: _userReviews.length, 
+      padding: const EdgeInsets.all(16),
+      itemCount: _userReviews.length,
       itemBuilder: (context, index) {
         final r = _userReviews[index];
-        final bool isMyReview = r['userId'] == FirebaseAuth.instance.currentUser?.uid;
-        
+        final bool isMyReview =
+            r['userId'] == FirebaseAuth.instance.currentUser?.uid;
+
         return GestureDetector(
-          onTap: isMyReview ? () => _showReviewDialog(strings, existingReview: existingReview) : null,
+          onTap: isMyReview
+              ? () => _showReviewDialog(strings, existingReview: existingReview)
+              : null,
           child: Card(
-            margin: const EdgeInsets.only(bottom: 12), 
+            margin: const EdgeInsets.only(bottom: 12),
             child: ListTile(
-              title: Text(r['userName'] ?? "User"), 
-              subtitle: Text(r['comment'] ?? ""), 
-              trailing: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.star, color: Colors.amber, size: 16), Text("${r['stars']}")]),
+              title: Text(r['userName'] ?? "User"),
+              subtitle: Text(r['comment'] ?? ""),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.star, color: Colors.amber, size: 16),
+                  Text("${r['stars']}"),
+                ],
+              ),
             ),
           ),
         );
-      }
+      },
     );
   }
 
   Widget _buildAboutTab(Map<String, String> strings) {
-    return SingleChildScrollView(padding: const EdgeInsets.all(24), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(strings['bio']!, style: const TextStyle(fontSize: 16, height: 1.5)),
-      const SizedBox(height: 32),
-      Text(strings['contact_info']!, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-      ListTile(leading: const Icon(Icons.phone), title: Text(_phoneNumber)),
-      ListTile(leading: const Icon(Icons.email), title: Text(_email)),
-      SizedBox(width: double.infinity, child: OutlinedButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AveragePricesPage())), icon: const Icon(Icons.price_change), label: Text(strings['price_guide']!))),
-    ]));
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            strings['bio']!,
+            style: const TextStyle(fontSize: 16, height: 1.5),
+          ),
+          const SizedBox(height: 32),
+          Text(
+            strings['contact_info']!,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          ListTile(leading: const Icon(Icons.phone), title: Text(_phoneNumber)),
+          ListTile(leading: const Icon(Icons.email), title: Text(_email)),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AveragePricesPage()),
+              ),
+              icon: const Icon(Icons.price_change),
+              label: Text(strings['price_guide']!),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
-  Widget _buildBottomAction(Map<String, String> strings, Map<String, dynamic>? existingReview) {
+  Widget _buildBottomAction(
+    Map<String, String> strings,
+    Map<String, dynamic>? existingReview,
+  ) {
     if (_isOwnProfile && _userType == 'normal' && !_isGuest()) {
       return Container(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
@@ -600,7 +910,10 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           ],
         ),
         child: InkWell(
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SubscriptionPage(email: _email))),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => SubscriptionPage(email: _email)),
+          ),
           borderRadius: BorderRadius.circular(16),
           child: Container(
             height: 56,
@@ -663,8 +976,11 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
               Expanded(
                 child: _buildActionBtn(
                   onTap: () {
-                    if (_isGuest()) _showGuestDialog(context, strings);
-                    else launchUrl(Uri.parse("tel:$_phoneNumber"));
+                    if (_isGuest()) {
+                      _showGuestDialog(context, strings);
+                    } else {
+                      launchUrl(Uri.parse("tel:$_phoneNumber"));
+                    }
                   },
                   icon: Icons.phone_rounded,
                   label: strings['call']!,
@@ -675,8 +991,11 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
               Expanded(
                 child: _buildActionBtn(
                   onTap: () {
-                    if (_isGuest()) _showGuestDialog(context, strings);
-                    else launchUrl(Uri.parse("sms:$_phoneNumber"));
+                    if (_isGuest()) {
+                      _showGuestDialog(context, strings);
+                    } else {
+                      launchUrl(Uri.parse("sms:$_phoneNumber"));
+                    }
                   },
                   icon: Icons.chat_bubble_rounded,
                   label: strings['message']!,
@@ -688,9 +1007,14 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
           if (_userType == 'worker') ...[
             const SizedBox(height: 12),
             _buildActionBtn(
-              onTap: () => _showReviewDialog(strings, existingReview: existingReview),
-              icon: existingReview != null ? Icons.edit_note_rounded : Icons.star_rate_rounded,
-              label: existingReview != null ? strings['edit_review']! : strings['add_review']!,
+              onTap: () =>
+                  _showReviewDialog(strings, existingReview: existingReview),
+              icon: existingReview != null
+                  ? Icons.edit_note_rounded
+                  : Icons.star_rate_rounded,
+              label: existingReview != null
+                  ? strings['edit_review']!
+                  : strings['add_review']!,
               color: const Color(0xFFF59E0B),
               isFullWidth: true,
             ),
@@ -725,7 +1049,11 @@ class _ProfileState extends State<profile> with SingleTickerProviderStateMixin {
             const SizedBox(width: 8),
             Text(
               label,
-              style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 15),
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+              ),
             ),
           ],
         ),
@@ -772,7 +1100,8 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
   }
 
   void _listenToComments() {
-    _commentsSubscription = _firestore.collection('users')
+    _commentsSubscription = _firestore
+        .collection('users')
         .doc(widget.userId)
         .collection('projects')
         .doc(widget.project['id'])
@@ -780,13 +1109,13 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
         .orderBy('timestamp', descending: true)
         .snapshots()
         .listen((snapshot) {
-      final loaded = snapshot.docs.map((doc) {
-        final data = Map<String, dynamic>.from(doc.data());
-        data['id'] = doc.id;
-        return data;
-      }).toList();
-      if (mounted) setState(() => _comments = loaded);
-    });
+          final loaded = snapshot.docs.map((doc) {
+            final data = Map<String, dynamic>.from(doc.data());
+            data['id'] = doc.id;
+            return data;
+          }).toList();
+          if (mounted) setState(() => _comments = loaded);
+        });
   }
 
   Future<void> _addComment() async {
@@ -800,17 +1129,18 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
       if (userDoc.exists) authorName = userDoc.data()?['name'] ?? "User";
     }
 
-    await _firestore.collection('users')
+    await _firestore
+        .collection('users')
         .doc(widget.userId)
         .collection('projects')
         .doc(widget.project['id'])
         .collection('comments')
         .add({
-      'userId': user.uid,
-      'userName': authorName,
-      'text': _commentController.text.trim(),
-      'timestamp': FieldValue.serverTimestamp(),
-    });
+          'userId': user.uid,
+          'userName': authorName,
+          'text': _commentController.text.trim(),
+          'timestamp': FieldValue.serverTimestamp(),
+        });
     _commentController.clear();
   }
 
@@ -841,15 +1171,22 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Image.network(widget.project['imageUrl'], fit: BoxFit.contain),
-                    if (widget.project['description'] != null && widget.project['description'].toString().isNotEmpty)
+                    Image.network(
+                      widget.project['imageUrl'],
+                      fit: BoxFit.contain,
+                    ),
+                    if (widget.project['description'] != null &&
+                        widget.project['description'].toString().isNotEmpty)
                       Container(
                         padding: const EdgeInsets.all(16),
                         color: Colors.black54,
                         width: double.infinity,
                         child: Text(
                           widget.project['description'],
-                          style: const TextStyle(color: Colors.white, fontSize: 16),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                          ),
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -868,7 +1205,13 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
               children: [
                 Padding(
                   padding: const EdgeInsets.all(16.0),
-                  child: Text(widget.localizedStrings['comments']!, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  child: Text(
+                    widget.localizedStrings['comments']!,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
                 Expanded(
                   child: ListView.builder(
@@ -878,13 +1221,20 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                       final c = _comments[index];
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
-                        title: Text(c['userName'] ?? "User", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        title: Text(
+                          c['userName'] ?? "User",
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
                         subtitle: Text(c['text'] ?? ""),
                       );
                     },
                   ),
                 ),
-                if (FirebaseAuth.instance.currentUser != null && !FirebaseAuth.instance.currentUser!.isAnonymous)
+                if (FirebaseAuth.instance.currentUser != null &&
+                    !FirebaseAuth.instance.currentUser!.isAnonymous)
                   Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Row(
@@ -894,13 +1244,23 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                             controller: _commentController,
                             decoration: InputDecoration(
                               hintText: widget.localizedStrings['add_comment'],
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(24)),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
                             ),
                           ),
                         ),
                         const SizedBox(width: 8),
-                        IconButton(onPressed: _addComment, icon: const Icon(Icons.send, color: Color(0xFF1976D2))),
+                        IconButton(
+                          onPressed: _addComment,
+                          icon: const Icon(
+                            Icons.send,
+                            color: Color(0xFF1976D2),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -916,8 +1276,16 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
 class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
   _SliverAppBarDelegate(this._tabBar);
   final TabBar _tabBar;
-  @override double get minExtent => _tabBar.preferredSize.height;
-  @override double get maxExtent => _tabBar.preferredSize.height;
-  @override Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) => Container(color: Colors.white, child: _tabBar);
-  @override bool shouldRebuild(_SliverAppBarDelegate oldDelegate) => false;
+  @override
+  double get minExtent => _tabBar.preferredSize.height;
+  @override
+  double get maxExtent => _tabBar.preferredSize.height;
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) => Container(color: Colors.white, child: _tabBar);
+  @override
+  bool shouldRebuild(_SliverAppBarDelegate oldDelegate) => false;
 }
