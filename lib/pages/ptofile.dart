@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -21,6 +22,7 @@ import 'package:untitled1/pages/analytics_page.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:http/http.dart' as http;
 
 class Profile extends StatefulWidget {
   final String? userId;
@@ -47,10 +49,9 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
   String _userType = "";
   List<String> _userProfessions = [];
   List<Map<String, dynamic>> _userReviews = [];
-
   List<Map<String, dynamic>> _projects = [];
-
   bool _isFavorite = false;
+
   bool _isOwnProfile = false;
   bool _isLoading = true;
 
@@ -61,6 +62,8 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
   String _distanceStr = "";
   double? _proLat;
   double? _proLng;
+
+  final String _googleMapsApiKey = "AIzaSyCL9zie59-f_Hiyqj_dYtaMziReezcd6fU";
 
   @override
   void initState() {
@@ -195,22 +198,53 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
       }
 
       if (userPos != null) {
-        double distance = Geolocator.distanceBetween(
-          userPos.latitude, userPos.longitude, _proLat!, _proLng!
+        final url = Uri.parse(
+          'https://maps.googleapis.com/maps/api/distancematrix/json'
+          '?origins=${userPos.latitude},${userPos.longitude}'
+          '&destinations=$_proLat,$_proLng'
+          '&key=$_googleMapsApiKey'
         );
 
-        if (mounted) {
-          setState(() {
-            if (distance < 1000) {
-              _distanceStr = "${distance.toStringAsFixed(0)}m";
-            } else {
-              _distanceStr = "${(distance / 1000).toStringAsFixed(1)}km";
+        final response = await http.get(url);
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (data['status'] == 'OK' && 
+              data['rows'].isNotEmpty && 
+              data['rows'][0]['elements'].isNotEmpty &&
+              data['rows'][0]['elements'][0]['status'] == 'OK') {
+            
+            final distanceText = data['rows'][0]['elements'][0]['distance']['text'];
+            
+            if (mounted) {
+              setState(() {
+                _distanceStr = distanceText;
+              });
             }
-          });
+          } else {
+            _calculateStraightLineDistance(userPos);
+          }
+        } else {
+          _calculateStraightLineDistance(userPos);
         }
       }
     } catch (e) {
       debugPrint("Distance calc error: $e");
+    }
+  }
+
+  void _calculateStraightLineDistance(Position userPos) {
+    double distance = Geolocator.distanceBetween(
+      userPos.latitude, userPos.longitude, _proLat!, _proLng!
+    );
+    
+    if (mounted) {
+      setState(() {
+        if (distance < 1000) {
+          _distanceStr = "${distance.toStringAsFixed(0)}m";
+        } else {
+          _distanceStr = "${(distance / 1000).toStringAsFixed(1)}km";
+        }
+      });
     }
   }
 
@@ -319,6 +353,10 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           'insured': 'מבוטח',
           'analytics': 'ניתוח מקצועי',
           'distance': 'מרחק ממך',
+          'price': 'מחיר',
+          'service': 'שירות',
+          'timing': 'עמידה בזמנים',
+          'choose_profession': 'בחר מקצוע',
         };
       default:
         return {
@@ -374,6 +412,10 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           'insured': 'Insured',
           'analytics': 'Professional Analyzation',
           'distance': 'Distance from you',
+          'price': 'Price',
+          'service': 'Service',
+          'timing': 'Timing',
+          'choose_profession': 'Choose Profession',
         };
     }
   }
@@ -477,7 +519,12 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
       return;
     }
 
-    double selectedStars = existingReview != null ? (existingReview['stars'] as num).toDouble() : 5.0;
+    double starsPrice = existingReview != null ? (existingReview['starsPrice'] as num? ?? existingReview['stars'] ?? 5.0).toDouble() : 5.0;
+    double starsService = existingReview != null ? (existingReview['starsService'] as num? ?? existingReview['stars'] ?? 5.0).toDouble() : 5.0;
+    double starsTiming = existingReview != null ? (existingReview['starsTiming'] as num? ?? existingReview['stars'] ?? 5.0).toDouble() : 5.0;
+    
+    String? selectedProfession = existingReview != null ? existingReview['profession'] : (_userProfessions.isNotEmpty ? _userProfessions.first : null);
+    
     final commentController = TextEditingController(text: existingReview != null ? existingReview['comment'] : "");
 
     await showDialog(
@@ -486,20 +533,33 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
         builder: (context, setDialogState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Text(existingReview != null ? strings['edit_review']! : strings['rating_title']!, style: const TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(5, (i) => IconButton(icon: Icon(i < selectedStars ? Icons.star : Icons.star_border, color: Colors.amber, size: 32), onPressed: () => setDialogState(() => selectedStars = i + 1.0)))),
-            const SizedBox(height: 16),
-            TextField(
-              controller: commentController,
-              decoration: InputDecoration(
-                hintText: strings['rating_hint'],
-                filled: true,
-                fillColor: Colors.grey[100],
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              if (_userProfessions.length > 1) ...[
+                DropdownButtonFormField<String>(
+                  value: selectedProfession,
+                  decoration: InputDecoration(labelText: strings['choose_profession']),
+                  items: _userProfessions.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
+                  onChanged: (val) => setDialogState(() => selectedProfession = val),
+                ),
+                const SizedBox(height: 16),
+              ],
+              _buildRatingRow(strings['price']!, starsPrice, (v) => setDialogState(() => starsPrice = v)),
+              _buildRatingRow(strings['service']!, starsService, (v) => setDialogState(() => starsService = v)),
+              _buildRatingRow(strings['timing']!, starsTiming, (v) => setDialogState(() => starsTiming = v)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: commentController,
+                decoration: InputDecoration(
+                  hintText: strings['rating_hint'],
+                  filled: true,
+                  fillColor: Colors.grey[100],
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                ),
+                maxLines: 3
               ),
-              maxLines: 3
-            ),
-          ]),
+            ]),
+          ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: Text(strings['cancel']!)),
             ElevatedButton(
@@ -515,10 +575,16 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                    if (userDoc.exists) authorName = userDoc.data()?['name'] ?? "User";
                 }
 
+                double avg = (starsPrice + starsService + starsTiming) / 3.0;
+
                 final reviewData = {
                   'userId': currentUser.uid,
                   'userName': authorName,
-                  'stars': selectedStars,
+                  'stars': avg,
+                  'starsPrice': starsPrice,
+                  'starsService': starsService,
+                  'starsTiming': starsTiming,
+                  'profession': selectedProfession,
                   'comment': commentController.text,
                   'timestamp': FieldValue.serverTimestamp(),
                 };
@@ -532,27 +598,68 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                   final data = userSnap.data()!;
                   double currentAvg = (data['avgRating'] ?? 0.0).toDouble();
                   int currentCount = (data['reviewCount'] ?? 0);
+                  Map<String, dynamic> professionStats = Map<String, dynamic>.from(data['professionStats'] ?? {});
 
                   final reviewsRef = userRef.collection('reviews');
                   
                   if (existingReview != null) {
                     double oldStars = (existingReview['stars'] as num).toDouble();
-                    double totalStars = (currentAvg * currentCount) - oldStars + selectedStars;
+                    String oldProf = existingReview['profession'] ?? "";
+                    
+                    // Update overall avg
+                    double totalStars = (currentAvg * currentCount) - oldStars + avg;
                     double newAvg = totalStars / currentCount;
+
+                    // Update profession-specific stats
+                    if (oldProf.isNotEmpty && professionStats.containsKey(oldProf)) {
+                       var pStat = professionStats[oldProf];
+                       double pAvg = (pStat['avg'] ?? 0.0).toDouble();
+                       int pCount = pStat['count'] ?? 0;
+                       
+                       if (oldProf == selectedProfession) {
+                          double pTotal = (pAvg * pCount) - oldStars + avg;
+                          professionStats[oldProf] = {'avg': pTotal / pCount, 'count': pCount};
+                       } else {
+                          // Moved review from one profession to another
+                          // Remove from old
+                          if (pCount > 1) {
+                             professionStats[oldProf] = {'avg': ((pAvg * pCount) - oldStars) / (pCount - 1), 'count': pCount - 1};
+                          } else {
+                             professionStats.remove(oldProf);
+                          }
+                          // Add to new
+                          if (selectedProfession != null) {
+                             var nStat = professionStats[selectedProfession] ?? {'avg': 0.0, 'count': 0};
+                             double nAvg = (nStat['avg'] ?? 0.0).toDouble();
+                             int nCount = nStat['count'] ?? 0;
+                             professionStats[selectedProfession!] = {'avg': ((nAvg * nCount) + avg) / (nCount + 1), 'count': nCount + 1};
+                          }
+                       }
+                    }
 
                     transaction.update(reviewsRef.doc(existingReview['id']), reviewData);
                     transaction.update(userRef, {
                       'avgRating': newAvg,
+                      'professionStats': professionStats,
                     });
                   } else {
-                    double totalStars = (currentAvg * currentCount) + selectedStars;
+                    double totalStars = (currentAvg * currentCount) + avg;
                     int newCount = currentCount + 1;
                     double newAvg = totalStars / newCount;
+
+                    // Update profession-specific stats
+                    if (selectedProfession != null) {
+                       var pStat = professionStats[selectedProfession] ?? {'avg': 0.0, 'count': 0};
+                       double pAvg = (pStat['avg'] ?? 0.0).toDouble();
+                       int pCount = pStat['count'] ?? 0;
+                       professionStats[selectedProfession!] = {'avg': ((pAvg * pCount) + avg) / (pCount + 1), 'count': pCount + 1};
+                    }
 
                     transaction.set(reviewsRef.doc(), reviewData);
                     transaction.update(userRef, {
                       'avgRating': newAvg,
                       'reviewCount': newCount,
+                      'professionStats': professionStats,
                     });
                   }
                 });
@@ -566,6 +673,19 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildRatingRow(String label, double rating, Function(double) onRatingChanged) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(5, (i) => IconButton(
+          visualDensity: VisualDensity.compact,
+          icon: Icon(i < rating ? Icons.star : Icons.star_border, color: Colors.amber, size: 24), 
+          onPressed: () => onRatingChanged(i + 1.0)))),
+      ],
     );
   }
 
@@ -882,10 +1002,30 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(16)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text(r['userName'] ?? "User", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(r['userName'] ?? "User", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  if (r['profession'] != null) 
+                    Text(r['profession'], style: TextStyle(fontSize: 12, color: Colors.grey[600], fontStyle: FontStyle.italic)),
+                ],
+              ),
               Row(children: List.generate(5, (i) => Icon(Icons.star, color: i < (r['stars'] as num) ? Colors.amber : Colors.grey[300], size: 14))),
             ]),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
+            if (r['starsPrice'] != null || r['starsService'] != null || r['starsTiming'] != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Wrap(
+                  spacing: 16,
+                  runSpacing: 8,
+                  children: [
+                    if (r['starsPrice'] != null) _buildMiniRating(strings['price']!, (r['starsPrice'] as num).toDouble()),
+                    if (r['starsService'] != null) _buildMiniRating(strings['service']!, (r['starsService'] as num).toDouble()),
+                    if (r['starsTiming'] != null) _buildMiniRating(strings['timing']!, (r['starsTiming'] as num).toDouble()),
+                  ],
+                ),
+              ),
             Text(r['comment'] ?? "", style: TextStyle(color: Colors.grey[700], height: 1.4)),
             if (isMyReview)
               Align(
@@ -895,6 +1035,17 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           ]),
         );
       }
+    );
+  }
+
+  Widget _buildMiniRating(String label, double rating) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+        Row(mainAxisSize: MainAxisSize.min, children: List.generate(5, (i) => Icon(Icons.star, color: i < rating ? Colors.amber : Colors.grey[300], size: 10))),
+      ],
     );
   }
 

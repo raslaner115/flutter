@@ -100,10 +100,8 @@ class _SearchPageState extends State<SearchPage> {
         final data = doc.data();
         data['uid'] = doc.id;
 
-        if (data['avgRating'] == null) {
-          data['avgRating'] = 0.0;
-          data['reviewCount'] = 0;
-        }
+        data['avgRating'] = (data['avgRating'] ?? 0.0).toDouble();
+        data['reviewCount'] = data['reviewCount'] ?? 0;
 
         return data;
       }).toList();
@@ -114,7 +112,7 @@ class _SearchPageState extends State<SearchPage> {
           _applyFilters();
           _isLoadingWorkers = false;
         });
-        
+
         if (_currentPosition != null) {
           _fetchMatrixDistances();
         }
@@ -135,7 +133,7 @@ class _SearchPageState extends State<SearchPage> {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) return;
       }
-      
+
       if (permission == LocationPermission.deniedForever) return;
 
       Position position = await Geolocator.getCurrentPosition();
@@ -145,11 +143,11 @@ class _SearchPageState extends State<SearchPage> {
            _sortBy = 'distance';
         }
       });
-      
+
       if (_allWorkers.isNotEmpty) {
         await _fetchMatrixDistances();
       }
-      
+
       _applyFilters();
     } catch (e) {
       debugPrint("Error getting location: $e");
@@ -234,7 +232,7 @@ class _SearchPageState extends State<SearchPage> {
           bool matchesRadius = true;
           if (_filterByRadius && _currentPosition != null) {
             double? radius = w['workRadius']?.toDouble();
-            
+
             if (_matrixDistances.containsKey(w['uid'])) {
               int distanceMeters = _matrixDistances[w['uid']]!['value'];
               if (radius != null) {
@@ -260,16 +258,24 @@ class _SearchPageState extends State<SearchPage> {
         }).toList();
 
         if (_sortBy == 'rating') {
-          _filteredWorkers.sort(
-            (a, b) => (b['avgRating'] as num).compareTo(a['avgRating'] as num),
-          );
+          _filteredWorkers.sort((a, b) {
+            double ratingA = (a['avgRating'] as num).toDouble();
+            double ratingB = (b['avgRating'] as num).toDouble();
+
+            if (_selectedProfession != null) {
+              String profKey = _selectedProfession!['en'];
+              ratingA = (a['professionStats']?[profKey]?['avg'] ?? 0.0).toDouble();
+              ratingB = (b['professionStats']?[profKey]?['avg'] ?? 0.0).toDouble();
+            }
+            return ratingB.compareTo(ratingA);
+          });
         } else if (_sortBy == 'distance' && _currentPosition != null) {
           _filteredWorkers.sort((a, b) {
             if (_matrixDistances.containsKey(a['uid']) && _matrixDistances.containsKey(b['uid'])) {
                return (_matrixDistances[a['uid']]!['value'] as int)
                    .compareTo(_matrixDistances[b['uid']]!['value'] as int);
             }
-            
+
             double latA = a['lat'] ?? 0.0;
             double lngA = a['lng'] ?? 0.0;
             double latB = b['lat'] ?? 0.0;
@@ -522,7 +528,7 @@ class _SearchPageState extends State<SearchPage> {
       itemCount: _filteredWorkers.length,
       itemBuilder: (context, index) {
         final w = _filteredWorkers[index];
-        
+
         String distanceStr = "";
         if (_matrixDistances.containsKey(w['uid'])) {
           distanceStr = _matrixDistances[w['uid']]!['text'];
@@ -538,6 +544,23 @@ class _SearchPageState extends State<SearchPage> {
         final bool isIdVerified = w['isIdVerified'] ?? false;
         final bool isBusinessVerified = w['isBusinessVerified'] ?? false;
         final bool isInsured = w['isInsured'] ?? false;
+
+        // Profession-specific rating logic
+        double displayRating = 0.0;
+        int displayReviewCount = 0;
+        bool isServiceSpecific = false;
+
+        if (_selectedProfession != null) {
+          String profKey = _selectedProfession!['en'];
+          if (w['professionStats']?[profKey] != null) {
+            displayRating = (w['professionStats'][profKey]['avg'] ?? 0.0).toDouble();
+            displayReviewCount = w['professionStats'][profKey]['count'] ?? 0;
+            isServiceSpecific = true;
+          }
+        } else {
+          displayRating = (w['avgRating'] as num).toDouble();
+          displayReviewCount = w['reviewCount'] ?? 0;
+        }
 
         return Container(
           margin: const EdgeInsets.only(bottom: 16),
@@ -609,38 +632,59 @@ class _SearchPageState extends State<SearchPage> {
                 ),
               ],
             ),
-            trailing: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.star_rounded,
-                        color: Colors.amber,
-                        size: 16,
+            trailing: SizedBox(
+              width: 100,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (isServiceSpecific)
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        locale == 'he' ? 'דירוג לשירות זה' : 'Rating for service',
+                        style: TextStyle(fontSize: 9, color: themeColor, fontWeight: FontWeight.bold),
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        (w['avgRating'] as num).toStringAsFixed(1),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
+                    ),
+                  const SizedBox(height: 2),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.star_rounded,
                           color: Colors.amber,
+                          size: 16,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 4),
+                        Text(
+                          displayRating.toStringAsFixed(1),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.amber,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  if (displayReviewCount > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4, right: 4),
+                      child: Text(
+                        "($displayReviewCount)",
+                        style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                ],
+              ),
             ),
             onTap: () => Navigator.push(
               context,

@@ -36,7 +36,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   bool _isLoading = false;
   final ImagePicker _picker = ImagePicker();
   
-  double _workRadius = 5000.0;
+  double _workRadius = 25000.0;
   LatLng? _workCenter;
 
   final List<String> _allProfessions = [
@@ -58,7 +58,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     _townController = TextEditingController(text: _selectedTown);
     _selectedProfessions = List<String>.from(widget.userData['professions'] ?? []);
     
-    _workRadius = (widget.userData['workRadius'] ?? 5000.0).toDouble();
+    _workRadius = (widget.userData['workRadius'] ?? 25000.0).toDouble();
     if (widget.userData['workCenterLat'] != null && widget.userData['workCenterLng'] != null) {
       _workCenter = LatLng(widget.userData['workCenterLat'], widget.userData['workCenterLng']);
     } else if (widget.userData['lat'] != null && widget.userData['lng'] != null) {
