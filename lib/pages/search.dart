@@ -33,6 +33,8 @@ class _SearchPageState extends State<SearchPage> {
   String _sortBy = 'rating';
   Position? _currentPosition;
   bool _filterByRadius = false;
+  bool _filterByVerified = false;
+  DateTime? _filterByDate;
 
   final String _googleMapsApiKey = "AIzaSyCL9zie59-f_Hiyqj_dYtaMziReezcd6fU";
   Map<String, Map<String, dynamic>> _matrixDistances = {}; // UID -> { 'text': '1.2 km', 'value': 1200 }
@@ -206,6 +208,43 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
+  bool _isWorkerAvailable(Map<String, dynamic> w, DateTime date) {
+    final dateStr = "${date.year}-${date.month}-${date.day}";
+    
+    // Check permanent off days (1=Mon, 7=Sun)
+    final disabledDays = List<int>.from(w['disabledDays'] ?? []);
+    if (disabledDays.contains(date.weekday)) return false;
+
+    // Check explicitly set available dates
+    final availableDates = List<String>.from(w['availableDates'] ?? []);
+    
+    // Check vacations
+    final vacations = List<Map<String, dynamic>>.from(w['vacations'] ?? []);
+    final d = DateTime(date.year, date.month, date.day);
+    bool onVacation = false;
+    for (var v in vacations) {
+      try {
+        final startParts = v['start']!.split('-');
+        final endParts = v['end']!.split('-');
+        final start = DateTime(int.parse(startParts[0]), int.parse(startParts[1]), int.parse(startParts[2]));
+        final end = DateTime(int.parse(endParts[0]), int.parse(endParts[1]), int.parse(endParts[2]));
+        if (d.isAtSameMomentAs(start) || d.isAtSameMomentAs(end) || (d.isAfter(start) && d.isBefore(end))) {
+          onVacation = true;
+          break;
+        }
+      } catch (_) {}
+    }
+    if (onVacation) return false;
+
+    // If worker has specified available dates, they must be in that list
+    if (availableDates.isNotEmpty) {
+      return availableDates.contains(dateStr);
+    }
+
+    // Default: available if not permanent off and not on vacation
+    return true;
+  }
+
   void _applyFilters() {
     final query = _searchController.text.toLowerCase();
     final locale = Provider.of<LanguageProvider>(
@@ -254,7 +293,17 @@ class _SearchPageState extends State<SearchPage> {
             }
           }
 
-          return matchesTrade && matchesSearch && matchesRadius;
+          bool matchesVerified = true;
+          if (_filterByVerified) {
+            matchesVerified = (w['isIdVerified'] == true) || (w['isBusinessVerified'] == true);
+          }
+
+          bool matchesDate = true;
+          if (_filterByDate != null) {
+            matchesDate = _isWorkerAvailable(w, _filterByDate!);
+          }
+
+          return matchesTrade && matchesSearch && matchesRadius && matchesVerified && matchesDate;
         }).toList();
 
         if (_sortBy == 'rating') {
@@ -376,6 +425,7 @@ class _SearchPageState extends State<SearchPage> {
         body: Column(
           children: [
             _buildSearchHeader(locale, themeColor),
+            if (_showWorkerList) _buildQuickFilters(locale, themeColor),
             Expanded(
               child: _showWorkerList
                   ? (_isLoadingWorkers
@@ -391,10 +441,85 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
+  Widget _buildQuickFilters(String locale, Color themeColor) {
+    final bool isHebrew = locale == 'he';
+    return Container(
+      height: 50,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          FilterChip(
+            label: Text(isHebrew ? 'היום' : 'Today'),
+            selected: _filterByDate != null && isSameDay(_filterByDate!, DateTime.now()),
+            onSelected: (val) {
+              setState(() => _filterByDate = val ? DateTime.now() : null);
+              _applyFilters();
+            },
+            selectedColor: themeColor.withOpacity(0.2),
+            checkmarkColor: themeColor,
+          ),
+          const SizedBox(width: 8),
+          FilterChip(
+            label: Text(isHebrew ? 'סופ"ש' : 'Weekend'),
+            selected: _filterByDate != null && (_filterByDate!.weekday == DateTime.friday || _filterByDate!.weekday == DateTime.saturday),
+            onSelected: (val) {
+              if (val) {
+                DateTime now = DateTime.now();
+                int daysUntilFriday = (DateTime.friday - now.weekday + 7) % 7;
+                setState(() => _filterByDate = now.add(Duration(days: daysUntilFriday)));
+              } else {
+                setState(() => _filterByDate = null);
+              }
+              _applyFilters();
+            },
+            selectedColor: themeColor.withOpacity(0.2),
+            checkmarkColor: themeColor,
+          ),
+          const SizedBox(width: 8),
+          ActionChip(
+            avatar: const Icon(Icons.calendar_month, size: 16),
+            label: Text(_filterByDate == null 
+                ? (isHebrew ? 'תאריך ספציפי' : 'Specific Date')
+                : "${_filterByDate!.day}/${_filterByDate!.month}"),
+            onPressed: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _filterByDate ?? DateTime.now(),
+                firstDate: DateTime.now(),
+                lastDate: DateTime.now().add(const Duration(days: 365)),
+              );
+              if (picked != null) {
+                setState(() => _filterByDate = picked);
+                _applyFilters();
+              }
+            },
+            backgroundColor: _filterByDate != null ? themeColor.withOpacity(0.1) : null,
+          ),
+          const SizedBox(width: 8),
+          FilterChip(
+            label: Text(isHebrew ? 'מאומתים בלבד' : 'Verified Only'),
+            selected: _filterByVerified,
+            onSelected: (val) {
+              setState(() => _filterByVerified = val);
+              _applyFilters();
+            },
+            selectedColor: themeColor.withOpacity(0.2),
+            checkmarkColor: themeColor,
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool isSameDay(DateTime d1, DateTime d2) {
+    return d1.year == d2.year && d1.month == d2.month && d1.day == d2.day;
+  }
+
   Widget _buildSearchHeader(String locale, Color themeColor) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       decoration: BoxDecoration(
         color: themeColor,
         borderRadius: const BorderRadius.vertical(bottom: Radius.circular(32)),

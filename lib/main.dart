@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -11,6 +12,7 @@ import 'package:untitled1/pages/formu.dart';
 import 'package:untitled1/pages/ptofile.dart';
 import 'package:untitled1/pages/splash_screen.dart';
 import 'package:untitled1/pages/inbox_page.dart';
+import 'package:untitled1/pages/chat_page.dart';
 import 'package:untitled1/services/notification_service.dart';
 
 void main() async {
@@ -40,12 +42,90 @@ void main() async {
   );
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+  @override
+  void initState() {
+    super.initState();
+    // Listen for notification taps
+    NotificationService.selectNotificationStream.stream.listen((String? payload) {
+      if (payload != null && payload.isNotEmpty) {
+        try {
+          final data = jsonDecode(payload);
+          _handleDeepLink(data);
+        } catch (e) {
+          debugPrint("Error parsing notification payload: $e");
+        }
+      }
+    });
+  }
+
+  void _handleDeepLink(Map<String, dynamic> data) {
+    // Determine where to navigate based on payload data
+    if (data['type'] == 'chat' && data['senderId'] != null) {
+      navigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (context) => ChatPage(
+            receiverId: data['senderId'],
+            receiverName: data['senderName'] ?? "User",
+          ),
+        ),
+      );
+    } else if (data['type'] == 'blog' && data['postId'] != null) {
+      // Logic for blog post deep link
+      // Since BlogPage uses a Stream of posts, we might need to fetch the post first
+      // or pass the ID to a detail page.
+      _navigateToBlogPost(data['postId']);
+    }
+  }
+
+  void _navigateToBlogPost(String postId) async {
+    try {
+      final doc = await FirebaseFirestore.instance.collection('blog_posts').doc(postId).get();
+      if (doc.exists && mounted) {
+        final postData = doc.data() as Map<String, dynamic>;
+        postData['id'] = doc.id;
+        
+        // Use a dummy callback for onLike/onEdit etc for now as they are required by the detail page
+        navigatorKey.currentState?.push(
+          MaterialPageRoute(
+            builder: (context) => PostDetailPage(
+              post: postData,
+              onLike: () {},
+              onEdit: () {},
+              onDelete: () {},
+              localizedStrings: _getBlogLocalizedStrings(context),
+              onGuestDialog: () {},
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error navigating to blog post: $e");
+    }
+  }
+
+  Map<String, dynamic> _getBlogLocalizedStrings(BuildContext context) {
+    final locale = Provider.of<LanguageProvider>(context, listen: false).locale.languageCode;
+    // Minimal strings needed for detail page
+    if (locale == 'he') {
+      return {'comments': 'תגובות', 'add_comment': 'הוסף תגובה...', 'delete': 'מחק', 'edit': 'ערוך', 'report': 'דווח'};
+    }
+    return {'comments': 'Comments', 'add_comment': 'Add a comment...', 'delete': 'Delete', 'edit': 'Edit', 'report': 'Report'};
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       locale: Provider.of<LanguageProvider>(context).locale,
       theme: ThemeData(
@@ -66,21 +146,17 @@ class AuthWrapper extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        // If auth state is still loading, show the splash screen without auto-navigation
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const SplashScreen(navigateToSignIn: false);
         }
 
         final user = snapshot.data;
         if (user != null) {
-          // Start listening for notifications when user is logged in
           NotificationService.startListening();
           return const MyHomePage();
         }
 
-        // Stop listening when logged out
         NotificationService.stopListening();
-        // Return SplashScreen which handles the navigation to SignInPage if needed
         return const SplashScreen();
       },
     );

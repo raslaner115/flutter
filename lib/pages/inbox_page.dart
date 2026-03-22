@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import 'package:untitled1/language_provider.dart';
 import 'package:untitled1/pages/chat_page.dart';
+import 'package:untitled1/pages/support_bot_page.dart';
 import 'package:intl/intl.dart' as intl;
 
 class InboxPage extends StatefulWidget {
@@ -85,7 +86,7 @@ class _InboxPageState extends State<InboxPage> {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: Colors.grey[500],
+                      color: Colors.grey[50],
                       letterSpacing: 0.5,
                     ),
                   ),
@@ -189,11 +190,16 @@ class _InboxPageState extends State<InboxPage> {
             style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 18),
           ),
           subtitle: Text(
-            isRtl ? 'אנחנו כאן בשבילך לכל שאלה' : 'We are here to help you',
+            isRtl ? 'צ׳אט עם הבוט שלנו או עם נציג' : 'Chat with our bot or a human',
             style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13),
           ),
           trailing: const Icon(Icons.chevron_right, color: Colors.white),
-          onTap: () => _handleSupportTap(user, isRtl),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const SupportBotPage()),
+            );
+          },
         ),
       ),
     );
@@ -297,75 +303,6 @@ class _InboxPageState extends State<InboxPage> {
         ],
       ),
     );
-  }
-
-  Future<void> _handleSupportTap(User user, bool isRtl) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator(color: Colors.white)),
-    );
-
-    try {
-      final chatRoomId = _getChatRoomId(user.uid, 'hirehub_manager');
-      final roomDoc = await _firestore.collection('chat_rooms').doc(chatRoomId).get();
-      
-      if (!roomDoc.exists) {
-        final welcomeMsg = isRtl 
-          ? "ברוכים הבאים לתמיכה של HireHub! איך נוכל לעזור לך היום?" 
-          : "Welcome to HireHub Support! How can we help you today?";
-        
-        await _firestore.collection('chat_rooms').doc(chatRoomId).set({
-          'lastMessage': welcomeMsg,
-          'lastTimestamp': FieldValue.serverTimestamp(),
-          'users': [user.uid, 'hirehub_manager'],
-          'userNames': {
-            user.uid: user.displayName ?? "User",
-            'hirehub_manager': 'HireHub',
-          }
-        });
-
-        await _firestore.collection('chat_rooms').doc(chatRoomId).collection('messages').add({
-          'senderId': 'hirehub_manager',
-          'receiverId': user.uid,
-          'message': welcomeMsg,
-          'timestamp': FieldValue.serverTimestamp(),
-        });
-      }
-
-      if (mounted) {
-        Navigator.pop(context); // Close loading dialog
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const ChatPage(
-              receiverId: 'hirehub_manager',
-              receiverName: 'HireHub',
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.pop(context); // Close loading dialog
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(isRtl 
-              ? 'שגיאה: אין הרשאות לגשת לצ׳אט התמיכה. אנא בדוק הגדרות Firebase.' 
-              : 'Error: No permissions. Please check Firestore rules.'),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-      debugPrint("Support chat error: $e");
-    }
-  }
-
-  String _getChatRoomId(String user1, String user2) {
-    List<String> ids = [user1, user2];
-    ids.sort();
-    return ids.join('_');
   }
 
   String _formatTimestamp(dynamic timestamp) {

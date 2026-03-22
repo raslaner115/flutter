@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -20,6 +21,9 @@ class NotificationService {
   static bool _isListening = false;
   static String? _activeUserId;
 
+  // Stream controller to handle notification taps
+  static final StreamController<String?> selectNotificationStream = StreamController<String?>.broadcast();
+
   static Future<void> init() async {
     if (_isInitialized) return;
 
@@ -41,7 +45,8 @@ class NotificationService {
     await _notificationsPlugin.initialize(
       settings: initializationSettings,
       onDidReceiveNotificationResponse: (NotificationResponse response) {
-        // Handle notification tap
+        // Handle notification tap by adding payload to stream
+        selectNotificationStream.add(response.payload);
       },
     );
 
@@ -55,8 +60,20 @@ class NotificationService {
           id: message.hashCode,
           title: message.notification!.title ?? '',
           body: message.notification!.body ?? '',
+          payload: jsonEncode(message.data),
         );
       }
+    });
+
+    // 4. Handle notification when app is opened from a terminated state
+    RemoteMessage? initialMessage = await _messaging.getInitialMessage();
+    if (initialMessage != null) {
+      selectNotificationStream.add(jsonEncode(initialMessage.data));
+    }
+
+    // 5. Handle notification when app is in background but not terminated
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      selectNotificationStream.add(jsonEncode(message.data));
     });
 
     _isInitialized = true;
@@ -91,7 +108,6 @@ class NotificationService {
   }
 
   /// Sends a push notification to a specific device token.
-  /// Note: In production, use Firebase Cloud Functions to keep your server key secure.
   static Future<void> sendPushNotification({
     required String targetToken,
     required String title,
@@ -99,24 +115,11 @@ class NotificationService {
     Map<String, dynamic>? data,
   }) async {
     try {
-      // Note: This is a placeholder for where you would call your backend or Cloud Function.
-      // If you are using FCM Legacy API (not recommended for production apps on stores):
-      /*
-      await http.post(
-        Uri.parse('https://fcm.googleapis.com/fcm/send'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'key=YOUR_SERVER_KEY',
-        },
-        body: jsonEncode({
-          'to': targetToken,
-          'notification': {'title': title, 'body': body},
-          'data': data ?? {'click_action': 'FLUTTER_NOTIFICATION_CLICK'},
-        }),
-      );
-      */
+      // Note: In production, you should trigger this via a Cloud Function for security.
+      // This is currently a debug placeholder or client-side trigger (depending on your setup).
       debugPrint("FCM notification request for token: $targetToken");
       debugPrint("Title: $title, Body: $body");
+      // If you are using FCM HTTP v1, you would perform an authenticated post here.
     } catch (e) {
       debugPrint("Error sending push notification: $e");
     }
@@ -129,7 +132,6 @@ class NotificationService {
       return;
     }
 
-    // Prevent multiple listeners for the same user
     if (_isListening && _activeUserId == user.uid) return;
     
     _isListening = true;
@@ -138,7 +140,6 @@ class NotificationService {
     saveDeviceToken(); 
     _notificationSubscription?.cancel();
 
-    // Listener for the internal notification collection (UI updates)
     bool isInitialLoad = true;
     _notificationSubscription = FirebaseFirestore.instance
         .collection('users')
@@ -163,6 +164,7 @@ class NotificationService {
             id: snapshot.docs.first.id.hashCode,
             title: data['title'] ?? 'New Notification',
             body: data['body'] ?? 'You have a new update.',
+            payload: jsonEncode(data),
           );
         }
       }
@@ -180,6 +182,7 @@ class NotificationService {
     required int id,
     required String title,
     required String body,
+    String? payload,
   }) async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'main_channel',
@@ -199,6 +202,7 @@ class NotificationService {
       title: title,
       body: body,
       notificationDetails: notificationDetails,
+      payload: payload,
     );
   }
 }

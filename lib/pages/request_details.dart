@@ -157,7 +157,7 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
           'partialWorkDays.$date': {'from': fStr, 'to': tStr},
         });
 
-        notifTitle = strings['accept'];
+        notifTitle = strings['accept'] ?? 'Request Accepted';
         notifBody = "${user.displayName ?? 'The professional'} accepted your request for $date. Arrival: $fStr - $tStr";
 
         // 3. Notify Client in Firestore
@@ -171,7 +171,7 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
           'timestamp': FieldValue.serverTimestamp(),
         });
       } else {
-        notifTitle = strings['declined'];
+        notifTitle = strings['declined'] ?? 'Request Declined';
         notifBody = "${user.displayName ?? 'The professional'} cannot make it on $date";
 
         // Notify Client about Decline in Firestore
@@ -197,8 +197,8 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
       if (clientFcmToken != null) {
         await NotificationService.sendPushNotification(
           targetToken: clientFcmToken,
-          title: notifTitle!,
-          body: notifBody!,
+          title: notifTitle,
+          body: notifBody,
         );
       }
 
@@ -366,8 +366,8 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
           child: OutlinedButton(
             onPressed: () => _processRequest(false),
             style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.red,
               side: const BorderSide(color: Colors.red),
+              foregroundColor: Colors.red,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
             child: Text(strings['decline']!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
