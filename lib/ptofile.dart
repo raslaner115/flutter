@@ -8,7 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:untitled1/pages/sighn_in.dart';
@@ -19,6 +19,7 @@ import 'package:untitled1/pages/invoice_builder.dart';
 import 'package:untitled1/pages/verify_business.dart';
 import 'package:untitled1/pages/chat_page.dart';
 import 'package:untitled1/pages/analytics_page.dart';
+import 'package:untitled1/pages/admin_panel.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path_provider/path_provider.dart';
@@ -58,7 +59,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
   bool _isIdVerified = false;
   bool _isBusinessVerified = false;
   bool _isInsured = false;
-  
+
   String _distanceStr = "";
   double? _proLat;
   double? _proLng;
@@ -86,8 +87,11 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
     _isOwnProfile = (targetUid == null || (currentUser != null && targetUid == currentUser.uid));
   }
 
-  void _initTabController({bool initial = false}) {
-    int tabCount = (_userType == 'worker' && _isOwnProfile) ? 5 : 4;
+  void _initTabController() {
+    // Admin has 2 tabs: System Overview, Actions
+    // Professional has 4 tabs: About, Reviews, Schedule, Projects
+    // Normal user has 2 tabs: About, Reviews
+    int tabCount = _userType == 'admin' ? 2 : (_userType == 'worker' ? 4 : 2);
     _tabController = TabController(length: tabCount, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) {
@@ -117,7 +121,8 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
 
       if (userDoc.exists && mounted) {
         final data = userDoc.data()!;
-        
+
+        String oldType = _userType;
         setState(() {
           _userName = data['name']?.toString() ?? "";
           _bio = data['description']?.toString() ?? "";
@@ -126,7 +131,14 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           _email = data['email']?.toString() ?? "";
           _town = data['town']?.toString() ?? "";
           _profileImageUrl = data['profileImageUrl']?.toString() ?? "";
-          _userType = data['userType']?.toString() ?? "normal";
+
+          if (data['isAdmin'] == true) {
+            _userType = 'admin';
+          } else if (data['isWorker'] == true) {
+            _userType = 'worker';
+          } else {
+            _userType = 'normal';
+          }
 
           if (data['professions'] is List) {
             _userProfessions = List<String>.from(data['professions']);
@@ -139,13 +151,12 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           _isIdVerified = data['isIdVerified'] ?? false;
           _isBusinessVerified = data['isBusinessVerified'] ?? false;
           _isInsured = data['isInsured'] ?? false;
-          
+
           _proLat = data['lat']?.toDouble();
           _proLng = data['lng']?.toDouble();
         });
 
-        int expectedTabCount = (_userType == 'worker' && _isOwnProfile) ? 5 : 4;
-        if (_tabController.length != expectedTabCount) {
+        if (oldType != _userType) {
           _initTabController();
         }
 
@@ -186,7 +197,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
 
   Future<void> _calculateDistance() async {
     if (_proLat == null || _proLng == null) return;
-    
+
     try {
       Position? userPos;
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -208,13 +219,13 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
         final response = await http.get(url);
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
-          if (data['status'] == 'OK' && 
-              data['rows'].isNotEmpty && 
+          if (data['status'] == 'OK' &&
+              data['rows'].isNotEmpty &&
               data['rows'][0]['elements'].isNotEmpty &&
               data['rows'][0]['elements'][0]['status'] == 'OK') {
-            
+
             final distanceText = data['rows'][0]['elements'][0]['distance']['text'];
-            
+
             if (mounted) {
               setState(() {
                 _distanceStr = distanceText;
@@ -236,7 +247,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
     double distance = Geolocator.distanceBetween(
       userPos.latitude, userPos.longitude, _proLat!, _proLng!
     );
-    
+
     if (mounted) {
       setState(() {
         if (distance < 1000) {
@@ -357,6 +368,10 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           'service': 'שירות',
           'timing': 'עמידה בזמנים',
           'choose_profession': 'בחר מקצוע',
+          'admin_panel': 'פאנל מנהל',
+          'sys_overview': 'סקירת מערכת',
+          'admin_actions': 'פעולות ניהול',
+          'admin_mode': 'מצב מנהל',
         };
       default:
         return {
@@ -416,6 +431,10 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           'service': 'Service',
           'timing': 'Timing',
           'choose_profession': 'Choose Profession',
+          'admin_panel': 'Admin Panel',
+          'sys_overview': 'System Overview',
+          'admin_actions': 'Admin Actions',
+          'admin_mode': 'Admin Mode',
         };
     }
   }
@@ -522,9 +541,9 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
     double starsPrice = existingReview != null ? (existingReview['starsPrice'] as num? ?? existingReview['stars'] ?? 5.0).toDouble() : 5.0;
     double starsService = existingReview != null ? (existingReview['starsService'] as num? ?? existingReview['stars'] ?? 5.0).toDouble() : 5.0;
     double starsTiming = existingReview != null ? (existingReview['starsTiming'] as num? ?? existingReview['stars'] ?? 5.0).toDouble() : 5.0;
-    
+
     String? selectedProfession = existingReview != null ? existingReview['profession'] : (_userProfessions.isNotEmpty ? _userProfessions.first : null);
-    
+
     final commentController = TextEditingController(text: existingReview != null ? existingReview['comment'] : "");
 
     await showDialog(
@@ -592,7 +611,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                 await _firestore.runTransaction((transaction) async {
                   final userRef = _firestore.collection('users').doc(targetUid);
                   final userSnap = await transaction.get(userRef);
-                  
+
                   if (!userSnap.exists) return;
 
                   final data = userSnap.data()!;
@@ -601,11 +620,11 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                   Map<String, dynamic> professionStats = Map<String, dynamic>.from(data['professionStats'] ?? {});
 
                   final reviewsRef = userRef.collection('reviews');
-                  
+
                   if (existingReview != null) {
                     double oldStars = (existingReview['stars'] as num).toDouble();
                     String oldProf = existingReview['profession'] ?? "";
-                    
+
                     // Update overall avg
                     double totalStars = (currentAvg * currentCount) - oldStars + avg;
                     double newAvg = totalStars / currentCount;
@@ -615,7 +634,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                        var pStat = professionStats[oldProf];
                        double pAvg = (pStat['avg'] ?? 0.0).toDouble();
                        int pCount = pStat['count'] ?? 0;
-                       
+
                        if (oldProf == selectedProfession) {
                           double pTotal = (pAvg * pCount) - oldStars + avg;
                           professionStats[oldProf] = {'avg': pTotal / pCount, 'count': pCount};
@@ -683,7 +702,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
         Text(label, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
         Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(5, (i) => IconButton(
           visualDensity: VisualDensity.compact,
-          icon: Icon(i < rating ? Icons.star : Icons.star_border, color: Colors.amber, size: 24), 
+          icon: Icon(i < rating ? Icons.star : Icons.star_border, color: Colors.amber, size: 24),
           onPressed: () => onRatingChanged(i + 1.0)))),
       ],
     );
@@ -775,8 +794,6 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
       orElse: () => null,
     );
 
-    final bool showAnalyticsTab = _userType == 'worker' && _isOwnProfile;
-
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
@@ -789,7 +806,8 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           child: NestedScrollView(
             headerSliverBuilder: (context, innerBoxIsScrolled) => [
               SliverAppBar(
-                expandedHeight: 450, pinned: true, stretch: true, backgroundColor: const Color(0xFF1976D2),
+                expandedHeight: 450, pinned: true, stretch: true,
+                backgroundColor: _userType == 'admin' ? Colors.red[900] : const Color(0xFF1976D2),
                 actions: [
                   IconButton(icon: const Icon(Icons.share_outlined), onPressed: () => _shareProfile(strings)),
                   if (!_isOwnProfile)
@@ -807,19 +825,20 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                 flexibleSpace: FlexibleSpaceBar(
                   stretchModes: const [StretchMode.zoomBackground, StretchMode.blurBackground],
                   background: Stack(fit: StackFit.expand, children: [
-                    _profileImageUrl.isNotEmpty 
+                    _profileImageUrl.isNotEmpty
                       ? CachedNetworkImage(
-                          imageUrl: _profileImageUrl, 
+                          imageUrl: _profileImageUrl,
                           fit: BoxFit.cover,
-                          placeholder: (context, url) => Container(color: const Color(0xFF1E3A8A)),
+                          placeholder: (context, url) => Container(color: _userType == 'admin' ? Colors.red[900] : const Color(0xFF1E3A8A)),
                           errorWidget: (context, url, error) => const Icon(Icons.error),
                         )
-                      : Container(color: const Color(0xFF1E3A8A), child: const Icon(Icons.person, size: 100, color: Colors.white24)),
+                      : Container(color: _userType == 'admin' ? Colors.red[900] : const Color(0xFF1E3A8A), child: const Icon(Icons.person, size: 100, color: Colors.white24)),
                     Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black.withOpacity(0.4), Colors.black.withOpacity(0.9)]))),
                     Positioned(bottom: 80, left: 24, right: 24, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Row(children: [
                         Flexible(child: Text(_userName, style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: -0.5))),
                         if (_userType == 'worker') const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Icon(Icons.verified, color: Color(0xFF60A5FA), size: 24)),
+                        if (_userType == 'admin') Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(12)), child: Text(strings['admin_mode']!, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)))),
                         if (_isIdVerified) const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: Icon(Icons.assignment_ind, color: Colors.greenAccent, size: 20)),
                         if (_isBusinessVerified) const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: Icon(Icons.business_center, color: Colors.orangeAccent, size: 20)),
                         if (_isInsured) const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: Icon(Icons.shield, color: Colors.blueAccent, size: 20)),
@@ -848,6 +867,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                   ]),
                 ),
               ),
+              if (_userType != 'admin')
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
@@ -869,18 +889,12 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                     child: TabBar(
                       controller: _tabController,
                       isScrollable: true,
-                      labelColor: const Color(0xFF1976D2),
+                      labelColor: _userType == 'admin' ? Colors.red : const Color(0xFF1976D2),
                       unselectedLabelColor: Colors.grey[400],
-                      indicatorColor: const Color(0xFF1976D2),
+                      indicatorColor: _userType == 'admin' ? Colors.red : const Color(0xFF1976D2),
                       indicatorSize: TabBarIndicatorSize.label,
                       labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                      tabs: [
-                        Tab(text: strings['about']),
-                        Tab(text: strings['reviews']),
-                        Tab(text: strings['schedule']),
-                        if (showAnalyticsTab) Tab(text: strings['analytics']),
-                        Tab(text: strings['projects']),
-                      ]
+                      tabs: _buildTabs(strings),
                     ),
                   )
                 )
@@ -890,19 +904,132 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
               color: Colors.white,
               child: TabBarView(
                 controller: _tabController,
-                children: [
-                  _buildAboutTab(strings),
-                  _buildReviewsTab(strings, existingReview),
-                  SchedulePage(workerId: widget.userId ?? FirebaseAuth.instance.currentUser?.uid ?? "", workerName: _userName),
-                  if (showAnalyticsTab) AnalyticsPage(userId: widget.userId ?? FirebaseAuth.instance.currentUser?.uid ?? "", strings: strings),
-                  _buildProjectsGrid(strings),
-                ]
+                children: _buildTabViews(strings, existingReview),
               ),
             ),
           ),
         ),
-        bottomNavigationBar: (_isOwnProfile && _userType == 'worker') ? null : _buildBottomAction(strings, existingReview),
+        bottomNavigationBar: (_isOwnProfile && (_userType == 'worker' || _userType == 'admin')) ? null : _buildBottomAction(strings, existingReview),
       ),
+    );
+  }
+
+  List<Widget> _buildTabs(Map<String, String> strings) {
+    if (_userType == 'admin') {
+      return [
+        Tab(text: strings['sys_overview']),
+        Tab(text: strings['admin_actions']),
+      ];
+    } else if (_userType == 'worker') {
+      return [
+        Tab(text: strings['about']),
+        Tab(text: strings['reviews']),
+        Tab(text: strings['schedule']),
+        Tab(text: strings['projects']),
+      ];
+    } else {
+      return [
+        Tab(text: strings['about']),
+        Tab(text: strings['reviews']),
+      ];
+    }
+  }
+
+  List<Widget> _buildTabViews(Map<String, String> strings, Map<String, dynamic>? existingReview) {
+    if (_userType == 'admin') {
+      return [
+        _buildAdminOverviewTab(strings),
+        _buildAdminActionsTab(strings),
+      ];
+    } else if (_userType == 'worker') {
+      return [
+        _buildAboutTab(strings),
+        _buildReviewsTab(strings, existingReview),
+        SchedulePage(workerId: widget.userId ?? FirebaseAuth.instance.currentUser?.uid ?? "", workerName: _userName),
+        _buildProjectsGrid(strings),
+      ];
+    } else {
+      return [
+        _buildAboutTab(strings),
+        _buildReviewsTab(strings, existingReview),
+      ];
+    }
+  }
+
+  Widget _buildAdminOverviewTab(Map<String, String> strings) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: _firestore.collection('metadata').doc('stats').snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        final data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
+
+        return ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            _buildAdminStatCard('Total Workers', data['totalWorkers']?.toString() ?? '0', Icons.work, Colors.blue),
+            const SizedBox(height: 16),
+            _buildAdminStatCard('Total Users', '...', Icons.people, Colors.green), // Need a cloud function or different way to count all users efficiently
+            const SizedBox(height: 16),
+            _buildAdminStatCard('Pending Reports', '...', Icons.report, Colors.orange),
+            const SizedBox(height: 16),
+            _buildAdminStatCard('Active Subscriptions', '...', Icons.star, Colors.purple),
+          ],
+        );
+      }
+    );
+  }
+
+  Widget _buildAdminStatCard(String title, String value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 32),
+          const SizedBox(width: 20),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w500)),
+              Text(value, style: TextStyle(color: color, fontSize: 24, fontWeight: FontWeight.bold)),
+            ],
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdminActionsTab(Map<String, String> strings) {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        _buildAdminActionTile(Icons.admin_panel_settings, strings['admin_panel']!, Colors.red, () {
+          Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminPanel()));
+        }),
+        _buildAdminActionTile(Icons.search, 'Find User by UID', Colors.blue, () {
+          // TODO: Search dialog
+        }),
+        _buildAdminActionTile(Icons.notifications_active, 'Broadcast Notification', Colors.orange, () {
+          // TODO: Notification sender
+        }),
+        _buildAdminActionTile(Icons.settings, 'Global App Settings', Colors.grey, () {
+          // TODO: System config
+        }),
+      ],
+    );
+  }
+
+  Widget _buildAdminActionTile(IconData icon, String label, Color color, VoidCallback onTap) {
+    return ListTile(
+      onTap: onTap,
+      leading: Icon(icon, color: color),
+      title: Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
+      trailing: const Icon(Icons.chevron_right),
+      contentPadding: const EdgeInsets.symmetric(vertical: 8),
     );
   }
 
@@ -956,7 +1083,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                         imageUrl: project['imageUrl'] ?? project['image'] ?? "",
                         fit: BoxFit.cover,
                         placeholder: (context, url) => Container(color: Colors.grey[200]),
-                        errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.grey),
+                        errorWidget: (context, url, error) => const Icon(Icons.error),
                       )
                     ),
                   ),
@@ -1006,7 +1133,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(r['userName'] ?? "User", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  if (r['profession'] != null) 
+                  if (r['profession'] != null)
                     Text(r['profession'], style: TextStyle(fontSize: 12, color: Colors.grey[600], fontStyle: FontStyle.italic)),
                 ],
               ),
@@ -1099,6 +1226,30 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
               onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VerifyBusinessPage())),
               icon: const Icon(Icons.verified_user_outlined),
               label: Text(strings['verify_business'] ?? 'Verify Business', style: const TextStyle(fontWeight: FontWeight.bold))
+            )
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E293B), foregroundColor: Colors.white, padding: const EdgeInsets.all(16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AnalyticsPage(userId: widget.userId ?? FirebaseAuth.instance.currentUser?.uid ?? "", strings: strings))),
+              icon: const Icon(Icons.analytics_outlined),
+              label: Text(strings['analytics'] ?? 'Professional Analytics', style: const TextStyle(fontWeight: FontWeight.bold))
+            )
+          ),
+          const SizedBox(height: 12),
+        ],
+        if (_isOwnProfile && _userType == 'admin') ...[
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white, padding: const EdgeInsets.all(16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+              onPressed: () {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminPanel()));
+              },
+              icon: const Icon(Icons.admin_panel_settings_outlined),
+              label: Text(strings['admin_panel']!, style: const TextStyle(fontWeight: FontWeight.bold))
             )
           ),
           const SizedBox(height: 12),
@@ -1266,9 +1417,9 @@ class _AddProjectPageState extends State<AddProjectPage> {
   Future<File> _compressImage(File file) async {
     final tempDir = await getTemporaryDirectory();
     final path = "${tempDir.path}/img_${DateTime.now().millisecondsSinceEpoch}.jpg";
-    
+
     var result = await FlutterImageCompress.compressAndGetFile(
-      file.absolute.path, 
+      file.absolute.path,
       path,
       quality: 85,
       minWidth: 1024,
