@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/services/notification_service.dart';
 
 class RequestDetailsPage extends StatefulWidget {

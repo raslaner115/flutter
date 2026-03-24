@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/chat_page.dart';
 import 'package:untitled1/pages/support_bot_page.dart';
 import 'package:intl/intl.dart' as intl;

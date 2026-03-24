@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:table_calendar/table_calendar.dart';
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/send_request.dart';
 
 class SchedulePage extends StatefulWidget {
@@ -715,12 +715,12 @@ class _SchedulePageState extends State<SchedulePage> {
                           if (_isVacation(day)) return _dayCircle(day, Colors.red);
                           if (_availableDates.contains(dStr))
                             return _dayCircle(day, Colors.green);
-                          if (_permanentlyDisabledDays.contains(day.weekday))
+                          if (_permanentlyDisabledDays.contains(day.weekday)){
                             return _dayCircle(
                               day,
                               Colors.grey.shade300,
                               isTextGrey: true,
-                            );
+                            );}
                           return null;
                         },
                       ),

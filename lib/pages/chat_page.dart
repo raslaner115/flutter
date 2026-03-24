@@ -4,10 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:provider/provider.dart';
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 import 'package:intl/intl.dart' as intl;
-import 'package:untitled1/pages/request_details.dart';
-import 'package:untitled1/pages/ptofile.dart';
+import 'package:untitled1/profile_page.dart';
 import 'package:untitled1/pages/invoice_builder.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
@@ -416,7 +415,7 @@ class _ChatPageState extends State<ChatPage> {
               if (!mounted) return;
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => Profile(userId: widget.receiverId)),
+                MaterialPageRoute(builder: (context) => ProfilePage(userId: widget.receiverId)),
               );
             }
           }
@@ -425,10 +424,10 @@ class _ChatPageState extends State<ChatPage> {
           children: [
             CircleAvatar(
               radius: 20,
-              backgroundColor: const Color(0xFF1976D2).withOpacity(0.1),
+              backgroundColor: const Color(0xFF1976D2),
               child: Text(
                 widget.receiverName.isNotEmpty ? widget.receiverName[0].toUpperCase() : "?",
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1976D2)),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
               ),
             ),
             const SizedBox(width: 12),
@@ -523,7 +522,7 @@ class _ChatPageState extends State<ChatPage> {
         margin: const EdgeInsets.symmetric(vertical: 16),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.9),
+          color: Colors.white,
           borderRadius: BorderRadius.circular(12),
           boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))],
         ),
@@ -551,7 +550,7 @@ class _ChatPageState extends State<ChatPage> {
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        color: isSelected ? const Color(0xFF1976D2).withOpacity(0.15) : Colors.transparent,
+        color: isSelected ? const Color(0xFF1976D2).withOpacity(0.2) : Colors.transparent,
         padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
         child: Align(
           alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -574,7 +573,7 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.06),
+                        color: Colors.black.withOpacity(0.05),
                         blurRadius: 6,
                         offset: const Offset(0, 3),
                       ),
@@ -591,11 +590,11 @@ class _ChatPageState extends State<ChatPage> {
                         children: [
                           Text(
                             timeStr,
-                            style: TextStyle(fontSize: 10, color: isMe ? Colors.white.withOpacity(0.8) : const Color(0xFF94A3B8)),
+                            style: TextStyle(fontSize: 10, color: isMe ? Colors.white70 : const Color(0xFF94A3B8)),
                           ),
                           if (isMe) ...[
                             const SizedBox(width: 4),
-                            Icon(Icons.done_all_rounded, size: 14, color: isMe ? Colors.white.withOpacity(0.9) : const Color(0xFF1976D2)),
+                            Icon(Icons.done_all_rounded, size: 14, color: Colors.white70),
                           ],
                         ],
                       ),
@@ -726,7 +725,7 @@ class _ChatPageState extends State<ChatPage> {
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF1976D2).withOpacity(0.3),
+                        color: const Color(0xFF1976D2).withOpacity(0.4),
                         blurRadius: 8,
                         offset: const Offset(0, 4),
                       )
@@ -1047,7 +1046,7 @@ class _VideoPreviewState extends State<_VideoPreview> {
               icon: Icon(
                 _controller.value.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_filled_rounded,
                 size: 64,
-                color: Colors.white.withOpacity(0.9),
+                color: Colors.white,
               ),
               onPressed: () {
                 setState(() {

@@ -1,5 +1,4 @@
-import 'dart:typed_data';
-import 'dart:ui' as ui;
+import 'dart:developer' as dev;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart' as pdf;
@@ -7,7 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:intl/intl.dart' as intl;
 import 'package:provider/provider.dart';
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart' as firebase_storage;
@@ -49,25 +48,128 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
   final _itemQtyController = TextEditingController(text: "1");
   final _itemPriceController = TextEditingController();
   final _notesController = TextEditingController();
+  
   final List<InvoiceItem> _items = [];
   bool _isPreparing = false;
   String _invoiceNumber = "";
+  double _totalAmount = 0.0;
+
+  // State for dealer logic
+  String _dealerType = 'exempt'; 
+  bool _isBusinessVerified = false;
+  String _selectedDocType = 'receipt'; 
+
+  pw.Font? _cachedFont;
+  pw.Font? _cachedFontBold;
+  pw.MemoryImage? _cachedLogo;
+  Map<String, String>? _cachedStrings;
+  String? _lastLocale;
 
   @override
   void initState() {
     super.initState();
-    _invoiceNumber = "INV-${intl.DateFormat('yyyyMMdd-HHmm').format(DateTime.now())}";
+    _invoiceNumber = "DOC-${intl.DateFormat('yyyyMMdd-HHmm').format(DateTime.now())}";
     if (widget.receiverName != null) {
       _clientNameController.text = widget.receiverName!;
+    }
+    
+    _fetchWorkerInfo();
+    
+    if (widget.receiverId != null) {
+      _fetchClientInfo(widget.receiverId!);
+    }
+    
+    _loadAssets();
+  }
+
+  Future<void> _fetchWorkerInfo() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        if (doc.exists && mounted) {
+          final data = doc.data();
+          setState(() {
+            _isBusinessVerified = data?['isBusinessVerified'] ?? false;
+            _dealerType = data?['dealerType'] ?? 'exempt';
+            
+            // Logic: Must be both Verified AND Licensed to use Invoices
+            if (_isBusinessVerified && _dealerType == 'licensed') {
+              _selectedDocType = 'invoice_receipt';
+            } else {
+              _selectedDocType = 'receipt';
+            }
+          });
+        }
+      } catch (e) {
+        dev.log("Error fetching worker info: $e");
+      }
+    }
+  }
+
+  Future<void> _fetchClientInfo(String clientId) async {
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(clientId).get();
+      if (doc.exists && mounted) {
+        final data = doc.data();
+        setState(() {
+          if (data?['name'] != null && _clientNameController.text.isEmpty) {
+            _clientNameController.text = data!['name'];
+          }
+          if (data?['phone'] != null) {
+            _clientPhoneController.text = data!['phone'];
+          }
+          if (data?['town'] != null) {
+            _clientAddressController.text = data!['town'];
+          }
+        });
+      }
+    } catch (e) {
+      dev.log("Error fetching client info: $e");
+    }
+  }
+
+  @override
+  void dispose() {
+    _clientNameController.dispose();
+    _clientAddressController.dispose();
+    _clientPhoneController.dispose();
+    _itemDescController.dispose();
+    _itemQtyController.dispose();
+    _itemPriceController.dispose();
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadAssets() async {
+    try {
+      final fontData = await rootBundle.load("assets/fonts/Rubik-VariableFont_wght.ttf");
+      _cachedFont = pw.Font.ttf(fontData);
+      _cachedFontBold = pw.Font.ttf(fontData);
+
+      try {
+        final logoData = await rootBundle.load("assets/icon/app_icon.png");
+        _cachedLogo = pw.MemoryImage(logoData.buffer.asUint8List());
+      } catch (e) {
+        dev.log("Logo load failed: $e");
+      }
+    } catch (e) {
+      dev.log("Font load failed: $e");
     }
   }
 
   Map<String, String> _getLocalizedStrings(BuildContext context, {bool listen = true}) {
     final locale = Provider.of<LanguageProvider>(context, listen: listen).locale.languageCode;
+    
+    if (_cachedStrings != null && _lastLocale == locale) {
+      return _cachedStrings!;
+    }
+
+    _lastLocale = locale;
     switch (locale) {
       case 'he':
-        return {
-          'title': 'מפיק חשבוניות (הצעת מחיר)',
+        _cachedStrings = {
+          'title': 'מפיק מסמכים עסקיים',
           'client_info': 'פרטי לקוח',
           'client_name': 'שם הלקוח',
           'client_address': 'כתובת הלקוח (אופציונלי)',
@@ -80,7 +182,6 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           'total': 'סה"כ לתשלום',
           'generate': 'תצוגה מקדימה / הדפסה',
           'empty_items': 'נא להוסיף לפחות פריט אחד',
-          'invoice_title': 'הצעת מחיר / דרישת תשלום',
           'worker': 'ספק שירות:',
           'date': 'תאריך:',
           'inv_no': 'מספר מסמך:',
@@ -92,10 +193,16 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           'sent_success': 'המסמך נשלח בהצלחה!',
           'notes': 'הערות נוספות (תנאי תשלום וכו\')',
           'subtotal': 'סיכום ביניים',
+          'doc_type': 'סוג המסמך',
+          'receipt': 'קבלה',
+          'invoice': 'חשבונית מס',
+          'invoice_receipt': 'חשבונית מס / קבלה',
+          'licensed_only': 'זמין לעוסק מורשה מאומת בלבד',
         };
+        break;
       default:
-        return {
-          'title': 'Professional Invoice Builder',
+        _cachedStrings = {
+          'title': 'Business Document Builder',
           'client_info': 'Client Information',
           'client_name': 'Client Name',
           'client_address': 'Client Address (Optional)',
@@ -108,10 +215,9 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           'total': 'Grand Total',
           'generate': 'Preview / Print PDF',
           'empty_items': 'Please add at least one item',
-          'invoice_title': 'Invoice / Service Quote',
           'worker': 'Service Provider:',
           'date': 'Date:',
-          'inv_no': 'Invoice No:',
+          'inv_no': 'Document No:',
           'preparing': 'Preparing document...',
           'legal_disclaimer': 'Generated via HireHub. This document serves as a quote or payment request. It is not a legal Tax Invoice unless properly signed according to tax regulations.',
           'send_to_contact': 'Send to Contact',
@@ -120,8 +226,14 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           'sent_success': 'Invoice sent successfully!',
           'notes': 'Notes / Payment Terms',
           'subtotal': 'Subtotal',
+          'doc_type': 'Document Type',
+          'receipt': 'Receipt',
+          'invoice': 'Tax Invoice',
+          'invoice_receipt': 'Tax Invoice / Receipt',
+          'licensed_only': 'Verified Licensed Dealers only',
         };
     }
+    return _cachedStrings!;
   }
 
   void _addItem() {
@@ -129,10 +241,19 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     final price = double.tryParse(_itemPriceController.text) ?? 0.0;
     final qty = int.tryParse(_itemQtyController.text) ?? 1;
     setState(() {
-      _items.add(InvoiceItem(description: _itemDescController.text, quantity: qty, price: price));
+      final newItem = InvoiceItem(description: _itemDescController.text, quantity: qty, price: price);
+      _items.add(newItem);
+      _totalAmount += newItem.total;
       _itemDescController.clear();
       _itemPriceController.clear();
       _itemQtyController.text = "1";
+    });
+  }
+
+  void _removeItem(int index) {
+    setState(() {
+      _totalAmount -= _items[index].total;
+      _items.removeAt(index);
     });
   }
 
@@ -140,20 +261,10 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     if (_items.isEmpty) return null;
     
     try {
-      final fontData = await rootBundle.load("assets/fonts/Rubik-VariableFont_wght.ttf");
-      final fontBoldData = await rootBundle.load("assets/fonts/Rubik-VariableFont_wght.ttf");
-      final font = pw.Font.ttf(fontData);
-      final fontBold = pw.Font.ttf(fontBoldData);
-
-      pw.MemoryImage? logo;
-      try {
-        final logoData = await rootBundle.load("assets/icon/app_icon.png");
-        logo = pw.MemoryImage(logoData.buffer.asUint8List());
-      } catch (_) {}
-
-      return await _generatePdf(pdf.PdfPageFormat.a4, font, fontBold, logo);
+      if (_cachedFont == null) await _loadAssets();
+      return await _generatePdf(pdf.PdfPageFormat.a4, _cachedFont!, _cachedFontBold!, _cachedLogo);
     } catch (e) {
-      debugPrint("Error generating PDF: $e");
+      dev.log("Error generating PDF: $e");
       return null;
     }
   }
@@ -167,31 +278,20 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     setState(() => _isPreparing = true);
 
     try {
-      final fontData = await rootBundle.load("assets/fonts/Rubik-VariableFont_wght.ttf");
-      final fontBoldData = await rootBundle.load("assets/fonts/Rubik-VariableFont_wght.ttf");
-      
-      final font = pw.Font.ttf(fontData);
-      final fontBold = pw.Font.ttf(fontBoldData);
-
-      pw.MemoryImage? logo;
-      try {
-        final logoData = await rootBundle.load("assets/icon/app_icon.png");
-        logo = pw.MemoryImage(logoData.buffer.asUint8List());
-      } catch (_) {}
+      if (_cachedFont == null) await _loadAssets();
 
       if (!mounted) return;
       setState(() => _isPreparing = false);
 
       await Printing.layoutPdf(
         onLayout: (format) async {
-          final pdfBytes = await _generatePdf(format, font, fontBold, logo);
-          return pdfBytes;
+          return await _generatePdf(format, _cachedFont!, _cachedFontBold!, _cachedLogo);
         },
-        name: '${_invoiceNumber}.pdf',
+        name: '$_invoiceNumber.pdf',
       );
     } catch (e) {
       if (mounted) setState(() => _isPreparing = false);
-      debugPrint("PDF Generation Error: $e");
+      dev.log("PDF Layout Error: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: ${e.toString()}")));
       }
@@ -253,8 +353,8 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
 
                         return ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: const Color(0xFF1976D2).withOpacity(0.1),
-                            child: Text(otherName[0].toUpperCase(), style: const TextStyle(color: Color(0xFF1976D2))),
+                            backgroundColor: const Color(0xFF1976D2).withValues(alpha: 0.1),
+                            child: Text(otherName.isNotEmpty ? otherName[0].toUpperCase() : "?", style: const TextStyle(color: Color(0xFF1976D2))),
                           ),
                           title: Text(otherName, style: const TextStyle(fontWeight: FontWeight.bold)),
                           onTap: () {
@@ -282,7 +382,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
       final pdfBytes = await _getGeneratedPdfBytes();
       if (pdfBytes == null) throw "Failed to generate PDF";
 
-      final fileName = '${_invoiceNumber}.pdf';
+      final fileName = '$_invoiceNumber.pdf';
       final ref = firebase_storage.FirebaseStorage.instance.ref().child('chat_media/files/$fileName');
       
       final uploadTask = await ref.putData(pdfBytes, firebase_storage.SettableMetadata(contentType: 'application/pdf'));
@@ -326,7 +426,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
       }
     } catch (e) {
       if (mounted) setState(() => _isPreparing = false);
-      debugPrint("Error sending PDF: $e");
+      dev.log("Error sending PDF: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
       }
@@ -337,10 +437,16 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     final doc = pw.Document();
     final strings = _getLocalizedStrings(context, listen: false);
     final dateStr = intl.DateFormat('dd/MM/yyyy').format(DateTime.now());
-    final total = _items.fold(0.0, (sum, item) => sum + item.total);
     final locale = Provider.of<LanguageProvider>(context, listen: false).locale.languageCode;
     final isRtl = locale == 'he' || locale == 'ar';
     final themeColor = pdf.PdfColors.blue900;
+
+    String docTitle;
+    switch (_selectedDocType) {
+      case 'invoice': docTitle = strings['invoice']!; break;
+      case 'invoice_receipt': docTitle = strings['invoice_receipt']!; break;
+      default: docTitle = strings['receipt']!;
+    }
 
     doc.addPage(
       pw.MultiPage(
@@ -354,7 +460,6 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  // Header
                   pw.Row(
                     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                     children: [
@@ -370,7 +475,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                       pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.end,
                         children: [
-                          pw.Text(strings['invoice_title']!, style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: themeColor)),
+                          pw.Text(docTitle, style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: themeColor)),
                           pw.SizedBox(height: 4),
                           pw.Text("${strings['inv_no']} $_invoiceNumber", style: const pw.TextStyle(fontSize: 10)),
                           pw.Text("${strings['date']} $dateStr", style: const pw.TextStyle(fontSize: 10)),
@@ -382,7 +487,6 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                   pw.Divider(thickness: 1, color: themeColor),
                   pw.SizedBox(height: 20),
 
-                  // Addresses
                   pw.Row(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
@@ -416,8 +520,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                   ),
                   pw.SizedBox(height: 30),
 
-                  // Table
-                  pw.Table.fromTextArray(
+                  pw.TableHelper.fromTextArray(
                     headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: pdf.PdfColors.white, fontSize: 10),
                     cellStyle: const pw.TextStyle(fontSize: 10),
                     headers: [strings['desc']!, strings['qty']!, strings['price']!, strings['total']!],
@@ -440,7 +543,6 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                     border: pw.TableBorder.all(color: pdf.PdfColors.grey200, width: 0.5),
                   ),
 
-                  // Summary
                   pw.SizedBox(height: 20),
                   pw.Row(
                     children: [
@@ -463,15 +565,15 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                           children: [
                             pw.Container(
                               padding: const pw.EdgeInsets.all(12),
-                              decoration: pw.BoxDecoration(
+                              decoration: const pw.BoxDecoration(
                                 color: pdf.PdfColors.blue50,
-                                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+                                borderRadius: pw.BorderRadius.all(pw.Radius.circular(4)),
                               ),
                               child: pw.Row(
                                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                                 children: [
                                   pw.Text(strings['total']!, style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: themeColor)),
-                                  pw.Text("${total.toStringAsFixed(2)} ₪", style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: themeColor)),
+                                  pw.Text("${_totalAmount.toStringAsFixed(2)} ₪", style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: themeColor)),
                                 ],
                               ),
                             ),
@@ -482,7 +584,6 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                   ),
 
                   pw.SizedBox(height: 50),
-                  // Footer Disclaimer
                   pw.Divider(color: pdf.PdfColors.grey300),
                   pw.SizedBox(height: 10),
                   pw.Text(strings['legal_disclaimer']!, style: const pw.TextStyle(fontSize: 8, color: pdf.PdfColors.grey600), textAlign: pw.TextAlign.center),
@@ -529,6 +630,39 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildSectionCard(
+                      title: strings['doc_type']!,
+                      icon: Icons.article_outlined,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: _selectedDocType,
+                          decoration: _inputStyle(strings['doc_type']!, Icons.description_outlined),
+                          items: [
+                            DropdownMenuItem(value: 'receipt', child: Text(strings['receipt']!)),
+                            DropdownMenuItem(
+                              value: 'invoice', 
+                              enabled: _dealerType == 'licensed' && _isBusinessVerified,
+                              child: Text(
+                                strings['invoice']! + ((_dealerType != 'licensed' || !_isBusinessVerified) ? " (${strings['licensed_only']})" : ""),
+                                style: TextStyle(color: (_dealerType == 'licensed' && _isBusinessVerified) ? Colors.black : Colors.grey),
+                              )
+                            ),
+                            DropdownMenuItem(
+                              value: 'invoice_receipt', 
+                              enabled: _dealerType == 'licensed' && _isBusinessVerified,
+                              child: Text(
+                                strings['invoice_receipt']! + ((_dealerType != 'licensed' || !_isBusinessVerified) ? " (${strings['licensed_only']})" : ""),
+                                style: TextStyle(color: (_dealerType == 'licensed' && _isBusinessVerified) ? Colors.black : Colors.grey),
+                              )
+                            ),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) setState(() => _selectedDocType = val);
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    _buildSectionCard(
                       title: strings['client_info']!,
                       icon: Icons.person_add_alt_1_rounded,
                       children: [
@@ -562,7 +696,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                             icon: const Icon(Icons.add_rounded),
                             label: Text(strings['add_item']!),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF1976D2).withOpacity(0.1),
+                              backgroundColor: const Color(0xFF1976D2).withValues(alpha: 0.1),
                               foregroundColor: const Color(0xFF1976D2),
                               elevation: 0,
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -585,7 +719,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(12),
-                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 4, offset: const Offset(0, 2))],
+                              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 4, offset: const Offset(0, 2))],
                             ),
                             child: ListTile(
                               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -598,7 +732,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                                   const SizedBox(width: 8),
                                   IconButton(
                                     icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 20),
-                                    onPressed: () => setState(() => _items.removeAt(index)),
+                                    onPressed: () => _removeItem(index),
                                   ),
                                 ],
                               ),
@@ -618,7 +752,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                           maxLines: 3,
                           decoration: InputDecoration(
                             hintText: strings['notes'],
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey[200]!)),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
                             filled: true,
                             fillColor: Colors.white,
                           ),
@@ -633,7 +767,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                         decoration: BoxDecoration(
                           color: const Color(0xFF1976D2),
                           borderRadius: BorderRadius.circular(20),
-                          boxShadow: [BoxShadow(color: const Color(0xFF1976D2).withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))],
+                          boxShadow: [BoxShadow(color: const Color(0xFF1976D2).withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4))],
                         ),
                         child: Column(
                           children: [
@@ -641,7 +775,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(strings['total']!, style: const TextStyle(color: Colors.white, fontSize: 16)),
-                                Text("${_items.fold(0.0, (sum, item) => sum + item.total).toStringAsFixed(2)} ₪", 
+                                Text("${_totalAmount.toStringAsFixed(2)} ₪",
                                   style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
                               ],
                             ),
@@ -654,7 +788,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                                     icon: const Icon(Icons.print_rounded),
                                     label: Text(strings['generate']!),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.white.withOpacity(0.2),
+                                      backgroundColor: Colors.white.withValues(alpha: 0.2),
                                       foregroundColor: Colors.white,
                                       elevation: 0,
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -666,7 +800,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                                   child: ElevatedButton.icon(
                                     onPressed: _showContactPickerAndSend,
                                     icon: const Icon(Icons.send_rounded),
-                                    label: Text(widget.receiverId != null ? "שלח ישירות" : "שלח איש קשר"),
+                                    label: Text(widget.receiverId != null ? (isRtl ? "שלח ישירות" : "Send Direct") : (isRtl ? "שלח איש קשר" : "Send Contact")),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: Colors.white,
                                       foregroundColor: const Color(0xFF1976D2),
@@ -704,7 +838,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
             children: [
               Icon(icon, size: 20, color: const Color(0xFF1976D2)),
               const SizedBox(width: 10),
-              Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+              Expanded(child: Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)))),
             ],
           ),
           const SizedBox(height: 20),
@@ -718,16 +852,20 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     return TextField(
       controller: controller,
       keyboardType: keyboardType,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, size: 20, color: const Color(0xFF64748B)),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey[200]!)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey[200]!)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF1976D2), width: 1.5)),
-        filled: true,
-        fillColor: const Color(0xFFF8FAFC),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      ),
+      decoration: _inputStyle(label, icon),
+    );
+  }
+
+  InputDecoration _inputStyle(String label, IconData icon) {
+    return InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon, size: 20, color: const Color(0xFF64748B)),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF1976D2), width: 1.5)),
+      filled: true,
+      fillColor: const Color(0xFFF8FAFC),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
     );
   }
 }

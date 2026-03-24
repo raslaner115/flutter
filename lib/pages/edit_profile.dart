@@ -8,7 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/map_radius_picker.dart';
 import 'package:untitled1/pages/location_picker.dart';
 

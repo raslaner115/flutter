@@ -5,8 +5,8 @@ import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
-import 'package:untitled1/language_provider.dart';
-import 'package:untitled1/pages/ptofile.dart';
+import 'package:untitled1/services/language_provider.dart';
+import 'package:untitled1/ptofile.dart';
 import 'package:untitled1/pages/average_prices.dart';
 
 class SearchPage extends StatefulWidget {
@@ -19,14 +19,19 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   List<Map<String, dynamic>> _allWorkers = [];
   List<Map<String, dynamic>> _filteredWorkers = [];
   List<Map<String, dynamic>> _professions = [];
   List<Map<String, dynamic>> _filteredProfessions = [];
-  bool _isLoadingWorkers = true;
+  bool _isLoadingWorkers = false;
   bool _isLoadingProfessions = true;
+
+  DocumentSnapshot? _lastDocument;
+  bool _hasMore = true;
+  bool _isFetchingMore = false;
 
   Map<String, dynamic>? _selectedProfession;
   bool _showWorkerList = false;
@@ -43,8 +48,23 @@ class _SearchPageState extends State<SearchPage> {
   void initState() {
     super.initState();
     _loadProfessions();
-    _fetchWorkers();
     _getCurrentLocation(silent: true);
+    
+    _scrollController.addListener(() {
+      // Trigger if user pulls 50 pixels past the end
+      if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent + 50) {
+        if (_hasMore && !_isFetchingMore && _showWorkerList) {
+          _fetchWorkers();
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadProfessions() async {
@@ -68,6 +88,7 @@ class _SearchPageState extends State<SearchPage> {
           if (initial.isNotEmpty) {
             _selectedProfession = initial;
             _showWorkerList = true;
+            _fetchWorkers(isRefresh: true);
             _trackSearch(initial['en']);
           }
         }
@@ -89,38 +110,88 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
-  Future<void> _fetchWorkers() async {
+  Future<void> _fetchWorkers({bool isRefresh = false}) async {
     if (!mounted) return;
-    setState(() => _isLoadingWorkers = true);
+    if (_isFetchingMore && !isRefresh) return;
+
+    setState(() {
+      if (isRefresh) {
+        _allWorkers = [];
+        _lastDocument = null;
+        _hasMore = true;
+        _isLoadingWorkers = true;
+      } else {
+        _isFetchingMore = true;
+      }
+    });
+
     try {
-      final snapshot = await _firestore
+      Query query = _firestore
           .collection('users')
-          .where('userType', isEqualTo: 'worker')
-          .get();
+          .where('userType', isEqualTo: 'worker');
 
-      final workers = snapshot.docs.map((doc) {
-        final data = doc.data();
-        data['uid'] = doc.id;
+      if (_selectedProfession != null) {
+        query = query.where('professions', arrayContains: _selectedProfession!['en']);
+      }
 
-        data['avgRating'] = (data['avgRating'] ?? 0.0).toDouble();
-        data['reviewCount'] = data['reviewCount'] ?? 0;
+      if (_sortBy == 'rating') {
+        query = query.orderBy('avgRating', descending: true);
+      } else {
+        query = query.orderBy('name');
+      }
 
-        return data;
-      }).toList();
+      // Setting limit to 5 as requested
+      query = query.limit(5);
+      if (_lastDocument != null) {
+        query = query.startAfterDocument(_lastDocument!);
+      }
 
-      if (mounted) {
-        setState(() {
-          _allWorkers = workers;
-          _applyFilters();
-          _isLoadingWorkers = false;
-        });
+      final snapshot = await query.get();
 
-        if (_currentPosition != null) {
-          _fetchMatrixDistances();
+      if (snapshot.docs.length < 5) {
+        _hasMore = false;
+      }
+
+      if (snapshot.docs.isNotEmpty) {
+        _lastDocument = snapshot.docs.last;
+        
+        final newWorkers = snapshot.docs.map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          data['uid'] = doc.id;
+          data['avgRating'] = (data['avgRating'] ?? 0.0).toDouble();
+          data['reviewCount'] = data['reviewCount'] ?? 0;
+          return data;
+        }).toList();
+
+        if (mounted) {
+          setState(() {
+            _allWorkers.addAll(newWorkers);
+            _applyFilters();
+            _isLoadingWorkers = false;
+            _isFetchingMore = false;
+          });
+
+          if (_currentPosition != null) {
+            _fetchMatrixDistances();
+          }
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _isLoadingWorkers = false;
+            _isFetchingMore = false;
+            _hasMore = false;
+          });
         }
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoadingWorkers = false);
+      debugPrint("Fetch Workers Error: $e");
+      if (mounted) {
+        setState(() {
+          _isLoadingWorkers = false;
+          _isFetchingMore = false;
+        });
+      }
     }
   }
 
@@ -143,6 +214,7 @@ class _SearchPageState extends State<SearchPage> {
         _currentPosition = position;
         if (!silent) {
            _sortBy = 'distance';
+           _fetchWorkers(isRefresh: true);
         }
       });
 
@@ -159,9 +231,7 @@ class _SearchPageState extends State<SearchPage> {
   Future<void> _fetchMatrixDistances() async {
     if (_currentPosition == null || _allWorkers.isEmpty) return;
 
-    List<Map<String, dynamic>> targets = _showWorkerList && _selectedProfession != null
-        ? _allWorkers.where((w) => _getProfessionsList(w).map((e) => e.toLowerCase()).contains(_selectedProfession!['en'].toString().toLowerCase())).toList()
-        : _allWorkers;
+    List<Map<String, dynamic>> targets = _allWorkers.where((w) => !_matrixDistances.containsKey(w['uid'])).toList();
 
     if (targets.isEmpty) return;
 
@@ -209,19 +279,11 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   bool _isWorkerAvailable(Map<String, dynamic> w, DateTime date) {
-    final dateStr = "${date.year}-${date.month}-${date.day}";
-    
-    // Check permanent off days (1=Mon, 7=Sun)
     final disabledDays = List<int>.from(w['disabledDays'] ?? []);
     if (disabledDays.contains(date.weekday)) return false;
 
-    // Check explicitly set available dates
-    final availableDates = List<String>.from(w['availableDates'] ?? []);
-    
-    // Check vacations
     final vacations = List<Map<String, dynamic>>.from(w['vacations'] ?? []);
     final d = DateTime(date.year, date.month, date.day);
-    bool onVacation = false;
     for (var v in vacations) {
       try {
         final startParts = v['start']!.split('-');
@@ -229,19 +291,11 @@ class _SearchPageState extends State<SearchPage> {
         final start = DateTime(int.parse(startParts[0]), int.parse(startParts[1]), int.parse(startParts[2]));
         final end = DateTime(int.parse(endParts[0]), int.parse(endParts[1]), int.parse(endParts[2]));
         if (d.isAtSameMomentAs(start) || d.isAtSameMomentAs(end) || (d.isAfter(start) && d.isBefore(end))) {
-          onVacation = true;
-          break;
+          return false;
         }
       } catch (_) {}
     }
-    if (onVacation) return false;
 
-    // If worker has specified available dates, they must be in that list
-    if (availableDates.isNotEmpty) {
-      return availableDates.contains(dateStr);
-    }
-
-    // Default: available if not permanent off and not on vacation
     return true;
   }
 
@@ -255,14 +309,6 @@ class _SearchPageState extends State<SearchPage> {
     setState(() {
       if (_showWorkerList) {
         _filteredWorkers = _allWorkers.where((w) {
-          final matchesTrade =
-              _selectedProfession == null ||
-              _getProfessionsList(w)
-                  .map((e) => e.toLowerCase())
-                  .contains(
-                    _selectedProfession!['en'].toString().toLowerCase(),
-                  );
-
           final matchesSearch =
               query.isEmpty ||
               (w['name'] ?? '').toLowerCase().contains(query) ||
@@ -303,44 +349,17 @@ class _SearchPageState extends State<SearchPage> {
             matchesDate = _isWorkerAvailable(w, _filterByDate!);
           }
 
-          return matchesTrade && matchesSearch && matchesRadius && matchesVerified && matchesDate;
+          return matchesSearch && matchesRadius && matchesVerified && matchesDate;
         }).toList();
 
-        if (_sortBy == 'rating') {
-          _filteredWorkers.sort((a, b) {
-            double ratingA = (a['avgRating'] as num).toDouble();
-            double ratingB = (b['avgRating'] as num).toDouble();
-
-            if (_selectedProfession != null) {
-              String profKey = _selectedProfession!['en'];
-              ratingA = (a['professionStats']?[profKey]?['avg'] ?? 0.0).toDouble();
-              ratingB = (b['professionStats']?[profKey]?['avg'] ?? 0.0).toDouble();
-            }
-            return ratingB.compareTo(ratingA);
-          });
-        } else if (_sortBy == 'distance' && _currentPosition != null) {
+        if (_sortBy == 'distance' && _currentPosition != null) {
           _filteredWorkers.sort((a, b) {
             if (_matrixDistances.containsKey(a['uid']) && _matrixDistances.containsKey(b['uid'])) {
                return (_matrixDistances[a['uid']]!['value'] as int)
                    .compareTo(_matrixDistances[b['uid']]!['value'] as int);
             }
-
-            double latA = a['lat'] ?? 0.0;
-            double lngA = a['lng'] ?? 0.0;
-            double latB = b['lat'] ?? 0.0;
-            double lngB = b['lng'] ?? 0.0;
-
-            if (latA == 0 && lngA == 0) return 1;
-            if (latB == 0 && lngB == 0) return -1;
-
-            double distA = Geolocator.distanceBetween(_currentPosition!.latitude, _currentPosition!.longitude, latA, lngA);
-            double distB = Geolocator.distanceBetween(_currentPosition!.latitude, _currentPosition!.longitude, latB, lngB);
-            return distA.compareTo(distB);
+            return 0;
           });
-        } else {
-          _filteredWorkers.sort(
-            (a, b) => (a['name'] ?? '').compareTo(b['name'] ?? ''),
-          );
         }
       } else {
         _filteredProfessions = _professions.where((p) {
@@ -428,7 +447,7 @@ class _SearchPageState extends State<SearchPage> {
             if (_showWorkerList) _buildQuickFilters(locale, themeColor),
             Expanded(
               child: _showWorkerList
-                  ? (_isLoadingWorkers
+                  ? (_isLoadingWorkers && _allWorkers.isEmpty
                         ? const Center(child: CircularProgressIndicator())
                         : _buildWorkerList(locale, themeColor))
                   : (_isLoadingProfessions
@@ -574,10 +593,9 @@ class _SearchPageState extends State<SearchPage> {
               _selectedProfession = p;
               _showWorkerList = true;
               _searchController.clear();
-              _applyFilters();
             });
+            _fetchWorkers(isRefresh: true);
             _trackSearch(p['en']);
-            _fetchMatrixDistances();
           },
           borderRadius: BorderRadius.circular(24),
           child: Container(
@@ -627,7 +645,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildWorkerList(String locale, Color themeColor) {
-    if (_filteredWorkers.isEmpty) {
+    if (_filteredWorkers.isEmpty && !_isLoadingWorkers) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -649,9 +667,30 @@ class _SearchPageState extends State<SearchPage> {
       );
     }
     return ListView.builder(
+      controller: _scrollController,
+      physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       padding: const EdgeInsets.all(16),
-      itemCount: _filteredWorkers.length,
+      itemCount: _filteredWorkers.length + (_hasMore ? 1 : 0),
       itemBuilder: (context, index) {
+        if (index == _filteredWorkers.length) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: _isFetchingMore 
+                ? const CircularProgressIndicator()
+                : Column(
+                    children: [
+                      const Icon(Icons.arrow_upward, color: Colors.grey, size: 20),
+                      Text(
+                        locale == 'he' ? 'משוך למעלה לעוד' : 'Pull up to load more',
+                        style: const TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                    ],
+                  ),
+            ),
+          );
+        }
+
         final w = _filteredWorkers[index];
 
         String distanceStr = "";
@@ -670,7 +709,6 @@ class _SearchPageState extends State<SearchPage> {
         final bool isBusinessVerified = w['isBusinessVerified'] ?? false;
         final bool isInsured = w['isInsured'] ?? false;
 
-        // Profession-specific rating logic
         double displayRating = 0.0;
         int displayReviewCount = 0;
         bool isServiceSpecific = false;
@@ -681,6 +719,9 @@ class _SearchPageState extends State<SearchPage> {
             displayRating = (w['professionStats'][profKey]['avg'] ?? 0.0).toDouble();
             displayReviewCount = w['professionStats'][profKey]['count'] ?? 0;
             isServiceSpecific = true;
+          } else {
+            displayRating = (w['avgRating'] as num).toDouble();
+            displayReviewCount = w['reviewCount'] ?? 0;
           }
         } else {
           displayRating = (w['avgRating'] as num).toDouble();
@@ -720,6 +761,7 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
             title: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Flexible(
                   child: Text(
@@ -728,9 +770,10 @@ class _SearchPageState extends State<SearchPage> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                if (isIdVerified) const Padding(padding: EdgeInsets.only(left: 4), child: Icon(Icons.assignment_ind, color: Colors.green, size: 14)),
-                if (isBusinessVerified) const Padding(padding: EdgeInsets.only(left: 4), child: Icon(Icons.business_center, color: Colors.orange, size: 14)),
-                if (isInsured) const Padding(padding: EdgeInsets.only(left: 4), child: Icon(Icons.shield, color: Colors.blue, size: 14)),
+                const SizedBox(width: 4),
+                if (isIdVerified) const Icon(Icons.assignment_ind, color: Colors.green, size: 14),
+                if (isBusinessVerified) const Padding(padding: EdgeInsets.only(left: 2), child: Icon(Icons.business_center, color: Colors.orange, size: 14)),
+                if (isInsured) const Padding(padding: EdgeInsets.only(left: 2), child: Icon(Icons.shield, color: Colors.blue, size: 14)),
               ],
             ),
             subtitle: Column(
@@ -745,21 +788,28 @@ class _SearchPageState extends State<SearchPage> {
                       color: Colors.grey,
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      w['town'] ?? '',
-                      style: const TextStyle(color: Colors.grey, fontSize: 13),
+                    Flexible(
+                      child: Text(
+                        w['town'] ?? '',
+                        style: const TextStyle(color: Colors.grey, fontSize: 13),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     if (distanceStr.isNotEmpty) ...[
                       const SizedBox(width: 8),
-                      Text(distanceStr, style: TextStyle(color: themeColor, fontSize: 12, fontWeight: FontWeight.bold)),
+                      Text(
+                        distanceStr,
+                        style: TextStyle(color: themeColor, fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
                     ]
                   ],
                 ),
               ],
             ),
             trailing: SizedBox(
-              width: 100,
+              width: 90,
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -768,18 +818,18 @@ class _SearchPageState extends State<SearchPage> {
                       fit: BoxFit.scaleDown,
                       child: Text(
                         locale == 'he' ? 'דירוג לשירות זה' : 'Rating for service',
-                        style: TextStyle(fontSize: 9, color: themeColor, fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 8, color: themeColor, fontWeight: FontWeight.bold),
                       ),
                     ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 1),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
+                      horizontal: 6,
+                      vertical: 2,
                     ),
                     decoration: BoxDecoration(
                       color: Colors.amber.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(6),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -787,14 +837,15 @@ class _SearchPageState extends State<SearchPage> {
                         const Icon(
                           Icons.star_rounded,
                           color: Colors.amber,
-                          size: 16,
+                          size: 14,
                         ),
-                        const SizedBox(width: 4),
+                        const SizedBox(width: 2),
                         Text(
                           displayRating.toStringAsFixed(1),
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             color: Colors.amber,
+                            fontSize: 12,
                           ),
                         ),
                       ],
@@ -802,10 +853,10 @@ class _SearchPageState extends State<SearchPage> {
                   ),
                   if (displayReviewCount > 0)
                     Padding(
-                      padding: const EdgeInsets.only(top: 4, right: 4),
+                      padding: const EdgeInsets.only(top: 1, right: 4),
                       child: Text(
                         "($displayReviewCount)",
-                        style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500),
+                        style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.w500),
                       ),
                     ),
                 ],
@@ -858,7 +909,7 @@ class _SearchPageState extends State<SearchPage> {
                   : null,
               onTap: () {
                 setState(() => _sortBy = 'rating');
-                _applyFilters();
+                _fetchWorkers(isRefresh: true);
                 Navigator.pop(context);
               },
             ),
@@ -879,7 +930,7 @@ class _SearchPageState extends State<SearchPage> {
                   : null,
               onTap: () {
                 setState(() => _sortBy = 'name');
-                _applyFilters();
+                _fetchWorkers(isRefresh: true);
                 Navigator.pop(context);
               },
             ),
@@ -889,12 +940,6 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  List<String> _getProfessionsList(Map<String, dynamic> worker) {
-    if (worker['professions'] is List)
-      return (worker['professions'] as List).cast<String>();
-    if (worker['profession'] != null) return [worker['profession'].toString()];
-    return [];
-  }
 
   IconData _getIcon(String? name) {
     switch (name) {

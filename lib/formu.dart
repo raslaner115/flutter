@@ -6,7 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:untitled1/pages/sighn_in.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -511,7 +511,7 @@ class _BlogPageState extends State<BlogPage> {
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.blue.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: [BoxShadow(color: Colors.blue, blurRadius: 10, offset: const Offset(0, 4))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -732,7 +732,6 @@ class _BlogCard extends StatelessWidget {
   final VoidCallback onGuestDialog;
 
   const _BlogCard({
-    super.key,
     required this.post,
     required this.onLike,
     required this.onDelete,

@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/sighn_up.dart';
-import 'package:untitled1/auth_service.dart';
 import '../main.dart';
 
 class SignInPage extends StatefulWidget {
@@ -17,8 +16,7 @@ class SignInPage extends StatefulWidget {
 class _SignInPageState extends State<SignInPage> {
   final _phoneController = TextEditingController();
   final _codeController = TextEditingController();
-  final AuthService _authService = AuthService();
-  
+
   String _verificationId = "";
   bool _codeSent = false;
   bool _loading = false;
@@ -144,8 +142,14 @@ class _SignInPageState extends State<SignInPage> {
       if (user != null) {
         final firestore = FirebaseFirestore.instance;
 
-        // Check by UID instead of phone for more reliability
-        final userDoc = await firestore.collection('users').doc(user.uid).get();
+        // Check all three collections
+        DocumentSnapshot userDoc = await firestore.collection('normal_users').doc(user.uid).get();
+        if (!userDoc.exists) {
+          userDoc = await firestore.collection('workers').doc(user.uid).get();
+        }
+        if (!userDoc.exists) {
+          userDoc = await firestore.collection('admins').doc(user.uid).get();
+        }
 
         if (userDoc.exists) {
           if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MyHomePage()));

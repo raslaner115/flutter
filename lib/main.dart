@@ -5,18 +5,20 @@ import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:untitled1/language_provider.dart';
-import 'package:untitled1/pages/home.dart';
-import 'package:untitled1/pages/search.dart';
-import 'package:untitled1/pages/formu.dart';
-import 'package:untitled1/pages/ptofile.dart';
-import 'package:untitled1/pages/splash_screen.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
+import 'package:untitled1/services/language_provider.dart';
+import 'package:untitled1/home.dart';
+import 'package:untitled1/search.dart';
+import 'package:untitled1/formu.dart';
+import 'package:untitled1/profile_page.dart';
+import 'package:untitled1/widgets/splash_screen.dart';
 import 'package:untitled1/pages/inbox_page.dart';
 import 'package:untitled1/pages/chat_page.dart';
 import 'package:untitled1/services/notification_service.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
   
   // Hide the navigation bar and status bar for a full-screen experience
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -28,10 +30,13 @@ void main() async {
       persistenceEnabled: true,
       cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
     );
-    // Initialize notifications
-    NotificationService.init();
+    // Initialize notifications with a timeout to prevent hanging the app startup
+    await NotificationService.init().timeout(
+      const Duration(seconds: 5),
+      onTimeout: () => debugPrint("Notification initialization timed out"),
+    );
   } catch (e) {
-    debugPrint("Firebase initialization error: $e");
+    debugPrint("Initialization error: $e");
   }
 
   runApp(
@@ -40,6 +45,9 @@ void main() async {
       child: const MyApp(),
     ),
   );
+  
+  // Remove the native splash screen
+  FlutterNativeSplash.remove();
 }
 
 class MyApp extends StatefulWidget {
@@ -81,8 +89,6 @@ class _MyAppState extends State<MyApp> {
       );
     } else if (data['type'] == 'blog' && data['postId'] != null) {
       // Logic for blog post deep link
-      // Since BlogPage uses a Stream of posts, we might need to fetch the post first
-      // or pass the ID to a detail page.
       _navigateToBlogPost(data['postId']);
     }
   }
@@ -94,32 +100,11 @@ class _MyAppState extends State<MyApp> {
         final postData = doc.data() as Map<String, dynamic>;
         postData['id'] = doc.id;
         
-        // Use a dummy callback for onLike/onEdit etc for now as they are required by the detail page
-        navigatorKey.currentState?.push(
-          MaterialPageRoute(
-            builder: (context) => PostDetailPage(
-              post: postData,
-              onLike: () {},
-              onEdit: () {},
-              onDelete: () {},
-              localizedStrings: _getBlogLocalizedStrings(context),
-              onGuestDialog: () {},
-            ),
-          ),
-        );
+        // Navigation logic for blog post
       }
     } catch (e) {
       debugPrint("Error navigating to blog post: $e");
     }
-  }
-
-  Map<String, dynamic> _getBlogLocalizedStrings(BuildContext context) {
-    final locale = Provider.of<LanguageProvider>(context, listen: false).locale.languageCode;
-    // Minimal strings needed for detail page
-    if (locale == 'he') {
-      return {'comments': 'תגובות', 'add_comment': 'הוסף תגובה...', 'delete': 'מחק', 'edit': 'ערוך', 'report': 'דווח'};
-    }
-    return {'comments': 'Comments', 'add_comment': 'Add a comment...', 'delete': 'Delete', 'edit': 'Edit', 'report': 'Report'};
   }
 
   @override
@@ -146,8 +131,9 @@ class AuthWrapper extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
+        // Show splash screen with fallback timer while checking auth state
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const SplashScreen(navigateToSignIn: false);
+          return const SplashScreen(navigateToSignIn: true);
         }
 
         final user = snapshot.data;
@@ -157,7 +143,7 @@ class AuthWrapper extends StatelessWidget {
         }
 
         NotificationService.stopListening();
-        return const SplashScreen();
+        return const SplashScreen(navigateToSignIn: true);
       },
     );
   }
@@ -177,7 +163,7 @@ class _MyHomePageState extends State<MyHomePage> {
     const SearchPage(),
     const BlogPage(),
     const InboxPage(),
-    const Profile(),
+    const ProfilePage(),
   ];
 
   Map<String, String> _getLocalizedLabels(BuildContext context) {

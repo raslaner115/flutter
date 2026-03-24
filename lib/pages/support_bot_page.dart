@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/chat_page.dart';
-import 'package:untitled1/pages/search.dart';
+import 'package:untitled1/search.dart';
 import 'package:untitled1/pages/analytics_page.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -20,7 +20,7 @@ class _SupportBotPageState extends State<SupportBotPage> {
   final ScrollController _scrollController = ScrollController();
   bool _isTyping = false;
   String? _userName;
-  String _userType = 'normal'; 
+  String _userType = 'normal';
 
   @override
   void initState() {
@@ -52,9 +52,9 @@ class _SupportBotPageState extends State<SupportBotPage> {
   String _getGreeting() {
     final hour = DateTime.now().hour;
     String timeGreeting = "Good day";
-    if (hour < 12) timeGreeting = "Good morning";
-    else if (hour < 17) timeGreeting = "Good afternoon";
-    else timeGreeting = "Good evening";
+    if (hour < 12){ timeGreeting = "Good morning";}
+    else if (hour < 17) {timeGreeting = "Good afternoon";}
+    else{ timeGreeting = "Good evening";}
 
     return "👋 $timeGreeting${_userName != null ? ' $_userName' : ''}! I'm your HireHub AI Assistant. I can help you find pros, check status, or answer questions about payments and safety. How can I help?";
   }

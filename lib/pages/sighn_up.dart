@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -11,7 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/subscription.dart';
 import 'package:untitled1/pages/map_radius_picker.dart';
 import 'package:untitled1/pages/location_picker.dart';
@@ -347,11 +346,15 @@ class _SignUpPageState extends State<SignUpPage> {
         'town': _selectedTown,
         'lat': lat,
         'lng': lng,
-        'userType': _userType == UserType.worker ? 'worker' : 'normal',
+        'isNormal': _userType == UserType.normal,
+        'isWorker': _userType == UserType.worker,
+        'isAdmin': false,
         'profileImageUrl': imageUrl,
         'createdAt': FieldValue.serverTimestamp(),
         'isAnonymous': user.isAnonymous,
       };
+
+      String targetCollection = _userType == UserType.worker ? 'workers' : 'normal_users';
 
       if (_userType == UserType.worker) {
         userData.addAll({
@@ -364,10 +367,12 @@ class _SignUpPageState extends State<SignUpPage> {
           'workCenterLat': _workCenter?.latitude,
           'workCenterLng': _workCenter?.longitude,
           'subscriptionDate': FieldValue.serverTimestamp(),
+          'avgRating': 0.0,
+          'reviewCount': 0,
         });
       }
 
-      await firestore.collection('users').doc(user.uid).set(userData);
+      await firestore.collection(targetCollection).doc(user.uid).set(userData);
       await user.updateDisplayName(finalName);
       
       if (_userType == UserType.worker) {
@@ -447,13 +452,16 @@ class _SignUpPageState extends State<SignUpPage> {
         'name': _nameController.text.trim(),
         'email': _emailController.text.trim(),
         'town': _selectedTown,
-        'userType': 'worker',
+        'isWorker': true,
+        'isNormal': false,
         'professions': _selectedProfessions,
         'optionalPhone': _altPhoneController.text.trim(),
         'description': _descriptionController.text.trim(),
         'workRadius': _workRadius,
         'workCenterLat': _workCenter?.latitude,
         'workCenterLng': _workCenter?.longitude,
+        'avgRating': 0.0,
+        'reviewCount': 0,
       };
 
       Navigator.push(

@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/request_details.dart';
 
 class NotificationsPage extends StatelessWidget {
@@ -166,7 +166,7 @@ class NotificationsPage extends StatelessWidget {
               leading: Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1976D2).withOpacity(0.1),
+                  color: const Color(0xFF1976D2),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
@@ -203,7 +203,7 @@ class NotificationsPage extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         decoration: BoxDecoration(
-                          color: (status == 'accepted' && !isDeclineNotif) ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                          color: (status == 'accepted' && !isDeclineNotif) ? Colors.green : Colors.red,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Center(

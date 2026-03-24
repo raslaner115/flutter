@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -7,8 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
-import 'package:http/http.dart' as http;
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 
 class SendRequestPage extends StatefulWidget {
   final String workerId;
@@ -244,7 +242,6 @@ class _SendRequestPageState extends State<SendRequestPage> {
       final workerDoc = await FirebaseFirestore.instance.collection('users').doc(widget.workerId).get();
       final workerData = workerDoc.data();
       final String? workerFcmToken = workerData?['fcmToken'];
-      final bool isWorkerPro = workerData?['isPro'] ?? false;
 
       final fStr = _fromTime != null ? "${_fromTime!.hour.toString().padLeft(2, '0')}:${_fromTime!.minute.toString().padLeft(2, '0')}" : null;
       final tStr = _toTime != null ? "${_toTime!.hour.toString().padLeft(2, '0')}:${_toTime!.minute.toString().padLeft(2, '0')}" : null;

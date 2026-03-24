@@ -6,8 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:untitled1/pages/sighn_up.dart';
-import 'package:untitled1/pages/edit_profile.dart';
-import '../main.dart';
+
 
 class SubscriptionPage extends StatefulWidget {
   final String email;
@@ -133,51 +132,54 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return false;
 
-      Map<String, dynamic> updateData = {
+      final firestore = FirebaseFirestore.instance;
+      
+      // 1. Fetch current data from normal_users (if exists)
+      final normalDoc = await firestore.collection('normal_users').doc(user.uid).get();
+      Map<String, dynamic> baseData = normalDoc.exists ? (normalDoc.data() ?? {}) : {};
+
+      // 2. Prepare worker data
+      Map<String, dynamic> workerData = {
+        ...baseData,
         'isPro': true,
         'isSubscribed': true,
         'subscriptionDate': FieldValue.serverTimestamp(),
-        'userType': 'worker',
+        'isWorker': true,
+        'isNormal': false,
+        'isAdmin': false,
       };
 
-      if (widget.pendingUserData != null)
-        updateData.addAll(widget.pendingUserData!);
+      if (widget.pendingUserData != null) {
+        workerData.addAll(widget.pendingUserData!);
+      }
 
       if (widget.pendingImage != null) {
         final storageRef = FirebaseStorage.instance.ref().child(
           'profile_pictures/${user.uid}.jpg',
         );
         await storageRef.putFile(widget.pendingImage!);
-        updateData['profileImageUrl'] = await storageRef.getDownloadURL();
+        workerData['profileImageUrl'] = await storageRef.getDownloadURL();
       }
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set(updateData, SetOptions(merge: true));
+      // 3. Atomic Migration using WriteBatch
+      WriteBatch batch = firestore.batch();
+      DocumentReference workerRef = firestore.collection('workers').doc(user.uid);
+      DocumentReference normalRef = firestore.collection('normal_users').doc(user.uid);
+      
+      batch.set(workerRef, workerData, SetOptions(merge: true));
+      batch.delete(normalRef);
+      
+      await batch.commit();
       return true;
     } catch (e) {
-      debugPrint("Update Error: $e");
+      debugPrint("Migration Error: $e");
       return false;
     }
   }
 
   void _buySubscription() {
-    if (_products.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            "Product not found. 1. Clear Play Store Cache. 2. Use a Physical Device. 3. Check License Testing.",
-          ),
-        ),
-      );
-      return;
-    }
-
-    final PurchaseParam purchaseParam = PurchaseParam(
-      productDetails: _products.first,
-    );
-    _inAppPurchase.buyNonConsumable(purchaseParam: purchaseParam);
+    // FOR TESTING: Directly complete subscription bypassing real IAP
+    _completeSubscription();
   }
 
   void _showSuccessDialog({required bool isNewReg}) {
@@ -231,33 +233,24 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 children: [
                   _buildCard(),
                   const Spacer(),
-                  if (!_isStoreAvailable)
-                    const Text(
-                      "Store Unavailable",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.red),
-                    )
-                  else
-                    ElevatedButton(
-                      onPressed: _buySubscription,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1976D2),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                      ),
-                      child: Text(
-                        _products.isNotEmpty
-                            ? 'Subscribe Now - ${_products.first.price}'
-                            : 'Product Not Found',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+                  ElevatedButton(
+                    onPressed: _buySubscription,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1976D2),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
                       ),
                     ),
+                    child: const Text(
+                      'Subscribe Now (TEST MODE)',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),

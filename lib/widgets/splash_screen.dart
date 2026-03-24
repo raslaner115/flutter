@@ -95,7 +95,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           Positioned(
             bottom: -50,
             left: -50,
-            child: _buildBlurCircle(const Color(0xFF1976D2).withOpacity(0.2), 250),
+            child: _buildBlurCircle(const Color(0xFF1976D2), 250),
           ),
           
           Center(

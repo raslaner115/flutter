@@ -149,7 +149,7 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
           circleId: const CircleId('radius'),
           center: _center!,
           radius: _radius,
-          fillColor: const Color(0xFF1976D2).withOpacity(0.2),
+          fillColor: const Color(0xFF1976D2),
           strokeColor: const Color(0xFF1976D2),
           strokeWidth: 2,
         ),
@@ -214,7 +214,7 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
             ),
           if (_isLoading)
             Container(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black,
               child: const Center(child: CircularProgressIndicator(color: Color(0xFF1976D2))),
             ),
           
@@ -273,7 +273,7 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF1976D2).withOpacity(0.1),
+                          color: const Color(0xFF1976D2),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
@@ -287,9 +287,9 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
                   SliderTheme(
                     data: SliderTheme.of(context).copyWith(
                       activeTrackColor: const Color(0xFF1976D2),
-                      inactiveTrackColor: Colors.blue.withOpacity(0.1),
+                      inactiveTrackColor: Colors.blue,
                       thumbColor: const Color(0xFF1976D2),
-                      overlayColor: const Color(0xFF1976D2).withOpacity(0.2),
+                      overlayColor: const Color(0xFF1976D2),
                     ),
                     child: Slider(
                       value: _radius,

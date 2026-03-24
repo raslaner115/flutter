@@ -4,9 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:untitled1/language_provider.dart';
-import 'package:untitled1/pages/search.dart';
-import 'package:untitled1/pages/ptofile.dart';
+import 'package:untitled1/services/language_provider.dart';
+import 'package:untitled1/search.dart';
+import 'package:untitled1/profile_page.dart';
 import 'package:untitled1/pages/notifications.dart';
 import 'package:untitled1/widgets/skeleton.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -87,8 +87,6 @@ class _HomePageState extends State<HomePage> {
           }
         }
       } catch (firestoreError) {
-        // This is where your PERMISSION_DENIED error was caught.
-        // We catch it and move on to defaults.
         debugPrint("Firestore analytics fetch failed (using defaults): $firestoreError");
       }
 
@@ -127,7 +125,7 @@ class _HomePageState extends State<HomePage> {
     
     try {
       final snapshot = await _firestore.collection('users')
-          .where('userType', isEqualTo: 'worker')
+          .where('isWorker', isEqualTo: true)
           .orderBy('avgRating', descending: true)
           .limit(10)
           .get();
@@ -160,7 +158,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _fetchAnyWorkers() async {
     try {
       final snapshot = await _firestore.collection('users')
-          .where('userType', isEqualTo: 'worker')
+          .where('isWorker', isEqualTo: true)
           .limit(10)
           .get();
       
@@ -491,7 +489,7 @@ class _HomePageState extends State<HomePage> {
                   itemBuilder: (context, index) {
                     final worker = _topRatedWorkers[index];
                     return GestureDetector(
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => Profile(userId: worker['uid']))),
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ProfilePage(userId: worker['uid']))),
                       child: Container(
                         width: 160,
                         margin: const EdgeInsets.symmetric(horizontal: 8),
