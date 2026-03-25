@@ -9,8 +9,8 @@ import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:untitled1/services/language_provider.dart';
-import 'package:untitled1/pages/map_radius_picker.dart';
-import 'package:untitled1/pages/location_picker.dart';
+import 'package:untitled1/map/map_radius_picker.dart';
+import 'package:untitled1/map/location_picker.dart';
 
 class EditProfilePage extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -182,7 +182,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
         updateData['profileImageUrl'] = imageUrl;
       }
 
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).update(updateData);
+      // Use the correct collection from userData
+      String collection = widget.userData['collection'] ?? 'normal_users';
+      await FirebaseFirestore.instance.collection(collection).doc(user.uid).update(updateData);
       await user.updateDisplayName(_nameController.text.trim());
 
       if (mounted) Navigator.pop(context, true);

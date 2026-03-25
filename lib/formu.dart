@@ -8,7 +8,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:untitled1/pages/sighn_in.dart';
+import 'package:untitled1/sighn_in.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 class BlogPage extends StatefulWidget {
@@ -29,7 +29,7 @@ class _BlogPageState extends State<BlogPage> {
   final Set<String> _hiddenPostIds = {};
   String _sortBy = 'newest'; // 'newest' or 'likes'
   int _selectedFilterIndex = 0; // 0 is "All"
-  bool _isGuideExpanded = true; // Added state for collapsible guide
+  bool _isGuideExpanded = false; // Added state for collapsible guide
 
   @override
   void initState() {

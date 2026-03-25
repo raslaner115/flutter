@@ -27,13 +27,20 @@ class AuthService {
         'name': "User",
         'phone': user.phoneNumber ?? "",
         'email': user.email ?? "",
-        'isNormal': true,
-        'isWorker': false,
-        'isAdmin': false,
         'createdAt': FieldValue.serverTimestamp(),
         'profileImageUrl': user.photoURL ?? "",
       });
     }
+  }
+
+  // Helper to get user document from any collection
+  Future<DocumentSnapshot?> getUserDoc(String uid) async {
+    final collections = ['normal_users', 'workers', 'admins'];
+    for (var col in collections) {
+      final doc = await _firestore.collection(col).doc(uid).get();
+      if (doc.exists) return doc;
+    }
+    return null;
   }
 
   // Sign Out

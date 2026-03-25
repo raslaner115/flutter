@@ -26,7 +26,7 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
   bool _isLoading = false;
   String? _errorMessage;
 
-  // Approximate bounds for Israel
+  // Exact bounds for Israel to lock the map
   final LatLngBounds _israelBounds = LatLngBounds(
     southwest: const LatLng(29.4533, 34.2674),
     northeast: const LatLng(33.3328, 35.8955),
@@ -37,11 +37,14 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
     super.initState();
     _radius = widget.initialRadius;
     _center = widget.initialCenter;
-    if (_center != null) {
-      _updateMapElements();
-    } else {
-      _determinePosition();
+    
+    // If no initial center or initial center is outside Israel, default to center of Israel (approx Tel Aviv area)
+    if (_center == null || !_isWithinIsrael(_center!)) {
+      _center = const LatLng(32.0853, 34.7818); 
     }
+    
+    _updateMapElements();
+    _determinePosition();
   }
 
   Future<void> _determinePosition() async {
@@ -55,7 +58,7 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
 
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        throw 'Location services are disabled. Please enable them in settings.';
+        throw 'Location services are disabled.';
       }
 
       LocationPermission permission = await Geolocator.checkPermission();
@@ -77,31 +80,25 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
       
       LatLng newCenter = LatLng(position.latitude, position.longitude);
       
-      // Ensure the determined position is within Israel bounds
-      if (!_isWithinIsrael(newCenter)) {
-        newCenter = const LatLng(32.0853, 34.7818); // Default to Tel Aviv
-      }
-
-      if (mounted) {
-        setState(() {
-          _center = newCenter;
-          _isLoading = false;
-          _updateMapElements();
-        });
-        _moveCameraToCenter();
+      // Only update if the user is actually in Israel
+      if (_isWithinIsrael(newCenter)) {
+        if (mounted) {
+          setState(() {
+            _center = newCenter;
+            _isLoading = false;
+            _updateMapElements();
+          });
+          _moveCameraToCenter();
+        }
+      } else {
+         if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           _isLoading = false;
           _errorMessage = e.toString();
-          if (_center == null) {
-            // Fallback to Tel Aviv
-            _center = const LatLng(32.0853, 34.7818);
-            _updateMapElements();
-          }
         });
-        _moveCameraToCenter();
       }
     }
   }
@@ -122,8 +119,9 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
   }
 
   double _getZoomLevel(double radius) {
+    // Adjusted zoom logic to keep things visible within Israel
     double scale = radius / 500;
-    return max(0, min(21, (16 - log(scale) / log(2))));
+    return max(6.0, min(21.0, (16 - log(scale) / log(2))));
   }
 
   void _updateMapElements() {
@@ -138,6 +136,11 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
           onDragEnd: (newPosition) {
             if (_isWithinIsrael(newPosition)) {
               _center = newPosition;
+            } else {
+              // If dragged out, snap back to a valid position near the edge or keep old center
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Please stay within Israel bounds")),
+              );
             }
             _updateMapElements();
           },
@@ -149,7 +152,7 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
           circleId: const CircleId('radius'),
           center: _center!,
           radius: _radius,
-          fillColor: const Color(0xFF1976D2),
+          fillColor: const Color(0xFF1976D2).withOpacity(0.2),
           strokeColor: const Color(0xFF1976D2),
           strokeWidth: 2,
         ),
@@ -189,8 +192,10 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
                 target: _center!,
                 zoom: _getZoomLevel(_radius),
               ),
+              // Lock the map to Israel bounds
               cameraTargetBounds: CameraTargetBounds(_israelBounds),
-              minMaxZoomPreference: const MinMaxZoomPreference(5.0, null),
+              // Prevent zooming out too far to keep the focus on Israel
+              minMaxZoomPreference: const MinMaxZoomPreference(7.0, 18.0),
               onMapCreated: (controller) {
                 _mapController = controller;
                 _moveCameraToCenter();
@@ -212,11 +217,9 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
               mapToolbarEnabled: false,
               compassEnabled: true,
             ),
+          
           if (_isLoading)
-            Container(
-              color: Colors.black,
-              child: const Center(child: CircularProgressIndicator(color: Color(0xFF1976D2))),
-            ),
+            const Center(child: CircularProgressIndicator(color: Color(0xFF1976D2))),
           
           Positioned(
             top: 16,
@@ -273,7 +276,7 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF1976D2),
+                          color: const Color(0xFF1976D2).withOpacity(0.1),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
@@ -287,15 +290,15 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
                   SliderTheme(
                     data: SliderTheme.of(context).copyWith(
                       activeTrackColor: const Color(0xFF1976D2),
-                      inactiveTrackColor: Colors.blue,
+                      inactiveTrackColor: const Color(0xFF1976D2).withOpacity(0.2),
                       thumbColor: const Color(0xFF1976D2),
-                      overlayColor: const Color(0xFF1976D2),
+                      overlayColor: const Color(0xFF1976D2).withOpacity(0.2),
                     ),
                     child: Slider(
                       value: _radius,
                       min: 1000,
-                      max: 500000, // Increased to 500km
-                      divisions: 499, // Finer divisions for the larger range
+                      max: 200000, // Reduced to 200km as it covers most of Israel's width/height effectively
+                      divisions: 199,
                       onChanged: (value) {
                         setState(() {
                           _radius = value;
@@ -314,7 +317,7 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
                       Icon(Icons.info_outline, size: 14, color: Colors.grey),
                       SizedBox(width: 4),
                       Text(
-                        'Tap the map or drag the marker to set your center',
+                        'Tap the map or drag the marker within Israel',
                         style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                     ],
@@ -323,46 +326,6 @@ class _MapRadiusPickerState extends State<MapRadiusPicker> {
               ),
             ),
           ),
-          
-          if (_errorMessage != null && _center == null)
-            Positioned.fill(
-              child: Container(
-                color: Colors.white,
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.location_off_outlined, size: 64, color: Colors.red),
-                        const SizedBox(height: 16),
-                        const Text(
-                          'Location Access Error',
-                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _errorMessage!,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.grey),
-                        ),
-                        const SizedBox(height: 24),
-                        ElevatedButton(
-                          onPressed: _determinePosition,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1976D2),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          child: const Text('Retry'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
     );

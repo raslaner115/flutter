@@ -6,7 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:untitled1/services/language_provider.dart';
-import 'package:untitled1/pages/sighn_in.dart';
+import 'package:untitled1/sighn_in.dart';
 import 'package:untitled1/pages/about.dart';
 import 'package:untitled1/pages/account_settings.dart';
 
@@ -23,6 +23,7 @@ class _SettingsPageState extends State<SettingsPage> {
   List<int> _disabledDays = []; // 1 = Monday, 7 = Sunday
   bool _isLoadingSettings = true;
   Map<String, dynamic>? _userData;
+  String _userCollection = "normal_users";
 
   @override
   void initState() {
@@ -38,16 +39,28 @@ class _SettingsPageState extends State<SettingsPage> {
     }
 
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      if (doc.exists) {
-        final data = doc.data()!;
+      DocumentSnapshot? userDoc;
+      final collections = ['normal_users', 'workers', 'admins'];
+      
+      for (var col in collections) {
+        final doc = await FirebaseFirestore.instance.collection(col).doc(user.uid).get();
+        if (doc.exists) {
+          userDoc = doc;
+          _userCollection = col;
+          break;
+        }
+      }
+
+      if (userDoc != null && userDoc.exists) {
+        final data = userDoc.data() as Map<String, dynamic>;
         // Check actual system permission status as well
         final status = await Permission.notification.status;
         setState(() {
           _userData = data;
+          // Add derived userType for child pages that might expect it
+          _userData!['userType'] = _userCollection == 'workers' ? 'worker' : (_userCollection == 'admins' ? 'admin' : 'normal');
+          _userData!['collection'] = _userCollection;
+          
           _hideSchedule = data['hideSchedule'] ?? false;
           _disabledDays = List<int>.from(data['disabledDays'] ?? []);
           // Sync with Firestore, but also respect system setting if permanently denied
@@ -56,6 +69,8 @@ class _SettingsPageState extends State<SettingsPage> {
               !status.isPermanentlyDenied;
           _isLoadingSettings = false;
         });
+      } else {
+        setState(() => _isLoadingSettings = false);
       }
     } catch (e) {
       debugPrint("Error loading settings: $e");
@@ -67,7 +82,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
+    await FirebaseFirestore.instance.collection(_userCollection).doc(user.uid).update({
       key: value,
     });
   }
@@ -237,6 +252,9 @@ class _SettingsPageState extends State<SettingsPage> {
     if (user == null || user.isAnonymous) return const SizedBox.shrink();
     if (_isLoadingSettings)
       return const Center(child: CupertinoActivityIndicator());
+
+    // Only show schedule settings for workers
+    if (_userCollection != 'workers') return const SizedBox.shrink();
 
     final dayNames = strings['days']!.split(',');
 
@@ -441,6 +459,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildGalaxySection(String title, List<Widget> children) {
+    if (children.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -532,6 +551,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ],
             ),
+            if (_userCollection == 'workers')
             CupertinoListSection.insetGrouped(
               header: Text(strings['schedule']!),
               children: [
@@ -718,7 +738,7 @@ class LanguageDropDown extends StatelessWidget {
       itemBuilder: (context) => [
         const PopupMenuItem(value: 'en', child: Text('English')),
         const PopupMenuItem(value: 'he', child: Text('עברית')),
-        const PopupMenuItem(value: 'ar', child: Text('عربي')),
+        const PopupMenuItem(value: 'ar', child: Text('עربي')),
         const PopupMenuItem(value: 'ru', child: Text('Русский')),
         const PopupMenuItem(value: 'am', child: Text('አማርኛ')),
       ],

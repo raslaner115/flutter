@@ -12,9 +12,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/subscription.dart';
-import 'package:untitled1/pages/map_radius_picker.dart';
-import 'package:untitled1/pages/location_picker.dart';
-import '../main.dart';
+import 'package:untitled1/map/map_radius_picker.dart';
+import 'package:untitled1/map/location_picker.dart';
+import 'main.dart';
 
 class SignUpPage extends StatefulWidget {
   final Map<String, dynamic>? pendingWorkerData;
@@ -44,7 +44,6 @@ class _SignUpPageState extends State<SignUpPage> {
   final _altPhoneController = TextEditingController();
   final _descriptionController = TextEditingController();
   
-  // Controller to clear the professions search bar after selection
   TextEditingController? _professionsSearchController;
 
   late SignUpStep _currentStep;
@@ -106,7 +105,8 @@ class _SignUpPageState extends State<SignUpPage> {
     switch (locale) {
       case 'he':
         return {
-          'title': 'הרשמה',
+          'title': 'יצירת חשבון',
+          'subtitle': 'הצטרף לקהילת HireHub',
           'phone_label': 'מספר טלפון',
           'phone_subtitle': 'הכנס את מספר הטלפון שלך לאימות וסיום',
           'send_code': 'שלח קוד אימות',
@@ -116,7 +116,7 @@ class _SignUpPageState extends State<SignUpPage> {
           'email_label': 'אימייל (אופציונלי)',
           'town_label': 'עיר',
           'user_type': 'סוג חשבון',
-          'normal': 'משתמש רגיל',
+          'normal': 'לקוח',
           'pro': 'בעל מקצוע',
           'professions': 'בחר מקצועות',
           'alt_phone': 'טלפון נוסף (אופציונלי)',
@@ -133,19 +133,21 @@ class _SignUpPageState extends State<SignUpPage> {
           'error_verify': 'שגיאה באימות הקוד',
           'search_hint': 'חפש...',
           'terms_title': 'תנאי שימוש',
-          'terms_content': 'תנאי השימוש:\n\n1. השירות: האפליקציה משמשת כפלטפורמה המקשרת בין משתמשים לבעלי מקצוע. המפעיל אינו צד בעסקה ואינו מספק את השירותים בעצמו.\n2. אחריות: המפעיל אינו אחראי לטיב העבודה, ללוחות הזמנים, למחיר או לכל נזק שייגרם כתוצאה מההתקשרות בין הצדדים.\n3. התנהגות משתמש: הנך מתחייב לספק מידע אמיתי ומדויק. חל איסור על שימוש לרעה במערכת או פרסום תוכן פוגעני.\n4. קניין רוחני: כל הזכויות באפליקציה שמורות למפעיליה.\n5. שינוי תנאים: המפעיל רשאי לעדכן את תנאי השימוש בכל עת.',
+          'terms_content': 'תנאי השימוש...',
           'privacy_title': 'מדיניות פרטיות',
-          'privacy_content': 'מדיניות פרטיות:\n\n1. איסוף מידע: אנו אוספים פרטי זיהוי (שם, טלפון, אימייל) ונתוני מיקום לצורך תפעול ושיפור השירות.\n2. שימוש במידע: המידע משמש לחיבור בין משתמשים, ניהול חשבונות ושליחת עדכונים רלוונטיים.\n3. שיתוף מידע: פרטי הקשר של בעלי מקצוע מוצגים למשתמשים לצורך התקשרות עסקית בלבד. איננו מוכרים מידע לצד ג\'.\n4. אבטחה: המידע נשמר בטכנולוגיות ענן מאובטחות בתקנים מחמירים.\n5. זכויותיך: הנך רשאי לבקש לעיין במידע, לתקנו או למחוק את חשבונך בכל עת דרך הגדרות האפליקציה.',
+          'privacy_content': 'מדיניות פרטיות...',
           'close': 'סגור',
-          'current_loc': 'השתמש במיקום נוכחי',
+          'current_loc': 'מיקום נוכחי',
           'pick_map': 'בחר מהמפה',
           'work_radius': 'רדיוס עבודה',
           'radius_val': 'רדיוס: {val} ק"מ',
           'select_radius': 'בחר רדיוס על המפה',
+          'edit_phone': 'ערוך מספר טלפון',
         };
       default:
         return {
-          'title': 'Sign Up',
+          'title': 'Create Account',
+          'subtitle': 'Join the HireHub community',
           'phone_label': 'Phone Number',
           'phone_subtitle': 'Enter your phone number to verify and complete',
           'send_code': 'Send Verification Code',
@@ -155,7 +157,7 @@ class _SignUpPageState extends State<SignUpPage> {
           'email_label': 'Email (Optional)',
           'town_label': 'City',
           'user_type': 'User Type',
-          'normal': 'Normal User',
+          'normal': 'Client',
           'pro': 'Professional',
           'professions': 'Select Professions',
           'alt_phone': 'Alt Phone (Optional)',
@@ -172,15 +174,16 @@ class _SignUpPageState extends State<SignUpPage> {
           'error_verify': 'Error verifying code',
           'search_hint': 'Search...',
           'terms_title': 'Terms of Use',
-          'terms_content': 'Terms of Use:\n\n1. Service: This app is a platform connecting users with service professionals. We are not a party to the actual contract between users.\n2. Liability: We are not responsible for the quality, legality, or any outcome of the services provided by professionals.\n3. User Conduct: You must provide accurate information and use the app in a lawful and respectful manner.\n4. Intellectual Property: All content and software are owned by the app operators.\n5. Modifications: We reserve the right to update these terms at any time without prior notice.',
+          'terms_content': 'Terms of Use...',
           'privacy_title': 'Privacy Policy',
-          'privacy_content': 'Privacy Policy:\n\n1. Data Collection: We collect name, phone number, email, and location data to facilitate our services.\n2. Data Usage: Your information is used to enable connections, manage accounts, and improve user experience.\n3. Data Sharing: Professional contact details are visible to users to enable business transactions. We do not sell your data.\n4. Security: We employ industry-standard security measures to protect your personal information.\n5. Your Rights: You can access, update, or request the deletion of your account and personal data at any time via the app settings.',
+          'privacy_content': 'Privacy Policy...',
           'close': 'Close',
-          'current_loc': 'Use Current Location',
+          'current_loc': 'Current Location',
           'pick_map': 'Select on Map',
           'work_radius': 'Work Radius',
           'radius_val': 'Radius: {val} km',
           'select_radius': 'Select radius on Map',
+          'edit_phone': 'Edit Phone Number',
         };
     }
   }
@@ -325,7 +328,6 @@ class _SignUpPageState extends State<SignUpPage> {
         }
       }
 
-      // Geocode town if center not set
       double? lat = _workCenter?.latitude;
       double? lng = _workCenter?.longitude;
       if (lat == null && _selectedTown != null) {
@@ -374,13 +376,13 @@ class _SignUpPageState extends State<SignUpPage> {
 
       await firestore.collection(targetCollection).doc(user.uid).set(userData);
       await user.updateDisplayName(finalName);
-      
+
       if (_userType == UserType.worker) {
         try {
           await firestore.collection('metadata').doc('stats').set({
             'totalWorkers': FieldValue.increment(1)
           }, SetOptions(merge: true));
-        } catch (_) {} 
+        } catch (_) {}
       }
 
       if (mounted) {
@@ -488,237 +490,285 @@ class _SignUpPageState extends State<SignUpPage> {
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.grey[50],
         body: _loading
             ? const Center(child: CircularProgressIndicator())
-            : _buildCurrentStep(),
+            : _buildCurrentStep(isRtl),
       ),
     );
   }
 
-  Widget _buildCurrentStep() {
+  Widget _buildCurrentStep(bool isRtl) {
     final strings = _getLocalizedStrings(context);
     return SingleChildScrollView(
       child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 300),
-        child: _currentStep == SignUpStep.profile 
-            ? _buildProfileStep(strings) 
-            : _buildPhoneStep(strings),
+        child: _currentStep == SignUpStep.profile
+            ? _buildProfileStep(strings, isRtl)
+            : _buildPhoneStep(strings, isRtl),
       ),
     );
   }
 
-  Widget _buildPhoneStep(Map<String, String> strings) {
+  Widget _buildPhoneStep(Map<String, String> strings, bool isRtl) {
     return Column(
       key: const ValueKey('phone'),
       children: [
-        Container(
-          height: 300,
-          width: double.infinity,
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF1E3A8A), Color(0xFF1976D2)],
+        _buildHeader(strings['phone_label']!, strings['phone_subtitle']!, isRtl, showBack: widget.pendingWorkerData == null),
+        Transform.translate(
+          offset: const Offset(0, -40),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, 10))],
             ),
-            borderRadius: BorderRadius.only(bottomLeft: Radius.circular(80)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (widget.pendingWorkerData == null)
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    onPressed: () => setState(() => _currentStep = SignUpStep.profile),
-                  ),
-                const Icon(Icons.phone_android_rounded, size: 50, color: Colors.white),
-                const SizedBox(height: 24),
-                Text(
-                  strings['phone_label']!,
-                  style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+                _buildStyledTextField(
+                  controller: _phoneController,
+                  labelText: strings['phone_label']!,
+                  icon: Icons.phone_android_rounded,
+                  keyboardType: TextInputType.phone,
+                  hintText: 'e.g. 0501234567',
+                  enabled: !_codeSent,
                 ),
+                if (_codeSent) ...[
+                  const SizedBox(height: 16),
+                  _buildStyledTextField(
+                    controller: _codeController,
+                    labelText: strings['enter_code']!,
+                    icon: Icons.lock_outline_rounded,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  height: 55,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : (_codeSent ? _handleVerifyCode : _handleSendCode),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1976D2),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: Text(_codeSent ? strings['verify_code']! : strings['send_code']!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                if (_codeSent)
+                  Center(
+                    child: TextButton(
+                      onPressed: () => setState(() => _codeSent = false),
+                      child: Text(strings['edit_phone']!, style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.w600)),
+                    ),
+                  ),
               ],
             ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(32.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                strings['phone_subtitle']!,
-                style: const TextStyle(fontSize: 16, color: Color(0xFF64748B)),
-              ),
-              const SizedBox(height: 40),
-              _buildStyledTextField(
-                controller: _phoneController,
-                labelText: strings['phone_label']!,
-                icon: Icons.phone_android_rounded,
-                keyboardType: TextInputType.phone,
-                hintText: 'e.g. 0501234567',
-                enabled: !_codeSent,
-              ),
-              if (_codeSent) ...[
-                const SizedBox(height: 16),
-                _buildStyledTextField(
-                  controller: _codeController,
-                  labelText: strings['enter_code']!,
-                  icon: Icons.lock_outline_rounded,
-                  keyboardType: TextInputType.number,
-                ),
-              ],
-              const SizedBox(height: 40),
-              SizedBox(
-                width: double.infinity,
-                height: 60,
-                child: ElevatedButton(
-                  onPressed: _loading ? null : (_codeSent ? _handleVerifyCode : _handleSendCode),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1976D2),
-                    foregroundColor: Colors.white,
-                    elevation: 4,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(_codeSent ? strings['verify_code']! : strings['send_code']!, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.arrow_forward_rounded, size: 22),
-                    ],
-                  ),
-                ),
-              ),
-            ],
           ),
         ),
       ],
     );
   }
 
-  Widget _buildProfileStep(Map<String, String> strings) {
+  Widget _buildHeader(String title, String subtitle, bool isRtl, {bool showBack = false}) {
+    return Container(
+      height: 300,
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topRight,
+          end: Alignment.bottomLeft,
+          colors: [Color(0xFF0D47A1), Color(0xFF1976D2)],
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: -50,
+            right: isRtl ? null : -50,
+            left: isRtl ? -50 : null,
+            child: CircleAvatar(radius: 100, backgroundColor: Colors.white.withOpacity(0.1)),
+          ),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (showBack)
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 20),
+                      onPressed: () => setState(() => _currentStep = SignUpStep.profile),
+                    ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(16)),
+                    child: Icon(showBack ? Icons.phone_android_rounded : Icons.person_add_rounded, size: 36, color: Colors.white),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(title, style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Text(subtitle, style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 16)),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfileStep(Map<String, String> strings, bool isRtl) {
     return Column(
       key: const ValueKey('profile'),
       children: [
-        Container(
-          height: 200,
-          width: double.infinity,
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(colors: [Color(0xFF1E3A8A), Color(0xFF1976D2)]),
-            borderRadius: BorderRadius.only(bottomLeft: Radius.circular(80)),
-          ),
-          child: Center(
-            child: Text(
-              strings['title']!,
-              style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+        _buildHeader(strings['title']!, strings['subtitle']!, isRtl),
+        Transform.translate(
+          offset: const Offset(0, -40),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, 10))],
+            ),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                children: [
+                  _buildImagePicker(),
+                  const SizedBox(height: 32),
+                  _buildStyledTextField(
+                    controller: _nameController,
+                    labelText: strings['name_label']!,
+                    icon: Icons.person_outline,
+                    validator: (v) => v!.isEmpty ? strings['req'] : null,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildStyledTextField(
+                    controller: _emailController,
+                    labelText: strings['email_label']!,
+                    icon: Icons.email_outlined,
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildLocationSelectionSection(strings),
+                  const SizedBox(height: 24),
+                  _buildTypeSelector(strings),
+                  if (_userType == UserType.worker) ...[
+                    const SizedBox(height: 24),
+                    _buildWorkRadiusSelector(strings),
+                    const SizedBox(height: 24),
+                    _buildMultiSelectProfessions(strings),
+                    const SizedBox(height: 16),
+                    _buildStyledTextField(
+                      controller: _altPhoneController,
+                      labelText: strings['alt_phone']!,
+                      icon: Icons.phone_android_outlined,
+                      keyboardType: TextInputType.phone,
+                    ),
+                    const SizedBox(height: 16),
+                    _buildStyledTextField(
+                      controller: _descriptionController,
+                      labelText: strings['desc_label']!,
+                      icon: Icons.description_outlined,
+                      maxLines: 3,
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  _buildPolicyCheckbox(strings),
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 55,
+                    child: ElevatedButton(
+                      onPressed: _submitProfile,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1976D2),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      ),
+                      child: Text(_userType == UserType.worker ? strings['pay']! : strings['finish']!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
+  Widget _buildImagePicker() {
+    return GestureDetector(
+      onTap: _pickImage,
+      child: Stack(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: const Color(0xFF1976D2).withOpacity(0.2), width: 2)),
+            child: CircleAvatar(
+              radius: 55,
+              backgroundColor: Colors.grey[100],
+              backgroundImage: _image != null ? FileImage(_image!) : null,
+              child: _image == null ? Icon(Icons.person_rounded, size: 50, color: Colors.grey[400]) : null,
+            ),
+          ),
+          Positioned(
+            bottom: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: const BoxDecoration(color: Color(0xFF1976D2), shape: BoxShape.circle),
+              child: const Icon(Icons.camera_alt, size: 18, color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPolicyCheckbox(Map<String, String> strings) {
+    return Row(
+      children: [
+        SizedBox(
+          height: 24,
+          width: 24,
+          child: Checkbox(
+            value: _agreedToPolicy,
+            onChanged: (v) => setState(() => _agreedToPolicy = v!),
+            activeColor: const Color(0xFF1976D2),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: RichText(
+            text: TextSpan(
+              style: TextStyle(fontSize: 13, color: Colors.grey[600]),
               children: [
-                GestureDetector(
-                  onTap: _pickImage,
-                  child: CircleAvatar(
-                    radius: 60,
-                    backgroundColor: const Color(0xFFF1F5F9),
-                    backgroundImage: _image != null ? FileImage(_image!) : null,
-                    child: _image == null
-                        ? Icon(Icons.person_rounded, size: 60, color: Colors.grey[400])
-                        : null,
-                  ),
+                TextSpan(text: strings['agree_prefix']!),
+                TextSpan(
+                  text: strings['terms_link']!,
+                  style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold),
+                  recognizer: TapGestureRecognizer()..onTap = () => _showPolicyDialog(strings['terms_title']!, strings['terms_content']!),
                 ),
-                const SizedBox(height: 32),
-                _buildStyledTextField(
-                  controller: _nameController,
-                  labelText: strings['name_label']!,
-                  icon: Icons.person_outline,
-                  validator: (v) => v!.isEmpty ? strings['req'] : null,
+                TextSpan(text: strings['and']!),
+                TextSpan(
+                  text: strings['privacy_link']!,
+                  style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold),
+                  recognizer: TapGestureRecognizer()..onTap = () => _showPolicyDialog(strings['privacy_title']!, strings['privacy_content']!),
                 ),
-                const SizedBox(height: 16),
-                _buildStyledTextField(
-                  controller: _emailController,
-                  labelText: strings['email_label']!,
-                  icon: Icons.email_outlined,
-                  keyboardType: TextInputType.emailAddress,
-                ),
-                const SizedBox(height: 16),
-                
-                _buildLocationSelectionSection(strings),
-
-                const SizedBox(height: 24),
-                _buildTypeSelector(strings),
-
-                if (_userType == UserType.worker) ...[
-                  const SizedBox(height: 24),
-                  _buildWorkRadiusSelector(strings),
-                  const SizedBox(height: 24),
-                  _buildMultiSelectProfessions(strings),
-                  const SizedBox(height: 16),
-                  _buildStyledTextField(
-                    controller: _altPhoneController,
-                    labelText: strings['alt_phone']!,
-                    icon: Icons.phone_android_outlined,
-                    keyboardType: TextInputType.phone,
-                  ),
-                  const SizedBox(height: 16),
-                  _buildStyledTextField(
-                    controller: _descriptionController,
-                    labelText: strings['desc_label']!,
-                    icon: Icons.description_outlined,
-                    maxLines: 3,
-                  ),
-                ],
-
-                const SizedBox(height: 24),
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _agreedToPolicy,
-                      onChanged: (v) => setState(() => _agreedToPolicy = v!),
-                      activeColor: const Color(0xFF1976D2),
-                    ),
-                    Expanded(
-                      child: RichText(
-                        text: TextSpan(
-                          style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
-                          children: [
-                            TextSpan(text: strings['agree_prefix']!),
-                            TextSpan(
-                              text: strings['terms_link']!,
-                              style: const TextStyle(color: Color(0xFF1976D2), decoration: TextDecoration.underline, fontWeight: FontWeight.bold),
-                              recognizer: TapGestureRecognizer()..onTap = () => _showPolicyDialog(strings['terms_title']!, strings['terms_content']!),
-                            ),
-                            TextSpan(text: strings['and']!),
-                            TextSpan(
-                              text: strings['privacy_link']!,
-                              style: const TextStyle(color: Color(0xFF1976D2), decoration: TextDecoration.underline, fontWeight: FontWeight.bold),
-                              recognizer: TapGestureRecognizer()..onTap = () => _showPolicyDialog(strings['privacy_title']!, strings['privacy_content']!),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  height: 55,
-                  child: ElevatedButton(
-                    onPressed: _submitProfile,
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1976D2), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-                    child: Text(_userType == UserType.worker ? strings['pay']! : strings['finish']!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  ),
-                ),
-                const SizedBox(height: 40),
               ],
             ),
           ),
@@ -739,18 +789,18 @@ class _SignUpPageState extends State<SignUpPage> {
           onTap: _openMapPicker,
           validator: (v) => (v == null || v.isEmpty) ? strings['req'] : null,
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         Row(
           children: [
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: _getCurrentLocation,
-                icon: const Icon(Icons.my_location, size: 18),
-                label: Text(strings['current_loc']!, style: const TextStyle(fontSize: 12)),
+                icon: const Icon(Icons.my_location, size: 16),
+                label: Text(strings['current_loc']!, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: const Color(0xFF1976D2),
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  side: const BorderSide(color: Color(0xFF1976D2)),
+                  side: BorderSide(color: const Color(0xFF1976D2).withOpacity(0.5)),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               ),
@@ -759,12 +809,12 @@ class _SignUpPageState extends State<SignUpPage> {
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: _openMapPicker,
-                icon: const Icon(Icons.map_outlined, size: 18),
-                label: Text(strings['pick_map']!, style: const TextStyle(fontSize: 12)),
+                icon: const Icon(Icons.map_outlined, size: 16),
+                label: Text(strings['pick_map']!, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: const Color(0xFF1976D2),
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  side: const BorderSide(color: Color(0xFF1976D2)),
+                  side: BorderSide(color: const Color(0xFF1976D2).withOpacity(0.5)),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               ),
@@ -795,15 +845,15 @@ class _SignUpPageState extends State<SignUpPage> {
   Widget _buildWorkRadiusSelector(Map<String, String> strings) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey[200]!)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.map_outlined, color: Color(0xFF1976D2)),
-              const SizedBox(width: 12),
-              Text(strings['work_radius']!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Color(0xFF64748B))),
+              const Icon(Icons.radar_rounded, color: Color(0xFF1976D2), size: 20),
+              const SizedBox(width: 10),
+              Text(strings['work_radius']!, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
             ],
           ),
           const SizedBox(height: 12),
@@ -812,9 +862,9 @@ class _SignUpPageState extends State<SignUpPage> {
             children: [
               Text(
                 strings['radius_val']!.replaceFirst('{val}', (_workRadius / 1000).toStringAsFixed(1)),
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1976D2)),
               ),
-              ElevatedButton.icon(
+              TextButton.icon(
                 onPressed: () async {
                   final result = await Navigator.push(
                     context,
@@ -833,13 +883,9 @@ class _SignUpPageState extends State<SignUpPage> {
                     if (_workCenter != null) _updateTownFromLocation(_workCenter!);
                   }
                 },
-                icon: const Icon(Icons.my_location, size: 18),
+                icon: const Icon(Icons.edit_location_alt_rounded, size: 18),
                 label: Text(strings['select_radius']!),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1976D2),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
+                style: TextButton.styleFrom(foregroundColor: const Color(0xFF1976D2), padding: EdgeInsets.zero),
               ),
             ],
           ),
@@ -855,18 +901,12 @@ class _SignUpPageState extends State<SignUpPage> {
         LayoutBuilder(
           builder: (context, constraints) => Autocomplete<String>(
             optionsBuilder: (TextEditingValue textEditingValue) {
-              if (textEditingValue.text.isEmpty) {
-                return _allProfessions;
-              }
-              return _allProfessions.where((String option) {
-                return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
-              });
+              if (textEditingValue.text.isEmpty) return _allProfessions;
+              return _allProfessions.where((option) => option.toLowerCase().contains(textEditingValue.text.toLowerCase()));
             },
-            onSelected: (String selection) {
+            onSelected: (selection) {
               setState(() {
-                if (!_selectedProfessions.contains(selection)) {
-                  _selectedProfessions.add(selection);
-                }
+                if (!_selectedProfessions.contains(selection)) _selectedProfessions.add(selection);
               });
               _professionsSearchController?.clear();
             },
@@ -874,18 +914,22 @@ class _SignUpPageState extends State<SignUpPage> {
               return Align(
                 alignment: Alignment.topLeft,
                 child: Material(
-                  elevation: 4,
-                  borderRadius: BorderRadius.circular(12),
-                  child: SizedBox(
+                  elevation: 8,
+                  shadowColor: Colors.black26,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
                     width: constraints.maxWidth,
-                    height: 250,
-                    child: ListView.builder(
-                      padding: const EdgeInsets.all(8.0),
+                    constraints: const BoxConstraints(maxHeight: 250),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+                    child: ListView.separated(
+                      padding: EdgeInsets.zero,
+                      shrinkWrap: true,
                       itemCount: options.length,
-                      itemBuilder: (BuildContext context, int index) {
-                        final String option = options.elementAt(index);
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final option = options.elementAt(index);
                         return ListTile(
-                          title: Text(option),
+                          title: Text(option, style: const TextStyle(fontSize: 14)),
                           onTap: () => onSelected(option),
                         );
                       },
@@ -910,14 +954,14 @@ class _SignUpPageState extends State<SignUpPage> {
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
-            runSpacing: 4,
+            runSpacing: 8,
             children: _selectedProfessions.map((prof) => Chip(
-              label: Text(prof),
-              onDeleted: () {
-                setState(() {
-                  _selectedProfessions.remove(prof);
-                });
-              },
+              label: Text(prof, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+              backgroundColor: const Color(0xFF1976D2).withOpacity(0.1),
+              side: BorderSide.none,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              deleteIcon: const Icon(Icons.close, size: 14),
+              onDeleted: () => setState(() => _selectedProfessions.remove(prof)),
             )).toList(),
           ),
         ],
@@ -926,14 +970,22 @@ class _SignUpPageState extends State<SignUpPage> {
   }
 
   Widget _buildTypeSelector(Map<String, String> strings) {
-    return Container(
-      decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(16)),
-      child: Row(
-        children: [
-          Expanded(child: _buildTypeButton(strings['normal']!, UserType.normal)),
-          Expanded(child: _buildTypeButton(strings['pro']!, UserType.worker)),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(strings['user_type']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87)),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(16)),
+          child: Row(
+            children: [
+              Expanded(child: _buildTypeButton(strings['normal']!, UserType.normal)),
+              Expanded(child: _buildTypeButton(strings['pro']!, UserType.worker)),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -941,13 +993,19 @@ class _SignUpPageState extends State<SignUpPage> {
     final isSelected = _userType == type;
     return GestureDetector(
       onTap: () => setState(() => _userType = type),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF1976D2) : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
+          color: isSelected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: isSelected ? [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))] : null,
         ),
-        child: Text(label, textAlign: TextAlign.center, style: TextStyle(color: isSelected ? Colors.white : const Color(0xFF64748B), fontWeight: FontWeight.bold)),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: isSelected ? const Color(0xFF1976D2) : Colors.grey[600], fontWeight: FontWeight.bold),
+        ),
       ),
     );
   }
@@ -964,25 +1022,34 @@ class _SignUpPageState extends State<SignUpPage> {
     bool readOnly = false,
     VoidCallback? onTap,
     FocusNode? focusNode,
+    TextAlign textAlign = TextAlign.start,
   }) {
-    return TextFormField(
-      controller: controller,
-      keyboardType: keyboardType,
-      maxLines: maxLines,
-      enabled: enabled,
-      readOnly: readOnly,
-      onTap: onTap,
-      focusNode: focusNode,
-      decoration: InputDecoration(
-        labelText: labelText,
-        hintText: hintText,
-        prefixIcon: Icon(icon, color: const Color(0xFF1976D2)),
-        filled: true,
-        fillColor: enabled ? const Color(0xFFF8FAFC) : const Color(0xFFE2E8F0),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      ),
-      validator: validator,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(labelText, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87)),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: controller,
+          keyboardType: keyboardType,
+          maxLines: maxLines,
+          enabled: enabled,
+          readOnly: readOnly,
+          onTap: onTap,
+          focusNode: focusNode,
+          textAlign: textAlign,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+          decoration: InputDecoration(
+            hintText: hintText,
+            prefixIcon: Icon(icon, color: const Color(0xFF1976D2), size: 20),
+            filled: true,
+            fillColor: enabled ? Colors.grey[100] : Colors.grey[200],
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          ),
+          validator: validator,
+        ),
+      ],
     );
   }
 }

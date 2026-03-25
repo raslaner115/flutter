@@ -3,8 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:untitled1/services/language_provider.dart';
-import 'package:untitled1/pages/sighn_up.dart';
-import '../main.dart';
+import 'package:untitled1/sighn_up.dart';
+import 'main.dart';
 
 class SignInPage extends StatefulWidget {
   const SignInPage({super.key});
@@ -27,6 +27,7 @@ class _SignInPageState extends State<SignInPage> {
       case 'he':
         return {
           'welcome': 'ברוכים הבאים',
+          'subtitle': 'התחבר כדי להמשיך',
           'phone_label': 'מספר טלפון',
           'phone_hint': 'לדוגמה: 0501234567',
           'get_code': 'שלח קוד אימות',
@@ -40,10 +41,12 @@ class _SignInPageState extends State<SignInPage> {
           'not_registered_body': 'מספר הטלפון שהוזן אינו רשום. האם תרצה להירשם?',
           'ok': 'אישור',
           'invalid_phone': 'אנא הכנס מספר טלפון ישראלי תקין (05XXXXXXXX)',
+          'edit_phone': 'ערוך מספר טלפון',
         };
       default:
         return {
           'welcome': 'Welcome Back',
+          'subtitle': 'Sign in to continue',
           'phone_label': 'Phone Number',
           'phone_hint': 'e.g. 0501234567',
           'get_code': 'Get Verification Code',
@@ -57,6 +60,7 @@ class _SignInPageState extends State<SignInPage> {
           'not_registered_body': 'The phone number you entered is not registered. Would you like to sign up?',
           'ok': 'OK',
           'invalid_phone': 'Please enter a valid Israeli phone number (05XXXXXXXX)',
+          'edit_phone': 'Edit Phone Number',
         };
     }
   }
@@ -211,31 +215,61 @@ class _SignInPageState extends State<SignInPage> {
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.grey[50],
         body: SingleChildScrollView(
           child: Column(
             children: [
-              _buildHeader(strings),
-              Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  children: [
-                    if (!_codeSent)
-                      _buildPhoneInput(strings)
-                    else
-                      _buildCodeInput(strings),
-                    const SizedBox(height: 32),
-                    _buildDivider(strings),
-                    const SizedBox(height: 24),
-                    TextButton(
-                      onPressed: _loading ? null : _handleGuestSignIn,
-                      child: Text(strings['guest']!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    ),
-                    const SizedBox(height: 32),
-                    _buildSignUpLink(strings),
-                  ],
+              _buildHeader(strings, isRtl),
+              Transform.translate(
+                offset: const Offset(0, -40),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.all(32),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      if (!_codeSent)
+                        _buildPhoneInput(strings)
+                      else
+                        _buildCodeInput(strings),
+                      const SizedBox(height: 24),
+                      _buildDivider(strings),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 55,
+                        child: OutlinedButton(
+                          onPressed: _loading ? null : _handleGuestSignIn,
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(color: Colors.grey[300]!),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          ),
+                          child: Text(
+                            strings['guest']!,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
+              _buildSignUpLink(strings),
+              const SizedBox(height: 40),
             ],
           ),
         ),
@@ -243,53 +277,110 @@ class _SignInPageState extends State<SignInPage> {
     );
   }
 
-  Widget _buildHeader(Map<String, String> strings) {
+  Widget _buildHeader(Map<String, String> strings, bool isRtl) {
     return Container(
-      height: 250,
+      height: 320,
       width: double.infinity,
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF1E3A8A), Color(0xFF1976D2)],
+          begin: Alignment.topRight,
+          end: Alignment.bottomLeft,
+          colors: [Color(0xFF0D47A1), Color(0xFF1976D2)],
         ),
-        borderRadius: BorderRadius.only(bottomLeft: Radius.circular(80)),
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(Icons.handyman_rounded, size: 40, color: Colors.white),
-            const SizedBox(height: 20),
-            Text(strings['welcome']!, style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold, height: 1.1)),
-          ],
-        ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: -50,
+            right: isRtl ? null : -50,
+            left: isRtl ? -50 : null,
+            child: CircleAvatar(
+              radius: 100,
+              backgroundColor: Colors.white.withOpacity(0.1),
+            ),
+          ),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 20),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Icon(Icons.handyman_rounded, size: 40, color: Colors.white),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    strings['welcome']!,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    strings['subtitle']!,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.8),
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildPhoneInput(Map<String, String> strings) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text(
+          strings['phone_label']!,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87),
+        ),
+        const SizedBox(height: 8),
         TextField(
           controller: _phoneController,
           keyboardType: TextInputType.phone,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
           decoration: InputDecoration(
-            labelText: strings['phone_label'],
             hintText: strings['phone_hint'],
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            prefixIcon: const Icon(Icons.phone_android_rounded, size: 20),
+            filled: true,
+            fillColor: Colors.grey[100],
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide.none,
+            ),
+            contentPadding: const EdgeInsets.symmetric(vertical: 18),
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 24),
         SizedBox(
           width: double.infinity,
-          height: 50,
+          height: 55,
           child: ElevatedButton(
             onPressed: _loading ? null : _sendCode,
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1976D2), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-            child: _loading ? const CircularProgressIndicator(color: Colors.white) : Text(strings['get_code']!, style: const TextStyle(color: Colors.white, fontSize: 16)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1976D2),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+            child: _loading 
+              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
+              : Text(strings['get_code']!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ),
         ),
       ],
@@ -298,23 +389,50 @@ class _SignInPageState extends State<SignInPage> {
 
   Widget _buildCodeInput(Map<String, String> strings) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text(
+          strings['enter_code']!,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87),
+        ),
+        const SizedBox(height: 8),
         TextField(
           controller: _codeController,
           keyboardType: TextInputType.number,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 8),
           decoration: InputDecoration(
-            labelText: strings['enter_code'],
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            filled: true,
+            fillColor: Colors.grey[100],
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide.none,
+            ),
+            contentPadding: const EdgeInsets.symmetric(vertical: 18),
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 24),
         SizedBox(
           width: double.infinity,
-          height: 50,
+          height: 55,
           child: ElevatedButton(
             onPressed: _loading ? null : _verifyCode,
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1976D2), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-            child: _loading ? const CircularProgressIndicator(color: Colors.white) : Text(strings['verify']!, style: const TextStyle(color: Colors.white, fontSize: 16)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1976D2),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+            child: _loading 
+              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
+              : Text(strings['verify']!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton(
+            onPressed: () => setState(() => _codeSent = false),
+            child: Text(strings['edit_phone']!, style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.w600)),
           ),
         ),
       ],
@@ -324,9 +442,15 @@ class _SignInPageState extends State<SignInPage> {
   Widget _buildDivider(Map<String, String> strings) {
     return Row(
       children: [
-        const Expanded(child: Divider()),
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text(strings['or']!, style: const TextStyle(color: Colors.grey))),
-        const Expanded(child: Divider()),
+        Expanded(child: Divider(color: Colors.grey[300])),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            strings['or']!,
+            style: TextStyle(color: Colors.grey[500], fontSize: 13, fontWeight: FontWeight.w500),
+          ),
+        ),
+        Expanded(child: Divider(color: Colors.grey[300])),
       ],
     );
   }
@@ -335,10 +459,13 @@ class _SignInPageState extends State<SignInPage> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text(strings['no_account']!),
+        Text(strings['no_account']!, style: TextStyle(color: Colors.grey[600])),
         GestureDetector(
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SignUpPage())),
-          child: Text(strings['signup']!, style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold)),
+          child: Text(
+            strings['signup']!,
+            style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold),
+          ),
         ),
       ],
     );

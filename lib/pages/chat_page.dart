@@ -6,7 +6,6 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:provider/provider.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:intl/intl.dart' as intl;
-import 'package:untitled1/profile_page.dart';
 import 'package:untitled1/pages/invoice_builder.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
@@ -19,6 +18,8 @@ import 'package:open_filex/open_filex.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:http/http.dart' as http;
 import 'package:gal/gal.dart';
+
+import '../ptofile.dart';
 
 class ChatPage extends StatefulWidget {
   final String receiverId;
@@ -67,18 +68,27 @@ class _ChatPageState extends State<ChatPage> {
         .snapshots();
   }
 
+  Future<DocumentSnapshot?> _getUserDoc(String uid) async {
+    final collections = ['normal_users', 'workers', 'admins'];
+    for (var col in collections) {
+      final doc = await _firestore.collection(col).doc(uid).get();
+      if (doc.exists) return doc;
+    }
+    return null;
+  }
+
   void _checkUserType() async {
     final user = _auth.currentUser;
     if (user != null) {
       try {
-        final doc = await _firestore.collection('users').doc(user.uid).get();
-        if (doc.exists && mounted) {
-          final data = doc.data();
+        final doc = await _getUserDoc(user.uid);
+        if (doc != null && doc.exists && mounted) {
+          final data = doc.data() as Map<String, dynamic>;
           setState(() {
-            _isWorker = data?['userType'] == 'worker';
-            _currentUserName = data?['name'] ?? user.displayName;
-            _currentUserPhone = data?['phone'];
-            _currentUserEmail = data?['email'] ?? user.email;
+            _isWorker = doc.reference.parent.id == 'workers';
+            _currentUserName = data['name'] ?? user.displayName;
+            _currentUserPhone = data['phone'];
+            _currentUserEmail = data['email'] ?? user.email;
           });
         }
       } catch (e) {
@@ -408,14 +418,13 @@ class _ChatPageState extends State<ChatPage> {
       ),
       title: InkWell(
         onTap: () async {
-          final userDoc = await _firestore.collection('users').doc(widget.receiverId).get();
-          if (userDoc.exists) {
-            final data = userDoc.data();
-            if (data != null && data['userType'] == 'worker') {
+          final userDoc = await _getUserDoc(widget.receiverId);
+          if (userDoc != null && userDoc.exists) {
+            if (userDoc.reference.parent.id == 'workers') {
               if (!mounted) return;
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => ProfilePage(userId: widget.receiverId)),
+                MaterialPageRoute(builder: (context) => Profile(userId: widget.receiverId)),
               );
             }
           }
@@ -472,9 +481,10 @@ class _ChatPageState extends State<ChatPage> {
         IconButton(
           icon: const Icon(Icons.call_rounded, size: 22),
           onPressed: () async {
-            final userDoc = await _firestore.collection('users').doc(widget.receiverId).get();
-            if (userDoc.exists) {
-              final phone = userDoc.data()?['phone']?.toString();
+            final userDoc = await _getUserDoc(widget.receiverId);
+            if (userDoc != null && userDoc.exists) {
+              final data = userDoc.data() as Map<String, dynamic>;
+              final phone = data['phone']?.toString();
               if (phone != null && phone.isNotEmpty) {
                 final Uri url = Uri.parse('tel:$phone');
                 if (await canLaunchUrl(url)) {

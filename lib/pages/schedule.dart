@@ -54,7 +54,7 @@ class _SchedulePageState extends State<SchedulePage> {
   Future<void> _fetchWorkerScheduleConfig() async {
     try {
       final doc = await _firestore
-          .collection('users')
+          .collection('workers')
           .doc(widget.workerId)
           .get();
       if (doc.exists) {
@@ -178,7 +178,7 @@ class _SchedulePageState extends State<SchedulePage> {
         _vacations = newVacations;
       });
 
-      await _firestore.collection('users').doc(widget.workerId).update({
+      await _firestore.collection('workers').doc(widget.workerId).update({
         'availableDates': _availableDates,
         'reminderDates': _reminderDates,
         'partialWorkDays': _partialWorkDays,
@@ -228,13 +228,13 @@ class _SchedulePageState extends State<SchedulePage> {
       if (_isOwnSchedule) {
         if (loadedReminders.isEmpty && _reminderDates.contains(dateStr)) {
           setState(() => _reminderDates.remove(dateStr));
-          await _firestore.collection('users').doc(widget.workerId).update({
+          await _firestore.collection('workers').doc(widget.workerId).update({
             'reminderDates': FieldValue.arrayRemove([dateStr]),
           });
         } else if (loadedReminders.isNotEmpty &&
             !_reminderDates.contains(dateStr)) {
           setState(() => _reminderDates.add(dateStr));
-          await _firestore.collection('users').doc(widget.workerId).update({
+          await _firestore.collection('workers').doc(widget.workerId).update({
             'reminderDates': FieldValue.arrayUnion([dateStr]),
           });
         }
@@ -400,7 +400,7 @@ class _SchedulePageState extends State<SchedulePage> {
       });
     });
 
-    await _firestore.collection('users').doc(widget.workerId).update({
+    await _firestore.collection('workers').doc(widget.workerId).update({
       'vacations': _vacations,
     });
   }
@@ -436,7 +436,7 @@ class _SchedulePageState extends State<SchedulePage> {
         _vacations.add({'start': startStr, 'end': endStr});
       });
 
-      await _firestore.collection('users').doc(widget.workerId).update({
+      await _firestore.collection('workers').doc(widget.workerId).update({
         'vacations': FieldValue.arrayUnion([
           {'start': startStr, 'end': endStr},
         ]),
@@ -517,7 +517,7 @@ class _SchedulePageState extends State<SchedulePage> {
         _partialWorkDays.remove(dateStr);
       });
 
-      await _firestore.collection('users').doc(widget.workerId).update({
+      await _firestore.collection('workers').doc(widget.workerId).update({
         'availableDates': FieldValue.arrayRemove([dateStr]),
         'partialWorkDays.$dateStr': FieldValue.delete(),
       });
@@ -535,7 +535,7 @@ class _SchedulePageState extends State<SchedulePage> {
       _fetchReminders();
     } else {
       setState(() => _availableDates.add(dateStr));
-      await _firestore.collection('users').doc(widget.workerId).update({
+      await _firestore.collection('workers').doc(widget.workerId).update({
         'availableDates': FieldValue.arrayUnion([dateStr]),
       });
     }
@@ -618,7 +618,7 @@ class _SchedulePageState extends State<SchedulePage> {
                   _partialWorkDays[dateStr] = {'from': fStr, 'to': tStr};
                 });
 
-                _firestore.collection('users').doc(widget.workerId).update({
+                _firestore.collection('workers').doc(widget.workerId).update({
                   'availableDates': FieldValue.arrayUnion([dateStr]),
                   'partialWorkDays.$dateStr': {'from': fStr, 'to': tStr},
                 });

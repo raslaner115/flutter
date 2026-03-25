@@ -5,7 +5,7 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:untitled1/pages/sighn_up.dart';
+import 'package:untitled1/sighn_up.dart';
 
 
 class SubscriptionPage extends StatefulWidget {

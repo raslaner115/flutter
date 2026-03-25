@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:untitled1/pages/sighn_in.dart';
+import 'package:untitled1/sighn_in.dart';
 
 class SplashScreen extends StatefulWidget {
   final bool navigateToSignIn;

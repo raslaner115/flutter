@@ -16,7 +16,7 @@ class InvoiceItem {
   final int quantity;
   final double price;
   InvoiceItem({required this.description, this.quantity = 1, required this.price});
-  
+
   double get total => quantity * price;
 }
 
@@ -48,16 +48,16 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
   final _itemQtyController = TextEditingController(text: "1");
   final _itemPriceController = TextEditingController();
   final _notesController = TextEditingController();
-  
+
   final List<InvoiceItem> _items = [];
   bool _isPreparing = false;
   String _invoiceNumber = "";
   double _totalAmount = 0.0;
 
   // State for dealer logic
-  String _dealerType = 'exempt'; 
+  String _dealerType = 'exempt';
   bool _isBusinessVerified = false;
-  String _selectedDocType = 'receipt'; 
+  String _selectedDocType = 'receipt';
 
   pw.Font? _cachedFont;
   pw.Font? _cachedFontBold;
@@ -72,13 +72,13 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     if (widget.receiverName != null) {
       _clientNameController.text = widget.receiverName!;
     }
-    
+
     _fetchWorkerInfo();
-    
+
     if (widget.receiverId != null) {
       _fetchClientInfo(widget.receiverId!);
     }
-    
+
     _loadAssets();
   }
 
@@ -92,7 +92,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           setState(() {
             _isBusinessVerified = data?['isBusinessVerified'] ?? false;
             _dealerType = data?['dealerType'] ?? 'exempt';
-            
+
             // Logic: Must be both Verified AND Licensed to use Invoices
             if (_isBusinessVerified && _dealerType == 'licensed') {
               _selectedDocType = 'invoice_receipt';
@@ -160,7 +160,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
 
   Map<String, String> _getLocalizedStrings(BuildContext context, {bool listen = true}) {
     final locale = Provider.of<LanguageProvider>(context, listen: listen).locale.languageCode;
-    
+
     if (_cachedStrings != null && _lastLocale == locale) {
       return _cachedStrings!;
     }
@@ -259,7 +259,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
 
   Future<Uint8List?> _getGeneratedPdfBytes() async {
     if (_items.isEmpty) return null;
-    
+
     try {
       if (_cachedFont == null) await _loadAssets();
       return await _generatePdf(pdf.PdfPageFormat.a4, _cachedFont!, _cachedFontBold!, _cachedLogo);
@@ -333,7 +333,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                       .snapshots(),
                   builder: (context, snapshot) {
                     if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-                    
+
                     final rooms = snapshot.data!.docs.where((doc) {
                       final data = doc.data() as Map<String, dynamic>;
                       final List users = data['users'] ?? [];
@@ -384,7 +384,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
 
       final fileName = '$_invoiceNumber.pdf';
       final ref = firebase_storage.FirebaseStorage.instance.ref().child('chat_media/files/$fileName');
-      
+
       final uploadTask = await ref.putData(pdfBytes, firebase_storage.SettableMetadata(contentType: 'application/pdf'));
       final url = await uploadTask.ref.getDownloadURL();
 
@@ -422,7 +422,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
       if (mounted) {
         setState(() => _isPreparing = false);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['sent_success']!)));
-        Navigator.pop(context); 
+        Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) setState(() => _isPreparing = false);
@@ -466,7 +466,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                       pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
                         children: [
-                          if (logo != null) 
+                          if (logo != null)
                             pw.Container(width: 60, height: 60, child: pw.Image(logo))
                           else
                             pw.Text('HireHub', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, color: themeColor)),
@@ -525,9 +525,9 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                     cellStyle: const pw.TextStyle(fontSize: 10),
                     headers: [strings['desc']!, strings['qty']!, strings['price']!, strings['total']!],
                     data: _items.map((item) => [
-                      item.description, 
+                      item.description,
                       item.quantity.toString(),
-                      "${item.price.toStringAsFixed(2)} ₪", 
+                      "${item.price.toStringAsFixed(2)} ₪",
                       "${item.total.toStringAsFixed(2)} ₪"
                     ]).toList(),
                     headerDecoration: pw.BoxDecoration(color: themeColor),
@@ -673,7 +673,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                         _buildTextField(_clientAddressController, strings['client_address']!, Icons.location_on_outlined),
                       ],
                     ),
-                    
+
                     const SizedBox(height: 20),
                     _buildSectionCard(
                       title: strings['items']!,
@@ -741,7 +741,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                         },
                       ),
                     ],
-                    
+
                     const SizedBox(height: 20),
                     _buildSectionCard(
                       title: strings['notes']!,

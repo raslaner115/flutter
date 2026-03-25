@@ -4,12 +4,15 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:untitled1/ptofile.dart';
+import 'package:untitled1/pages/admin_profile.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/search.dart';
-import 'package:untitled1/profile_page.dart';
 import 'package:untitled1/pages/notifications.dart';
 import 'package:untitled1/widgets/skeleton.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'dart:async';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -19,12 +22,16 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  StreamSubscription? _popupSubscription;
+  String? _lastPopupId;
 
   List<Map<String, dynamic>> _topRatedWorkers = [];
   List<Map<String, dynamic>> _popularCategories = [];
   bool _isTopRatedLoading = true;
   bool _isPopularLoading = true;
   String? _cachedName;
+  String? _profileImageUrl;
+  String _userCollection = "normal_users";
 
   @override
   void initState() {
@@ -32,22 +39,131 @@ class _HomePageState extends State<HomePage> {
     _fetchTopRatedWorkers();
     _fetchCurrentUserName();
     _fetchPopularCategories();
+    _listenForPopups();
+  }
+
+  @override
+  void dispose() {
+    _popupSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _listenForPopups() {
+    _popupSubscription = _firestore
+        .collection('system_announcements')
+        .where('isPopup', isEqualTo: true)
+        .orderBy('timestamp', descending: true)
+        .limit(1)
+        .snapshots()
+        .listen((snapshot) {
+      if (snapshot.docs.isNotEmpty) {
+        final doc = snapshot.docs.first;
+        final data = doc.data();
+        final id = doc.id;
+
+        // Only show if it's a new popup and from the last 24 hours
+        final timestamp = data['timestamp'] as Timestamp?;
+        if (timestamp != null) {
+          final diff = DateTime.now().difference(timestamp.toDate());
+          if (diff.inHours < 24 && _lastPopupId != id) {
+            _lastPopupId = id;
+            _showAdPopup(data);
+          }
+        }
+      }
+    });
+  }
+
+  void _showAdPopup(Map<String, dynamic> data) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (data['imageUrl'] != null)
+              ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                child: CachedNetworkImage(
+                  imageUrl: data['imageUrl'],
+                  height: 200,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  Text(
+                    data['title'] ?? 'Announcement',
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    data['message'] ?? '',
+                    style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Close'),
+                        ),
+                      ),
+                      if (data['link'] != null && data['link'].toString().isNotEmpty)
+                        Expanded(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF1976D2),
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            onPressed: () async {
+                              final url = Uri.parse(data['link']);
+                              if (await canLaunchUrl(url)) {
+                                await launchUrl(url);
+                              }
+                              if (context.mounted) Navigator.pop(context);
+                            },
+                            child: Text(data['buttonText'] ?? 'Learn More'),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _fetchCurrentUserName() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null && !user.isAnonymous) {
-      if (user.displayName == null || user.displayName!.isEmpty) {
-        try {
-          final doc = await _firestore.collection('users').doc(user.uid).get();
+      try {
+        // Check all collections for the current user's data
+        final collections = ['normal_users', 'workers', 'admins'];
+        for (var col in collections) {
+          final doc = await _firestore.collection(col).doc(user.uid).get();
           if (doc.exists && mounted) {
             setState(() {
               _cachedName = doc.data()?['name']?.toString().split(' ').first;
+              _profileImageUrl = doc.data()?['profileImageUrl']?.toString();
+              _userCollection = col;
             });
+            break;
           }
-        } catch (e) {
-          debugPrint("Error fetching user name: $e");
         }
+      } catch (e) {
+        debugPrint("Error fetching user data: $e");
       }
     }
   }
@@ -57,7 +173,6 @@ class _HomePageState extends State<HomePage> {
     setState(() => _isPopularLoading = true);
 
     try {
-      // 1. Load full profession details from local JSON
       final String response = await rootBundle.loadString('assets/profeissions.json');
       final List<dynamic> allProfsJson = json.decode(response);
       final List<Map<String, dynamic>> allProfs = allProfsJson.map((e) => Map<String, dynamic>.from(e)).toList();
@@ -65,7 +180,6 @@ class _HomePageState extends State<HomePage> {
       List<Map<String, dynamic>> popular = [];
 
       try {
-        // 2. Try to fetch search analytics from Firestore
         final snapshot = await _firestore
             .collection('metadata')
             .doc('analytics')
@@ -90,7 +204,6 @@ class _HomePageState extends State<HomePage> {
         debugPrint("Firestore analytics fetch failed (using defaults): $firestoreError");
       }
 
-      // 3. Fallback to default categories if no analytics data exists or fetch failed
       if (popular.isEmpty) {
         final defaults = ['Plumber', 'Electrician', 'Carpenter', 'Painter', 'AC Technician', 'Handyman', 'Gardener', 'Cleaner'];
         for (var name in defaults) {
@@ -102,7 +215,6 @@ class _HomePageState extends State<HomePage> {
         }
       }
 
-      // 4. Final safety check: if still empty, just take the first 8
       if (popular.isEmpty && allProfs.isNotEmpty) {
         popular = allProfs.take(8).toList();
       }
@@ -124,8 +236,7 @@ class _HomePageState extends State<HomePage> {
     setState(() => _isTopRatedLoading = true);
     
     try {
-      final snapshot = await _firestore.collection('users')
-          .where('isWorker', isEqualTo: true)
+      final snapshot = await _firestore.collection('workers')
           .orderBy('avgRating', descending: true)
           .limit(10)
           .get();
@@ -157,8 +268,7 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _fetchAnyWorkers() async {
     try {
-      final snapshot = await _firestore.collection('users')
-          .where('isWorker', isEqualTo: true)
+      final snapshot = await _firestore.collection('workers')
           .limit(10)
           .get();
       
@@ -195,6 +305,7 @@ class _HomePageState extends State<HomePage> {
           'see_all': 'הכל',
           'top_rated': 'מקצוענים מובילים בשבילך',
           'view_all': 'ראה עוד',
+          'broadcast_title': 'הודעת מערכת',
         };
       default:
         return {
@@ -206,6 +317,7 @@ class _HomePageState extends State<HomePage> {
           'see_all': 'See all',
           'top_rated': 'Top Rated Professionals',
           'view_all': 'View all',
+          'broadcast_title': 'System Broadcast',
         };
     }
   }
@@ -231,6 +343,7 @@ class _HomePageState extends State<HomePage> {
           child: CustomScrollView(
             slivers: [
               _buildSliverAppBar(localized, theme, user),
+              _buildBroadcastBanner(localized),
               SliverPadding(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 sliver: SliverToBoxAdapter(
@@ -252,6 +365,91 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildBroadcastBanner(Map<String, dynamic> strings) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('system_announcements')
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return const SliverToBoxAdapter(child: SizedBox.shrink());
+        }
+
+        final data = snapshot.data!.docs.first.data() as Map<String, dynamic>;
+        
+        // If it's a popup, don't show it as a banner as well (or show both? usually banner is better for persistence)
+        // But the user said "popup message", so let's stick to the popup logic added in init.
+
+        final timestamp = data['timestamp'] as Timestamp?;
+        
+        // Only show if the message is from the last 48 hours
+        if (timestamp != null) {
+          final diff = DateTime.now().difference(timestamp.toDate());
+          if (diff.inHours > 48) return const SliverToBoxAdapter(child: SizedBox.shrink());
+        }
+
+        return SliverToBoxAdapter(
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF1E3A8A), Color(0xFF1976D2)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.blue.withOpacity(0.3),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.campaign_rounded, color: Colors.white, size: 32),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        data['title'] ?? strings['broadcast_title'],
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        data['message'] ?? '',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white70, size: 20),
+                  onPressed: () {
+                    // In a real app, you'd save this locally to hide for the session
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildSliverAppBar(Map<String, dynamic> strings, ThemeData theme, User? user) {
     String displayName = _cachedName ?? user?.displayName?.split(' ').first ?? strings['guest'];
     
@@ -266,7 +464,7 @@ class _HomePageState extends State<HomePage> {
           padding: const EdgeInsets.only(right: 12, left: 12),
           child: StreamBuilder<QuerySnapshot>(
             stream: (user != null && !user.isAnonymous)
-                ? _firestore.collection('users').doc(user.uid).collection('notifications').where('status', isEqualTo: 'pending').snapshots()
+                ? _firestore.collection(_userCollection).doc(user.uid).collection('notifications').where('status', isEqualTo: 'pending').snapshots()
                 : const Stream.empty(),
             builder: (context, snapshot) {
               int count = snapshot.hasData ? snapshot.data!.docs.length : 0;
@@ -317,6 +515,26 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     Row(
                       children: [
+                        GestureDetector(
+                          onTap: () {
+                            if (_userCollection == 'admins') {
+                              Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminProfile()));
+                            } else {
+                              Navigator.push(context, MaterialPageRoute(builder: (_) => const Profile()));
+                            }
+                          },
+                          child: CircleAvatar(
+                            radius: 22,
+                            backgroundColor: Colors.white.withOpacity(0.2),
+                            backgroundImage: (_profileImageUrl != null && _profileImageUrl!.isNotEmpty)
+                                ? CachedNetworkImageProvider(_profileImageUrl!)
+                                : null,
+                            child: (_profileImageUrl == null || _profileImageUrl!.isEmpty)
+                                ? const Icon(Icons.person, color: Colors.white, size: 20)
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
                         Text(
                           '${strings['welcome']} $displayName',
                           style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 16),
@@ -489,7 +707,7 @@ class _HomePageState extends State<HomePage> {
                   itemBuilder: (context, index) {
                     final worker = _topRatedWorkers[index];
                     return GestureDetector(
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ProfilePage(userId: worker['uid']))),
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => Profile(userId: worker['uid']))),
                       child: Container(
                         width: 160,
                         margin: const EdgeInsets.symmetric(horizontal: 8),

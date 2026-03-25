@@ -4,9 +4,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:untitled1/language_provider.dart';
+import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/edit_profile.dart';
-import 'package:untitled1/pages/phone_auth_page.dart';
+import 'package:untitled1/services/phone_auth_page.dart';
 
 class AccountSettingsPage extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -18,11 +18,13 @@ class AccountSettingsPage extends StatefulWidget {
 
 class _AccountSettingsPageState extends State<AccountSettingsPage> {
   late String _currentPhone;
+  String _userCollection = "normal_users";
 
   @override
   void initState() {
     super.initState();
     _currentPhone = widget.userData['phone'] ?? 'N/A';
+    _userCollection = widget.userData['collection'] ?? "normal_users";
   }
 
   Map<String, String> _getLocalizedStrings(
@@ -45,6 +47,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
           'user_type': 'סוג משתמש',
           'worker': 'בעל מקצוע',
           'client': 'לקוח',
+          'admin': 'מנהל',
           'change_phone': 'שנה מספר טלפון',
           'phone_updated': 'מספר הטלפון עודכן בהצלחה',
         };
@@ -59,22 +62,9 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
           'user_type': 'نوع المستخدم',
           'worker': 'محترف',
           'client': 'عميل',
+          'admin': 'مسؤول',
           'change_phone': 'تغيير رقم الهاتف',
           'phone_updated': 'تم تحديث رقم الهاتف بنجاح',
-        };
-      case 'am':
-        return {
-          'title': 'አካውንት',
-          'edit_profile': 'ፕሮፋይል አዘምን',
-          'personal_info': 'የግል መረጃ',
-          'email': 'ኢሜይል',
-          'phone': 'ስልክ',
-          'town': 'ከተማ',
-          'user_type': 'የተጠቃሚ ዓይነት',
-          'worker': 'ባለሙያ',
-          'client': 'ደንበኛ',
-          'change_phone': 'የስልክ ቁጥር ይቀይሩ',
-          'phone_updated': 'የስልክ ቁጥር በተሳካ ሁኔታ ተቀይሯል',
         };
       default:
         return {
@@ -87,6 +77,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
           'user_type': 'User Type',
           'worker': 'Professional',
           'client': 'Client',
+          'admin': 'Admin',
           'change_phone': 'Change Phone Number',
           'phone_updated': 'Phone number updated successfully',
         };
@@ -97,10 +88,12 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
+        // Use the collection passed in userData
         await FirebaseFirestore.instance
-            .collection('users')
+            .collection(_userCollection)
             .doc(user.uid)
             .update({'phone': newPhone});
+            
         setState(() {
           _currentPhone = newPhone;
         });
@@ -146,9 +139,13 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
 
     final email = widget.userData['email'] ?? 'N/A';
     final town = widget.userData['town'] ?? 'N/A';
-    final userType = widget.userData['userType'] == 'worker'
-        ? strings['worker']
-        : strings['client'];
+    
+    String userType = strings['client']!;
+    if (_userCollection == 'workers') {
+      userType = strings['worker']!;
+    } else if (_userCollection == 'admins') {
+      userType = strings['admin']!;
+    }
 
     if (Platform.isIOS) {
       return Directionality(
@@ -176,6 +173,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                           userData: {
                             ...widget.userData,
                             'phone': _currentPhone,
+                            'collection': _userCollection,
                           },
                         ),
                       ),
@@ -209,7 +207,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                   ),
                   CupertinoListTile(
                     title: Text(strings['user_type']!),
-                    additionalInfo: Text(userType!),
+                    additionalInfo: Text(userType),
                   ),
                 ],
               ),
@@ -238,7 +236,11 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                   context,
                   MaterialPageRoute(
                     builder: (_) => EditProfilePage(
-                      userData: {...widget.userData, 'phone': _currentPhone},
+                      userData: {
+                        ...widget.userData, 
+                        'phone': _currentPhone,
+                        'collection': _userCollection,
+                      },
                     ),
                   ),
                 );
@@ -280,7 +282,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
               _buildInfoTile(
                 Icons.badge_outlined,
                 strings['user_type']!,
-                userType!,
+                userType,
               ),
             ]),
           ],

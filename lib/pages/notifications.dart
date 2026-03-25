@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/request_details.dart';
+import 'package:rxdart/rxdart.dart';
 
 class NotificationsPage extends StatelessWidget {
   const NotificationsPage({super.key});
@@ -23,18 +24,7 @@ class NotificationsPage extends StatelessWidget {
           'declined': 'נדחה',
           'call': 'התקשר',
           'details': 'פרטים',
-        };
-      case 'ar':
-        return {
-          'title': 'الإشعارات',
-          'empty': 'لا توجد إشعارات جديدة',
-          'clear': 'مسح الكل',
-          'accept': 'قبول',
-          'decline': 'رفض',
-          'accepted': 'تم القبول',
-          'declined': 'تم الرفض',
-          'call': 'اتصال',
-          'details': 'تفاصيل',
+          'broadcast': 'הודעת מערכת',
         };
       default:
         return {
@@ -47,6 +37,7 @@ class NotificationsPage extends StatelessWidget {
           'declined': 'Declined',
           'call': 'Call',
           'details': 'Details',
+          'broadcast': 'System Broadcast',
         };
     }
   }
@@ -101,28 +92,58 @@ class NotificationsPage extends StatelessWidget {
         ),
         body: user == null || user.isAnonymous
             ? _buildEmptyState(strings)
-            : StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(user.uid)
-                    .collection('notifications')
-                    .orderBy('timestamp', descending: true)
-                    .snapshots(),
+            : StreamBuilder<List<Map<String, dynamic>>>(
+                stream: CombineLatestStream.combine2(
+                  FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(user.uid)
+                      .collection('notifications')
+                      .snapshots(),
+                  FirebaseFirestore.instance
+                      .collection('system_announcements')
+                      .snapshots(),
+                  (QuerySnapshot personal, QuerySnapshot system) {
+                    List<Map<String, dynamic>> all = [];
+                    for (var doc in personal.docs) {
+                      final data = doc.data() as Map<String, dynamic>;
+                      data['id'] = doc.id;
+                      data['isBroadcast'] = false;
+                      all.add(data);
+                    }
+                    for (var doc in system.docs) {
+                      final data = doc.data() as Map<String, dynamic>;
+                      data['id'] = doc.id;
+                      data['isBroadcast'] = true;
+                      data['type'] = 'broadcast';
+                      data['body'] = data['message']; // Map 'message' to 'body' for consistency
+                      all.add(data);
+                    }
+                    all.sort((a, b) {
+                      final Timestamp? tA = a['timestamp'] as Timestamp?;
+                      final Timestamp? tB = b['timestamp'] as Timestamp?;
+                      if (tA == null) return 1;
+                      if (tB == null) return -1;
+                      return tB.compareTo(tA);
+                    });
+                    return all;
+                  },
+                ),
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
-                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  if (!snapshot.hasData || snapshot.data!.isEmpty) {
                     return _buildEmptyState(strings);
                   }
 
+                  final notifications = snapshot.data!;
+
                   return ListView.builder(
                     padding: const EdgeInsets.all(16),
-                    itemCount: snapshot.data!.docs.length,
+                    itemCount: notifications.length,
                     itemBuilder: (context, index) {
-                      final doc = snapshot.data!.docs[index];
-                      final data = doc.data() as Map<String, dynamic>;
-                      return _buildNotificationCard(context, doc.id, data, strings);
+                      final data = notifications[index];
+                      return _buildNotificationCard(context, data['id'], data, strings);
                     },
                   );
                 },
@@ -146,14 +167,14 @@ class NotificationsPage extends StatelessWidget {
 
   Widget _buildNotificationCard(BuildContext context, String docId, Map<String, dynamic> data, Map<String, String> strings) {
     final bool isWorkRequest = data['type'] == 'work_request';
-    final bool isDeclineNotif = data['type'] == 'request_declined';
+    final bool isBroadcast = data['isBroadcast'] == true;
     final String status = data['status'] ?? 'none';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       elevation: 0,
-      color: Colors.white,
+      color: isBroadcast ? Colors.blue.shade50 : Colors.white,
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: isWorkRequest && status == 'pending'
@@ -166,23 +187,24 @@ class NotificationsPage extends StatelessWidget {
               leading: Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1976D2),
+                  color: isBroadcast ? Colors.blue : const Color(0xFF1976D2),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  isWorkRequest ? Icons.calendar_today : Icons.notifications_active,
-                  color: const Color(0xFF1976D2)
+                  isBroadcast ? Icons.campaign : (isWorkRequest ? Icons.calendar_today : Icons.notifications_active),
+                  color: Colors.white,
+                  size: 20,
                 ),
               ),
               title: Text(
-                data['title'] ?? 'Notification',
+                data['title'] ?? (isBroadcast ? strings['broadcast']! : 'Notification'),
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 4),
-                  Text(data['body'] ?? ''),
+                  Text(data['body'] ?? data['message'] ?? ''),
                   if (data['timestamp'] != null) ...[
                     const SizedBox(height: 8),
                     Text(
@@ -194,7 +216,7 @@ class NotificationsPage extends StatelessWidget {
               ),
               trailing: isWorkRequest && status == 'pending' ? const Icon(Icons.chevron_right, color: Colors.grey) : null,
             ),
-            if ((isWorkRequest && status != 'pending') || isDeclineNotif)
+            if (isWorkRequest && status != 'pending')
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 child: Row(
@@ -203,34 +225,20 @@ class NotificationsPage extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         decoration: BoxDecoration(
-                          color: (status == 'accepted' && !isDeclineNotif) ? Colors.green : Colors.red,
+                          color: status == 'accepted' ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Center(
                           child: Text(
-                            isDeclineNotif ? strings['declined']! : (status == 'accepted' ? strings['accepted']! : strings['declined']!),
+                            status == 'accepted' ? strings['accepted']! : strings['declined']!,
                             style: TextStyle(
-                              color: (status == 'accepted' && !isDeclineNotif) ? Colors.green : Colors.red,
+                              color: status == 'accepted' ? Colors.green : Colors.red,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
                       ),
                     ),
-                    if (status == 'declined' || isDeclineNotif) ...[
-                      const SizedBox(width: 12),
-                      ElevatedButton.icon(
-                        onPressed: () => _handleCall(context, data['fromId']),
-                        icon: const Icon(Icons.call, size: 18),
-                        label: Text(strings['call']!),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1976D2),
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
