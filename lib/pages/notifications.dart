@@ -45,6 +45,7 @@ class NotificationsPage extends StatelessWidget {
   Future<void> _handleCall(BuildContext context, String? userId) async {
     if (userId == null) return;
     try {
+      // Fetch from unified 'users' collection
       final doc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
       final phone = doc.data()?['phone'];
       if (phone != null && phone.toString().isNotEmpty) {
@@ -63,6 +64,14 @@ class NotificationsPage extends StatelessWidget {
     final isRtl = Provider.of<LanguageProvider>(context).locale.languageCode == 'he' || 
                   Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
 
+    if (user == null || user.isAnonymous) {
+      return _buildScaffold(context, strings, isRtl, user);
+    }
+
+    return _buildScaffold(context, strings, isRtl, user);
+  }
+
+  Widget _buildScaffold(BuildContext context, Map<String, String> strings, bool isRtl, User? user) {
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
@@ -75,12 +84,15 @@ class NotificationsPage extends StatelessWidget {
             if (user != null && !user.isAnonymous)
               TextButton(
                 onPressed: () async {
-                   final batch = FirebaseFirestore.instance.batch();
                    final snapshots = await FirebaseFirestore.instance
                     .collection('users')
                     .doc(user.uid)
                     .collection('notifications')
                     .get();
+                   
+                   if (snapshots.docs.isEmpty) return;
+
+                   final batch = FirebaseFirestore.instance.batch();
                    for (var doc in snapshots.docs) {
                      batch.delete(doc.reference);
                    }
@@ -90,7 +102,7 @@ class NotificationsPage extends StatelessWidget {
               ),
           ],
         ),
-        body: user == null || user.isAnonymous
+        body: (user == null || user.isAnonymous)
             ? _buildEmptyState(strings)
             : StreamBuilder<List<Map<String, dynamic>>>(
                 stream: CombineLatestStream.combine2(

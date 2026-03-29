@@ -8,7 +8,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:untitled1/sighn_in.dart';
+import 'package:untitled1/sign_in.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 class BlogPage extends StatefulWidget {
@@ -383,7 +383,9 @@ class _BlogPageState extends State<BlogPage> {
                       if (user.displayName == null || user.displayName!.isEmpty) {
                         try {
                           final userDoc = await _firestore.collection('users').doc(user.uid).get();
-                          if (userDoc.exists) authorName = userDoc.data()?['name'] ?? "User";
+                          if (userDoc.exists) {
+                            authorName = userDoc.data()?['name'] ?? "User";
+                          }
                         } catch (_) {}
                       }
 
@@ -656,6 +658,7 @@ class _BlogPageState extends State<BlogPage> {
           ),
         ),
         floatingActionButton: FloatingActionButton.extended(
+          heroTag: 'formu_fab',
           onPressed: () => _showCreatePostSheet(context),
           backgroundColor: const Color(0xFF1976D2),
           icon: const Icon(Icons.add, color: Colors.white),

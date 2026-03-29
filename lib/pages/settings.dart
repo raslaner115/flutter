@@ -6,9 +6,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:untitled1/services/language_provider.dart';
-import 'package:untitled1/sighn_in.dart';
+import 'package:untitled1/sign_in.dart';
 import 'package:untitled1/pages/about.dart';
 import 'package:untitled1/pages/account_settings.dart';
+import 'package:untitled1/pages/privacy_policy_page.dart';
+import 'package:untitled1/pages/terms_of_service_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -23,7 +25,7 @@ class _SettingsPageState extends State<SettingsPage> {
   List<int> _disabledDays = []; // 1 = Monday, 7 = Sunday
   bool _isLoadingSettings = true;
   Map<String, dynamic>? _userData;
-  String _userCollection = "normal_users";
+  String _userRole = "customer";
 
   @override
   void initState() {
@@ -39,31 +41,16 @@ class _SettingsPageState extends State<SettingsPage> {
     }
 
     try {
-      DocumentSnapshot? userDoc;
-      final collections = ['normal_users', 'workers', 'admins'];
-      
-      for (var col in collections) {
-        final doc = await FirebaseFirestore.instance.collection(col).doc(user.uid).get();
-        if (doc.exists) {
-          userDoc = doc;
-          _userCollection = col;
-          break;
-        }
-      }
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
 
-      if (userDoc != null && userDoc.exists) {
-        final data = userDoc.data() as Map<String, dynamic>;
-        // Check actual system permission status as well
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
         final status = await Permission.notification.status;
         setState(() {
           _userData = data;
-          // Add derived userType for child pages that might expect it
-          _userData!['userType'] = _userCollection == 'workers' ? 'worker' : (_userCollection == 'admins' ? 'admin' : 'normal');
-          _userData!['collection'] = _userCollection;
-          
+          _userRole = data['role'] ?? 'customer';
           _hideSchedule = data['hideSchedule'] ?? false;
           _disabledDays = List<int>.from(data['disabledDays'] ?? []);
-          // Sync with Firestore, but also respect system setting if permanently denied
           _notificationsEnabled =
               (data['notificationsEnabled'] ?? true) &&
               !status.isPermanentlyDenied;
@@ -82,20 +69,18 @@ class _SettingsPageState extends State<SettingsPage> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    await FirebaseFirestore.instance.collection(_userCollection).doc(user.uid).update({
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
       key: value,
     });
   }
 
   Future<void> _toggleNotifications(bool value) async {
     if (value) {
-      // Request permission when enabling
       final status = await Permission.notification.request();
       if (status.isGranted) {
         setState(() => _notificationsEnabled = true);
         await _updateSetting('notificationsEnabled', true);
       } else if (status.isPermanentlyDenied) {
-        // If permanently denied, show a dialog to open settings
         if (mounted) {
           _showPermissionDialog();
         }
@@ -104,7 +89,6 @@ class _SettingsPageState extends State<SettingsPage> {
         setState(() => _notificationsEnabled = false);
       }
     } else {
-      // Just disable in Firestore/UI
       setState(() => _notificationsEnabled = false);
       await _updateSetting('notificationsEnabled', false);
     }
@@ -150,7 +134,8 @@ class _SettingsPageState extends State<SettingsPage> {
           'language': 'שפה',
           'about': 'אודות',
           'account': 'חשבון',
-          'privacy': 'פרטיות',
+          'privacy': 'מדיניות פרטיות',
+          'terms': 'תנאי שימוש',
           'help': 'עזרה',
           'logout': 'התנתקות',
           'appearance': 'מראה',
@@ -171,7 +156,8 @@ class _SettingsPageState extends State<SettingsPage> {
           'language': 'اللغة',
           'about': 'حول',
           'account': 'الحساب',
-          'privacy': 'الخصوصية',
+          'privacy': 'سياسة الخصوصية',
+          'terms': 'شروط الخدمة',
           'help': 'المساعدة',
           'logout': 'تسجيل الخروج',
           'appearance': 'المظهر',
@@ -192,7 +178,8 @@ class _SettingsPageState extends State<SettingsPage> {
           'language': 'Language',
           'about': 'About',
           'account': 'Account',
-          'privacy': 'Privacy',
+          'privacy': 'Privacy Policy',
+          'terms': 'Terms of Service',
           'help': 'Help & Support',
           'logout': 'Logout',
           'appearance': 'Appearance',
@@ -228,7 +215,6 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
 
-    // Refresh when coming back in case data changed
     _loadSettings();
   }
 
@@ -253,8 +239,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (_isLoadingSettings)
       return const Center(child: CupertinoActivityIndicator());
 
-    // Only show schedule settings for workers
-    if (_userCollection != 'workers') return const SizedBox.shrink();
+    if (_userRole != 'worker') return const SizedBox.shrink();
 
     final dayNames = strings['days']!.split(',');
 
@@ -328,7 +313,6 @@ class _SettingsPageState extends State<SettingsPage> {
     ]);
   }
 
-  // --- ANDROID (Galaxy / One UI) DESIGN ---
   Widget _buildAndroidSettings(
     BuildContext context,
     Map<String, String> strings,
@@ -375,7 +359,16 @@ class _SettingsPageState extends State<SettingsPage> {
                         _buildGalaxyTile(
                           Icons.lock_outline_rounded,
                           strings['privacy']!,
-                          () {},
+                          () {
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyPolicyPage()));
+                          },
+                        ),
+                        _buildGalaxyTile(
+                          Icons.description_outlined,
+                          strings['terms']!,
+                          () {
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => const TermsOfServicePage()));
+                          },
                         ),
                       ]),
                       const SizedBox(height: 16),
@@ -512,7 +505,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // --- iOS (Cupertino) DESIGN ---
   Widget _buildIosSettings(
     BuildContext context,
     Map<String, String> strings,
@@ -547,11 +539,24 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   title: Text(strings['privacy']!),
                   trailing: const CupertinoListTileChevron(),
-                  onTap: () {},
+                  onTap: () {
+                    Navigator.push(context, CupertinoPageRoute(builder: (_) => const PrivacyPolicyPage()));
+                  },
+                ),
+                CupertinoListTile(
+                  leading: const Icon(
+                    CupertinoIcons.doc_text,
+                    color: CupertinoColors.systemBlue,
+                  ),
+                  title: Text(strings['terms']!),
+                  trailing: const CupertinoListTileChevron(),
+                  onTap: () {
+                    Navigator.push(context, CupertinoPageRoute(builder: (_) => const TermsOfServicePage()));
+                  },
                 ),
               ],
             ),
-            if (_userCollection == 'workers')
+            if (_userRole == 'worker')
             CupertinoListSection.insetGrouped(
               header: Text(strings['schedule']!),
               children: [
@@ -569,7 +574,6 @@ class _SettingsPageState extends State<SettingsPage> {
                     },
                   ),
                 ),
-                // Days off row for iOS
                 Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -596,12 +600,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           height: 32,
                           decoration: BoxDecoration(
                             color: isOff
-                                ? CupertinoColors.systemRed.withValues(
-                                    alpha: 0.1,
-                                  )
-                                : CupertinoColors.systemBlue.withValues(
-                                    alpha: 0.1,
-                                  ),
+                                ? CupertinoColors.systemRed.withOpacity(0.1)
+                                : CupertinoColors.systemBlue.withOpacity(0.1),
                             shape: BoxShape.circle,
                             border: Border.all(
                               color: isOff
@@ -738,7 +738,7 @@ class LanguageDropDown extends StatelessWidget {
       itemBuilder: (context) => [
         const PopupMenuItem(value: 'en', child: Text('English')),
         const PopupMenuItem(value: 'he', child: Text('עברית')),
-        const PopupMenuItem(value: 'ar', child: Text('עربي')),
+        const PopupMenuItem(value: 'ar', child: Text('عربي')),
         const PopupMenuItem(value: 'ru', child: Text('Русский')),
         const PopupMenuItem(value: 'am', child: Text('አማርኛ')),
       ],

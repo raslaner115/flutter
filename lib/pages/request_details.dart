@@ -70,6 +70,7 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
           'declined': 'הבקשה נדחתה',
           'view_map': 'צפה במיקום במפה',
           'error_missing_id': 'שגיאה: חסר מזהה לקוח',
+          'error_not_found': 'שגיאה: משתמש לא נמצא',
         };
       case 'ar':
         return {
@@ -88,6 +89,7 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
           'declined': 'تم رفض الطلب',
           'view_map': 'عرض الموقع على الخريطة',
           'error_missing_id': 'خطأ: معرف العميل مفقود',
+          'error_not_found': 'خطأ: المستخدم غير موجود',
         };
       default:
         return {
@@ -106,6 +108,7 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
           'declined': 'Request declined',
           'view_map': 'View location on Map',
           'error_missing_id': 'Error: Missing Client ID',
+          'error_not_found': 'Error: User not found',
         };
     }
   }
@@ -139,8 +142,12 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
     final String date = widget.data['date'];
 
     try {
-      // 1. Get Client's FCM Token for push notification
+      // 1. Get Client's FCM Token for push notification from unified 'users' collection
       final clientDoc = await firestore.collection('users').doc(clientId).get();
+      if (!clientDoc.exists) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['error_not_found']!)));
+        return;
+      }
       final String? clientFcmToken = clientDoc.data()?['fcmToken'];
 
       final batch = firestore.batch();
@@ -151,16 +158,22 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
         final fStr = "${_availableFrom.hour.toString().padLeft(2, '0')}:${_availableFrom.minute.toString().padLeft(2, '0')}";
         final tStr = "${_availableTo.hour.toString().padLeft(2, '0')}:${_availableTo.minute.toString().padLeft(2, '0')}";
 
-        // 2. Update Pro's Schedule
-        batch.update(firestore.collection('users').doc(user.uid), {
+        // 2. Update Pro's Schedule in 'Schedule' sub-collection under 'users'
+        final scheduleRef = firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('Schedule')
+            .doc('info');
+
+        batch.set(scheduleRef, {
           'availableDates': FieldValue.arrayUnion([date]),
           'partialWorkDays.$date': {'from': fStr, 'to': tStr},
-        });
+        }, SetOptions(merge: true));
 
         notifTitle = strings['accept'] ?? 'Request Accepted';
         notifBody = "${user.displayName ?? 'The professional'} accepted your request for $date. Arrival: $fStr - $tStr";
 
-        // 3. Notify Client in Firestore
+        // 3. Notify Client in Firestore under 'users' collection
         final clientNotifRef = firestore.collection('users').doc(clientId).collection('notifications').doc();
         batch.set(clientNotifRef, {
           'type': 'request_accepted',
@@ -186,7 +199,7 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
         });
       }
 
-      // 4. Update current notification status in Pro's list
+      // 4. Update current notification status in Pro's list under 'users' collection
       batch.update(firestore.collection('users').doc(user.uid).collection('notifications').doc(widget.notificationId), {
         'status': accept ? 'accepted' : 'declined',
       });

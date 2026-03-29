@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 
+
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 }
@@ -83,11 +84,14 @@ class NotificationService {
       if (settings.authorizationStatus == AuthorizationStatus.authorized) {
         String? token = await _messaging.getToken();
         if (token != null) {
-          await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+          final firestore = FirebaseFirestore.instance;
+          final data = {
             'fcmToken': token,
             'lastTokenUpdate': FieldValue.serverTimestamp(),
             'platform': Platform.isAndroid ? 'android' : 'ios',
-          }, SetOptions(merge: true));
+          };
+          // Save token to the unified 'users' collection
+          await firestore.collection('users').doc(user.uid).set(data, SetOptions(merge: true));
         }
       }
     } catch (e) {
@@ -113,6 +117,8 @@ class NotificationService {
 
     // 1. Personal Notifications
     bool isInitialLoad = true;
+
+    // Listen to personal notifications in the unified 'users' collection
     _notificationSubscription = FirebaseFirestore.instance
         .collection('users')
         .doc(user.uid)

@@ -3,8 +3,10 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:untitled1/ptofile.dart';
 
 class AdminPanel extends StatefulWidget {
@@ -37,14 +39,14 @@ class _AdminPanelState extends State<AdminPanel> {
               icon: Icons.people_alt_rounded,
               title: 'Normal Users',
               subtitle: 'View and manage client accounts',
-              onTap: () => _showUserList(context, 'normal_users', 'Normal Users'),
+              onTap: () => _showUserList(context, 'customer', 'Normal Users'),
             ),
             _buildAdminTile(
               context,
               icon: Icons.engineering_rounded,
               title: 'All Workers',
               subtitle: 'Manage all professional worker accounts',
-              onTap: () => _showUserList(context, 'workers', 'Professional Workers'),
+              onTap: () => _showUserList(context, 'worker', 'Professional Workers'),
             ),
             _buildAdminTile(
               context,
@@ -174,17 +176,17 @@ class _AdminPanelState extends State<AdminPanel> {
     }
   }
 
-  void _showUserList(BuildContext context, String collection, String title) {
+  void _showUserList(BuildContext context, String role, String title) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => _UserManagementSheet(
         title: title,
-        collection: collection,
+        role: role,
         firestore: _firestore,
-        onDelete: (uid, name) => _confirmDeleteUser(uid, name, collection),
-        onBan: (uid, name, isCurrentlyBanned) => _confirmBanUser(uid, name, collection, isCurrentlyBanned),
+        onDelete: (uid, name) => _confirmDeleteUser(uid, name),
+        onBan: (uid, name, isCurrentlyBanned) => _confirmBanUser(uid, name, isCurrentlyBanned),
       ),
     );
   }
@@ -199,11 +201,15 @@ class _AdminPanelState extends State<AdminPanel> {
         stream: _firestore.collection('verifications').where('status', isEqualTo: 'pending').snapshots(),
         itemBuilder: (context, doc) {
           final data = doc.data() as Map<String, dynamic>;
+          final String uid = data['userId'] ?? doc.id;
+          final String dealerType = data['dealerType'] ?? 'exempt';
+          final String businessName = data['businessName'] ?? 'Business';
+
           return Card(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: ExpansionTile(
-              title: Text(data['businessName'] ?? 'Business'),
-              subtitle: Text('ID: ${data['businessId']} • ${data['dealerType']}'),
+              title: Text(businessName),
+              subtitle: Text('ID: ${data['businessId']} • $dealerType'),
               children: [
                 Padding(
                   padding: const EdgeInsets.all(16),
@@ -226,7 +232,7 @@ class _AdminPanelState extends State<AdminPanel> {
                           Expanded(
                             child: ElevatedButton(
                               style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                              onPressed: () => _handleVerification(doc.id, true),
+                              onPressed: () => _handleVerification(doc.id, uid, true, dealerType, businessName),
                               child: const Text('Approve'),
                             ),
                           ),
@@ -234,7 +240,7 @@ class _AdminPanelState extends State<AdminPanel> {
                           Expanded(
                             child: OutlinedButton(
                               style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
-                              onPressed: () => _handleVerification(doc.id, false),
+                              onPressed: () => _showRejectDialog(doc.id, uid, dealerType, businessName),
                               child: const Text('Reject'),
                             ),
                           ),
@@ -356,20 +362,17 @@ class _AdminPanelState extends State<AdminPanel> {
                           icon: const Icon(Icons.remove_circle, color: Colors.red),
                           onPressed: () => setState(() => imageFile = null),
                         ),
-                      ),
+                      )
                     ],
                   )
                 else
                   OutlinedButton.icon(
-                    onPressed: () async {
-                      final picker = ImagePicker();
-                      final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
-                      if (picked != null) {
-                        setState(() => imageFile = File(picked.path));
-                      }
-                    },
                     icon: const Icon(Icons.add_a_photo),
-                    label: const Text('Add Marketing Image'),
+                    label: const Text('Pick Ad Image'),
+                    onPressed: () async {
+                      final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
+                      if (picked != null) setState(() => imageFile = File(picked.path));
+                    },
                   ),
               ],
             ),
@@ -378,123 +381,204 @@ class _AdminPanelState extends State<AdminPanel> {
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
             ElevatedButton(
               onPressed: isUploading ? null : () async {
-                if (titleController.text.isEmpty || msgController.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Title and Message are required')));
-                  return;
-                }
-                
+                if (titleController.text.isEmpty || msgController.text.isEmpty) return;
                 setState(() => isUploading = true);
                 
-                try {
-                  String? imageUrl;
-                  if (imageFile != null) {
-                    final ref = FirebaseStorage.instance.ref().child('broadcasts/${DateTime.now().millisecondsSinceEpoch}.jpg');
-                    await ref.putFile(imageFile!);
-                    imageUrl = await ref.getDownloadURL();
-                  }
-
-                  await _firestore.collection('system_announcements').add({
-                    'title': titleController.text,
-                    'message': msgController.text,
-                    'imageUrl': imageUrl,
-                    'link': linkController.text.trim(),
-                    'buttonText': btnTextController.text.trim(),
-                    'type': 'marketing',
-                    'isPopup': true,
-                    'timestamp': FieldValue.serverTimestamp(),
-                  });
-
-                  if (context.mounted) Navigator.pop(context);
-                } catch (e) {
-                  debugPrint("Broadcast Error: $e");
-                } finally {
-                  if (mounted) setState(() => isUploading = false);
+                String? imageUrl;
+                if (imageFile != null) {
+                  final ref = FirebaseStorage.instance.ref().child('ads/${DateTime.now().millisecondsSinceEpoch}.jpg');
+                  await ref.putFile(imageFile!);
+                  imageUrl = await ref.getDownloadURL();
                 }
+
+                await _firestore.collection('system_announcements').add({
+                  'title': titleController.text,
+                  'message': msgController.text,
+                  'imageUrl': imageUrl,
+                  'link': linkController.text,
+                  'buttonText': btnTextController.text,
+                  'timestamp': FieldValue.serverTimestamp(),
+                  'isPopup': true, // To show as an urgent popup
+                });
+
+                if (context.mounted) Navigator.pop(context);
               },
-              child: isUploading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Blast to Everyone'),
-            )
+              child: isUploading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Broadcast Now'),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Future<void> _handleVerification(String uid, bool approved) async {
-    await _firestore.collection('verifications').doc(uid).update({'status': approved ? 'approved' : 'rejected'});
-    if (approved) {
-      await _firestore.collection('workers').doc(uid).update({
-        'isBusinessVerified': true,
-        'businessVerificationStatus': 'approved'
-      });
-    }
-    if (mounted) Navigator.pop(context);
-  }
-
-  Future<void> _confirmDeleteUser(String uid, String? name, String collection) async {
-    final confirmed = await showDialog<bool>(
+  void _showRejectDialog(String docId, String uid, String dealerType, String businessName) {
+    final controller = TextEditingController();
+    showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete User?'),
-        content: Text('Are you sure you want to delete $name? This action cannot be undone.'),
+        title: const Text('Reject Verification'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(hintText: 'Enter reason for rejection'),
+          maxLines: 3,
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete Account'),
-          )
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () {
+              if (controller.text.trim().isEmpty) return;
+              _handleVerification(docId, uid, false, dealerType, businessName, reason: controller.text.trim());
+              Navigator.pop(context);
+            },
+            child: const Text('Reject', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
-
-    if (confirmed == true) {
-      await _firestore.collection(collection).doc(uid).delete();
-    }
   }
 
-  Future<void> _confirmBanUser(String uid, String? name, String collection, bool isCurrentlyBanned) async {
-    final confirmed = await showDialog<bool>(
+  Future<void> _handleVerification(String docId, String uid, bool approve, String dealerType, String businessName, {String? reason}) async {
+     // Immediate feedback to show button click worked
+     if (mounted) {
+       ScaffoldMessenger.of(context).showSnackBar(
+         SnackBar(content: Text(approve ? 'Approving verification...' : 'Rejecting verification...'), duration: const Duration(seconds: 1)),
+       );
+     }
+
+     try {
+       final vDoc = await _firestore.collection('verifications').doc(docId).get();
+       final vData = vDoc.data();
+       if (vData == null) return;
+
+       if (approve) {
+         // Use set with merge: true to ensure the document exists and updates the requested fields
+         await _firestore.collection('users').doc(uid).set({
+           'role': 'worker',
+           'isapproved': true, // As per request
+           'dealertype': dealerType, // As per request
+           'isVerified': true,
+           'isPro': true,
+           'verifiedAt': FieldValue.serverTimestamp(),
+         }, SetOptions(merge: true));
+
+         // Add verification info collection to user collection (as a subcollection)
+         await _firestore.collection('users').doc(uid).collection('verification_info').doc('latest').set({
+           ...vData,
+           'approvedAt': FieldValue.serverTimestamp(),
+           'status': 'approved',
+         });
+       } else {
+         final String adminUid = FirebaseAuth.instance.currentUser?.uid ?? 'admin';
+         
+         if (reason != null && reason.isNotEmpty) {
+           // Send message to worker in chat room
+           final List<String> ids = [adminUid, uid];
+           ids.sort();
+           final String roomId = ids.join('_');
+           
+           await _firestore.collection('chat_rooms').doc(roomId).collection('messages').add({
+             'senderId': adminUid,
+             'receiverId': uid,
+             'message': 'Your business verification has been rejected. Reason: $reason',
+             'type': 'text',
+             'timestamp': FieldValue.serverTimestamp(),
+           });
+
+           await _firestore.collection('chat_rooms').doc(roomId).set({
+             'lastMessage': 'Verification rejected: $reason',
+             'lastTimestamp': FieldValue.serverTimestamp(),
+             'users': [adminUid, uid],
+             'user_names': {
+               adminUid: 'Admin',
+               uid: businessName,
+             }
+           }, SetOptions(merge: true));
+
+           // Send notification to user collection
+           await _firestore.collection('users').doc(uid).collection('notifications').add({
+             'title': 'Verification Rejected',
+             'body': 'Your business verification was rejected: $reason',
+             'timestamp': FieldValue.serverTimestamp(),
+           });
+         }
+       }
+
+       // In BOTH cases (Approve/Reject), remove the request from the pending queue
+       await _firestore.collection('verifications').doc(docId).delete();
+
+       if (mounted) {
+         ScaffoldMessenger.of(context).hideCurrentSnackBar();
+         ScaffoldMessenger.of(context).showSnackBar(
+           SnackBar(content: Text(approve ? 'Worker Verified Successfully!' : 'Verification Rejected'), backgroundColor: approve ? Colors.green : Colors.red),
+         );
+       }
+     } catch (e) {
+       debugPrint("Verification handle error: $e");
+       if (mounted) {
+         ScaffoldMessenger.of(context).hideCurrentSnackBar();
+         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+       }
+     }
+  }
+
+  void _confirmDeleteUser(String uid, String? name) {
+    showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(isCurrentlyBanned ? 'Unban User?' : 'Ban User?'),
-        content: Text('Are you sure you want to ${isCurrentlyBanned ? 'unban' : 'ban'} $name?'),
+        title: const Text('Delete User'),
+        content: Text('Are you sure you want to permanently delete ${name ?? "this user"}? This cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: isCurrentlyBanned ? Colors.green : Colors.orange, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(isCurrentlyBanned ? 'Unban' : 'Ban User'),
-          )
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () async {
+              await _firestore.collection('users').doc(uid).delete();
+              if (context.mounted) Navigator.pop(context);
+            },
+            child: const Text('DELETE', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
-
-    if (confirmed == true) {
-      await _firestore.collection(collection).doc(uid).update({
-        'isBanned': !isCurrentlyBanned,
-        'bannedAt': !isCurrentlyBanned ? FieldValue.serverTimestamp() : null,
-      });
-    }
   }
 
-  Future<void> _removeCategory(String cat) async {
+  void _confirmBanUser(String uid, String? name, bool currentlyBanned) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(currentlyBanned ? 'Unban User' : 'Ban User'),
+        content: Text('Are you sure you want to ${currentlyBanned ? "unban" : "ban"} ${name ?? "this user"}?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () async {
+              await _firestore.collection('users').doc(uid).update({'isBanned': !currentlyBanned});
+              if (context.mounted) Navigator.pop(context);
+            },
+            child: Text(currentlyBanned ? 'UNBAN' : 'BAN', style: TextStyle(color: currentlyBanned ? Colors.green : Colors.orange)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _removeCategory(String cat) async {
     await _firestore.collection('metadata').doc('professions').update({
       'list': FieldValue.arrayRemove([cat])
     });
   }
 
-  Future<void> _addCategoryDialog(BuildContext context) async {
+  void _addCategoryDialog(BuildContext context) {
     final controller = TextEditingController();
-    await showDialog(
+    showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Add Category'),
-        content: TextField(controller: controller, decoration: const InputDecoration(hintText: 'Category Name')),
+        content: TextField(controller: controller, decoration: const InputDecoration(hintText: 'Enter profession name')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(
+          TextButton(
             onPressed: () async {
-              if (controller.text.trim().isEmpty) return;
+              if (controller.text.isEmpty) return;
               await _firestore.collection('metadata').doc('professions').update({
                 'list': FieldValue.arrayUnion([controller.text.trim()])
               });
@@ -524,7 +608,14 @@ class _AdminPanelState extends State<AdminPanel> {
       children: [
         IconButton(
           icon: const Icon(Icons.file_present_rounded, color: Colors.red),
-          onPressed: () { /* Launch URL */ },
+          onPressed: () async {
+            if (url != null && url.isNotEmpty) {
+              final Uri uri = Uri.parse(url);
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            }
+          },
         ),
         Text(label, style: const TextStyle(fontSize: 10)),
       ],
@@ -534,14 +625,14 @@ class _AdminPanelState extends State<AdminPanel> {
 
 class _UserManagementSheet extends StatefulWidget {
   final String title;
-  final String collection;
+  final String role;
   final FirebaseFirestore firestore;
   final Function(String, String?) onDelete;
   final Function(String, String?, bool) onBan;
 
   const _UserManagementSheet({
     required this.title,
-    required this.collection,
+    required this.role,
     required this.firestore,
     required this.onDelete,
     required this.onBan,
@@ -595,7 +686,7 @@ class _UserManagementSheetState extends State<_UserManagementSheet> {
           ),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: widget.firestore.collection(widget.collection).snapshots(),
+              stream: widget.firestore.collection('users').where('role', isEqualTo: widget.role).snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
                 if (!snapshot.hasData) return const Center(child: Text('No data found'));
@@ -634,7 +725,7 @@ class _UserManagementSheetState extends State<_UserManagementSheet> {
                           ),
                         ],
                       ),
-                      subtitle: Text('${user['phone'] ?? 'No Phone'}${widget.collection == 'workers' ? ' • ${user['profession'] ?? "Worker"}' : ""}'),
+                      subtitle: Text('${user['phone'] ?? 'No Phone'}${widget.role == 'worker' ? ' • ${user['profession'] ?? "Worker"}' : ""}'),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [

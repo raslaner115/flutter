@@ -132,6 +132,7 @@ class _SendRequestPageState extends State<SendRequestPage> {
           'error': 'שליחת הבקשה נכשלה',
           'not_pro_warning': 'זהו עובד שאינו בסטטוס PRO. ייתכן שזמן התגובה יהיה איטי יותר.',
           'chat_request_msg': 'שלחתי לך בקשת עבודה לתאריך: ',
+          'error_not_found': 'שגיאה: משתמש לא נמצא',
         };
       case 'ar':
         return {
@@ -153,6 +154,7 @@ class _SendRequestPageState extends State<SendRequestPage> {
           'error': 'فشل إرسال الطلب',
           'not_pro_warning': 'هذا العامل ليس في حالة PRO. قد يكون وقت الاستجابة أبطأ.',
           'chat_request_msg': 'لقד أرسلت لك طلب عمل بتاريخ: ',
+          'error_not_found': 'خطأ: المستخدم غير موجود',
         };
       default:
         return {
@@ -174,37 +176,14 @@ class _SendRequestPageState extends State<SendRequestPage> {
           'error': 'Failed to send request',
           'not_pro_warning': 'This worker is not in PRO status. Response time might be slower.',
           'chat_request_msg': 'I sent you a work request for: ',
+          'error_not_found': 'Error: User not found',
         };
     }
   }
 
   /// Sends a push notification via FCM directly from the app (Workaround for Cloud Functions)
-  /// Note: In production, this should be done via Firebase Cloud Functions for security.
   Future<void> _sendFCMNotification(String targetToken, String title, String body) async {
-    // You will need to set up a Service Account or use the legacy FCM API with a Server Key.
-    // For the modern FCM v1 API, you usually need a bearer token from a server.
-    // I am including the structure here so you can see where the logic goes.
-    try {
-      // THIS IS A PLACEHOLDER. You should replace this with a call to your backend or Cloud Function.
-      // Example of a Direct Post (Requires Server Key - Legacy):
-      /*
-      await http.post(
-        Uri.parse('https://fcm.googleapis.com/fcm/send'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'key=YOUR_SERVER_KEY',
-        },
-        body: jsonEncode({
-          'to': targetToken,
-          'notification': {'title': title, 'body': body},
-          'data': {'click_action': 'FLUTTER_NOTIFICATION_CLICK'},
-        }),
-      );
-      */
-      debugPrint("FCM trigger would happen here for token: $targetToken");
-    } catch (e) {
-      debugPrint("FCM error: $e");
-    }
+    debugPrint("FCM trigger would happen here for token: $targetToken");
   }
 
   String _getChatRoomId(String user1, String user2) {
@@ -232,14 +211,22 @@ class _SendRequestPageState extends State<SendRequestPage> {
         imageUrls.add(await ref.getDownloadURL());
       }
 
-      // 2. Get User Info (Client)
+      // 2. Get User Info (Client) from unified 'users' collection
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      if (!userDoc.exists) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['error_not_found']!)));
+        return;
+      }
       final userData = userDoc.data();
       final userName = userData?['name'] ?? 'Client';
       final userTown = userData?['town'];
 
-      // 3. Get Worker's FCM Token
+      // 3. Get Worker's Info from unified 'users' collection
       final workerDoc = await FirebaseFirestore.instance.collection('users').doc(widget.workerId).get();
+      if (!workerDoc.exists) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(strings['error_not_found']!)));
+        return;
+      }
       final workerData = workerDoc.data();
       final String? workerFcmToken = workerData?['fcmToken'];
 
@@ -251,7 +238,7 @@ class _SendRequestPageState extends State<SendRequestPage> {
             ? "$userName ($userTown) requested you to work on $dStr."
             : "$userName ($userTown) requested you to work on $dStr from $fStr to $tStr.";
 
-      // 4. Create Notification in Firestore (for the in-app list)
+      // 4. Create Notification in Firestore (for the in-app list under 'users' collection)
       await FirebaseFirestore.instance.collection('users').doc(widget.workerId).collection('notifications').add({
         'type': 'work_request',
         'fromId': user.uid,
@@ -279,7 +266,7 @@ class _SendRequestPageState extends State<SendRequestPage> {
         'receiverId': widget.workerId,
         'message': chatMsg,
         'timestamp': FieldValue.serverTimestamp(),
-        'isSystem': true, // Optional: flag to style differently
+        'isSystem': true,
       });
 
       await FirebaseFirestore.instance.collection('chat_rooms').doc(chatRoomId).set({
@@ -410,7 +397,7 @@ class _SendRequestPageState extends State<SendRequestPage> {
                     ),
                   ),
                 );
-          }
+          },
         ),
       ),
     );

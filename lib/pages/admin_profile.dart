@@ -36,7 +36,7 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
 
   Future<void> _checkSystemSettings() async {
     try {
-      final doc = await _firestore.collection('settings').doc('system').get();
+      final doc = await _firestore.collection('metadata').doc('system').get();
       if (doc.exists && mounted) {
         setState(() {
           _isMaintenanceMode = doc.data()?['maintenanceMode'] ?? false;
@@ -56,7 +56,8 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
     }
 
     try {
-      final doc = await _firestore.collection('admins').doc(user.uid).get();
+      // Admins are also in the 'users' collection with role 'admin'
+      final doc = await _firestore.collection('users').doc(user.uid).get();
       if (doc.exists && mounted) {
         final data = doc.data() as Map<String, dynamic>;
         setState(() {
@@ -223,20 +224,18 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _buildHeaderStat("Users", "normal_users"),
-          _buildHeaderStat("Workers", "workers"),
-          _buildHeaderStat("Reports", "reports"),
+          _buildHeaderStat("Users", "customer"),
+          _buildHeaderStat("Workers", "worker"),
+          _buildHeaderStat("Reports", null, collection: 'reports'),
         ],
       ),
     );
   }
 
-  Widget _buildHeaderStat(String label, String collection, {Map<String, dynamic>? filter}) {
+  Widget _buildHeaderStat(String label, String? role, {String collection = 'users'}) {
     Query query = _firestore.collection(collection);
-    if (filter != null) {
-      filter.forEach((key, value) {
-        query = query.where(key, isEqualTo: value);
-      });
+    if (role != null) {
+      query = query.where('role', isEqualTo: role);
     }
 
     return StreamBuilder<QuerySnapshot>(
@@ -359,9 +358,9 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
           const SizedBox(height: 20),
           Row(
             children: [
-              Expanded(child: _buildMetricTile("Workers", "workers", Icons.engineering)),
-              Expanded(child: _buildMetricTile("Projects", "projects", Icons.work_history)),
-              Expanded(child: _buildMetricTile("Reviews", "reviews", Icons.star)),
+              Expanded(child: _buildMetricTile("Workers", "worker", Icons.engineering)),
+              Expanded(child: _buildMetricTile("Projects", null, Icons.work_history, subcollection: 'projects')),
+              Expanded(child: _buildMetricTile("Reviews", null, Icons.star, subcollection: 'reviews')),
             ],
           ),
         ],
@@ -369,9 +368,31 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildMetricTile(String label, String collection, IconData icon) {
+  Widget _buildMetricTile(String label, String? role, IconData icon, {String? subcollection}) {
+    if (subcollection != null) {
+      return StreamBuilder<QuerySnapshot>(
+        stream: _firestore.collectionGroup(subcollection).snapshots(),
+        builder: (context, snapshot) {
+          final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+          return Column(
+            children: [
+              Icon(icon, color: Colors.red[900], size: 20),
+              const SizedBox(height: 8),
+              Text(count.toString(), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+            ],
+          );
+        },
+      );
+    }
+
+    Query query = _firestore.collection('users');
+    if (role != null) {
+      query = query.where('role', isEqualTo: role);
+    }
+
     return StreamBuilder<QuerySnapshot>(
-      stream: _firestore.collection(collection).snapshots(),
+      stream: query.snapshots(),
       builder: (context, snapshot) {
         final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
         return Column(
@@ -558,7 +579,7 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
   }
 
   Future<void> _logActivity(String action) async {
-    await _firestore.collection('admin_activity').add({
+    await _firestore.collection('users').doc('${FirebaseAuth.instance.currentUser?.uid}').collection('admin_activity').add({
       'action': action,
       'timestamp': FieldValue.serverTimestamp(),
       'adminId': FirebaseAuth.instance.currentUser?.uid,
@@ -653,8 +674,7 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
         ),
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
-            stream: _firestore
-                .collection('admin_activity')
+            stream: _firestore.collection('users').doc('${FirebaseAuth.instance.currentUser?.uid}').collection('admin_activity')
                 .orderBy('timestamp', descending: true)
                 .limit(50)
                 .snapshots(),
@@ -760,7 +780,7 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
 
     if (confirmed == true) {
       final batch = _firestore.batch();
-      final snapshot = await _firestore.collection('admin_activity').get();
+      final snapshot = await _firestore.collection('users').doc('${FirebaseAuth.instance.currentUser?.uid}').collection('admin_activity').get();
       for (var doc in snapshot.docs) {
         batch.delete(doc.reference);
       }

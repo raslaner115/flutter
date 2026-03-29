@@ -9,14 +9,12 @@ import 'package:untitled1/services/language_provider.dart';
 
 class AddReviewPage extends StatefulWidget {
   final String targetUserId;
-  final String targetCollection;
   final List<String> professions;
   final Map<String, dynamic>? existingReview;
 
   const AddReviewPage({
     super.key,
     required this.targetUserId,
-    required this.targetCollection,
     required this.professions,
     this.existingReview,
   });
@@ -75,7 +73,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
 
   Future<void> _submitReview() async {
     if (_commentController.text.trim().isEmpty) {
-       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please write a comment')));
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('אנא כתוב תגובה')));
        return;
     }
 
@@ -87,7 +85,6 @@ class _AddReviewPageState extends State<AddReviewPage> {
 
       List<String> finalImageUrls = List.from(_existingImageUrls);
 
-      // 1. Upload New Images to Storage
       for (var i = 0; i < _newImages.length; i++) {
         final fileName = 'review_${DateTime.now().millisecondsSinceEpoch}_$i.jpg';
         final storageRef = FirebaseStorage.instance
@@ -101,7 +98,6 @@ class _AddReviewPageState extends State<AddReviewPage> {
         finalImageUrls.add(imageUrl);
       }
 
-      // 2. Save to Firestore
       double overallRating = (_priceRating + _workRating + _professionalismRating) / 3;
 
       final reviewData = {
@@ -118,16 +114,15 @@ class _AddReviewPageState extends State<AddReviewPage> {
         'timestamp': FieldValue.serverTimestamp(),
       };
 
+      // Unified collection name 'users'
       final reviewCollection = FirebaseFirestore.instance
-            .collection(widget.targetCollection)
+            .collection('users')
             .doc(widget.targetUserId)
             .collection('reviews');
 
       if (widget.existingReview != null) {
-        // Update existing review using its ID
         await reviewCollection.doc(widget.existingReview!['id']).update(reviewData);
       } else {
-        // Add new review using user UID as document ID to enforce 1 review per user
         await reviewCollection.doc(user.uid).set(reviewData);
       }
 
@@ -138,7 +133,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
       debugPrint("Review upload error: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to submit review: $e')),
+          SnackBar(content: Text('הגשת הביקורת נכשלה: $e')),
         );
       }
     } finally {
@@ -159,6 +154,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
         'add_images': 'הוסף תמונות',
         'submit': widget.existingReview != null ? 'עדכן ביקורת' : 'שלח ביקורת',
         'uploading': 'שולח ביקורת...',
+        'rating_summary': 'איך הייתה החוויה שלך?',
       };
     }
     return {
@@ -171,6 +167,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
       'add_images': 'Add Images',
       'submit': widget.existingReview != null ? 'Update Review' : 'Submit Review',
       'uploading': 'Submitting review...',
+      'rating_summary': 'How was your experience?',
     };
   }
 
@@ -178,19 +175,25 @@ class _AddReviewPageState extends State<AddReviewPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4.0),
+          child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: Colors.black87)),
+        ),
         Row(
+          mainAxisAlignment: MainAxisAlignment.start,
           children: List.generate(5, (index) {
             return IconButton(
+              iconSize: 32,
+              visualDensity: VisualDensity.compact,
               icon: Icon(
                 index < rating ? Icons.star_rounded : Icons.star_outline_rounded,
                 color: Colors.amber,
-                size: 30,
               ),
               onPressed: () => onRatingChanged(index + 1.0),
             );
           }),
         ),
+        const SizedBox(height: 8),
       ],
     );
   }
@@ -203,147 +206,168 @@ class _AddReviewPageState extends State<AddReviewPage> {
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
+        backgroundColor: Colors.white,
         appBar: AppBar(
-          title: Text(strings['title']!),
-          backgroundColor: const Color(0xFF1976D2),
-          foregroundColor: Colors.white,
+          title: Text(strings['title']!, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
+          centerTitle: true,
+          elevation: 0,
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black,
+          leading: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => Navigator.pop(context),
+          ),
         ),
         body: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Text(
+                strings['rating_summary']!,
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 32),
+              
               if (widget.professions.length > 1) ...[
-                Text(strings['profession_label']!, style: const TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
+                Text(strings['profession_label']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   value: _selectedProfession,
                   items: widget.professions.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
                   onChanged: (val) => setState(() => _selectedProfession = val),
                   decoration: InputDecoration(
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                    filled: true,
+                    fillColor: Colors.grey[50],
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 32),
               ],
-              _buildRatingStars(strings['price_rating']!, _priceRating, (val) => setState(() => _priceRating = val)),
-              _buildRatingStars(strings['work_rating']!, _workRating, (val) => setState(() => _workRating = val)),
-              _buildRatingStars(strings['professionalism']!, _professionalismRating, (val) => setState(() => _professionalismRating = val)),
-              const SizedBox(height: 24),
-              TextField(
-                controller: _commentController,
-                maxLines: 4,
-                decoration: InputDecoration(
-                  hintText: strings['comment_hint'],
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  filled: true,
-                  fillColor: Colors.grey[50],
+
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50]?.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Column(
+                  children: [
+                    _buildRatingStars(strings['price_rating']!, _priceRating, (val) => setState(() => _priceRating = val)),
+                    _buildRatingStars(strings['work_rating']!, _workRating, (val) => setState(() => _workRating = val)),
+                    _buildRatingStars(strings['professionalism']!, _professionalismRating, (val) => setState(() => _professionalismRating = val)),
+                  ],
                 ),
               ),
-              const SizedBox(height: 24),
-              Text(strings['add_images']!, style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
+              
+              const SizedBox(height: 32),
+              TextField(
+                controller: _commentController,
+                maxLines: 5,
+                style: const TextStyle(fontSize: 16),
+                decoration: InputDecoration(
+                  hintText: strings['comment_hint'],
+                  hintStyle: TextStyle(color: Colors.grey[400]),
+                  filled: true,
+                  fillColor: Colors.grey[50],
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.all(16),
+                ),
+              ),
+              
+              const SizedBox(height: 32),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(strings['add_images']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  Text(
+                    "${_existingImageUrls.length + _newImages.length}/5",
+                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
               SizedBox(
                 height: 100,
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
-                  itemCount: _existingImageUrls.length + _newImages.length + 1,
+                  itemCount: _existingImageUrls.length + _newImages.length < 5 ? _existingImageUrls.length + _newImages.length + 1 : 5,
                   itemBuilder: (context, index) {
                     if (index < _existingImageUrls.length) {
-                      // Existing images
-                      return Stack(
-                        children: [
-                          Container(
-                            width: 100,
-                            margin: const EdgeInsets.only(right: 8),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              image: DecorationImage(
-                                image: NetworkImage(_existingImageUrls[index]),
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            top: 0,
-                            right: 0,
-                            child: GestureDetector(
-                              onTap: () => _removeExistingImage(index),
-                              child: Container(
-                                padding: const EdgeInsets.all(2),
-                                decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                                child: const Icon(Icons.close, size: 16, color: Colors.white),
-                              ),
-                            ),
-                          ),
-                        ],
-                      );
+                      return _buildImageThumb(NetworkImage(_existingImageUrls[index]), () => _removeExistingImage(index));
                     } else if (index < _existingImageUrls.length + _newImages.length) {
-                      // New images
                       int newIdx = index - _existingImageUrls.length;
-                      return Stack(
-                        children: [
-                          Container(
-                            width: 100,
-                            margin: const EdgeInsets.only(right: 8),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              image: DecorationImage(
-                                image: FileImage(_newImages[newIdx]),
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            top: 0,
-                            right: 0,
-                            child: GestureDetector(
-                              onTap: () => _removeNewImage(newIdx),
-                              child: Container(
-                                padding: const EdgeInsets.all(2),
-                                decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                                child: const Icon(Icons.close, size: 16, color: Colors.white),
-                              ),
-                            ),
-                          ),
-                        ],
-                      );
+                      return _buildImageThumb(FileImage(_newImages[newIdx]), () => _removeNewImage(newIdx));
                     } else {
-                      // Add button
                       return GestureDetector(
                         onTap: _pickImages,
                         child: Container(
                           width: 100,
-                          margin: const EdgeInsets.only(right: 8),
                           decoration: BoxDecoration(
-                            color: Colors.grey[200],
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.grey[300]!),
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.grey[200]!),
                           ),
-                          child: const Icon(Icons.add_a_photo_outlined, color: Colors.grey),
+                          child: Icon(Icons.add_a_photo_outlined, color: Colors.grey[400], size: 30),
                         ),
                       );
                     }
                   },
                 ),
               ),
-              const SizedBox(height: 40),
+              
+              const SizedBox(height: 48),
               ElevatedButton(
                 onPressed: _isUploading ? null : _submitReview,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF1976D2),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  elevation: 2,
                 ),
                 child: _isUploading
                     ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : Text(strings['submit']!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    : Text(strings['submit']!, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               ),
+              const SizedBox(height: 24),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildImageThumb(ImageProvider image, VoidCallback onRemove) {
+    return Container(
+      width: 100,
+      margin: const EdgeInsets.only(right: 12),
+      child: Stack(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              image: DecorationImage(image: image, fit: BoxFit.cover),
+            ),
+          ),
+          Positioned(
+            top: 4,
+            right: 4,
+            child: GestureDetector(
+              onTap: onRemove,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(color: Colors.black.withOpacity(0.5), shape: BoxShape.circle),
+                child: const Icon(Icons.close, size: 14, color: Colors.white),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

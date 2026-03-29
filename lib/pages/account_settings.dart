@@ -18,13 +18,13 @@ class AccountSettingsPage extends StatefulWidget {
 
 class _AccountSettingsPageState extends State<AccountSettingsPage> {
   late String _currentPhone;
-  String _userCollection = "normal_users";
+  String _userRole = "customer";
 
   @override
   void initState() {
     super.initState();
     _currentPhone = widget.userData['phone'] ?? 'N/A';
-    _userCollection = widget.userData['collection'] ?? "normal_users";
+    _userRole = widget.userData['role'] ?? "customer";
   }
 
   Map<String, String> _getLocalizedStrings(
@@ -88,9 +88,8 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
-        // Use the collection passed in userData
         await FirebaseFirestore.instance
-            .collection(_userCollection)
+            .collection('users')
             .doc(user.uid)
             .update({'phone': newPhone});
             
@@ -123,7 +122,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
             _updatePhoneInFirestore(newPhone);
             Navigator.pop(
               context,
-            ); // Go back to account settings from PhoneAuthPage
+            ); 
           },
         ),
       ),
@@ -141,9 +140,9 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
     final town = widget.userData['town'] ?? 'N/A';
     
     String userType = strings['client']!;
-    if (_userCollection == 'workers') {
+    if (_userRole == 'worker') {
       userType = strings['worker']!;
-    } else if (_userCollection == 'admins') {
+    } else if (_userRole == 'admin') {
       userType = strings['admin']!;
     }
 
@@ -173,7 +172,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                           userData: {
                             ...widget.userData,
                             'phone': _currentPhone,
-                            'collection': _userCollection,
+                            'role': _userRole,
                           },
                         ),
                       ),
@@ -239,7 +238,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                       userData: {
                         ...widget.userData, 
                         'phone': _currentPhone,
-                        'collection': _userCollection,
+                        'role': _userRole,
                       },
                     ),
                   ),

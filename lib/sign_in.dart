@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:untitled1/services/language_provider.dart';
-import 'package:untitled1/sighn_up.dart';
+import 'package:untitled1/sign_up.dart';
 import 'main.dart';
 
 class SignInPage extends StatefulWidget {
@@ -146,14 +146,8 @@ class _SignInPageState extends State<SignInPage> {
       if (user != null) {
         final firestore = FirebaseFirestore.instance;
 
-        // Check all three collections
-        DocumentSnapshot userDoc = await firestore.collection('normal_users').doc(user.uid).get();
-        if (!userDoc.exists) {
-          userDoc = await firestore.collection('workers').doc(user.uid).get();
-        }
-        if (!userDoc.exists) {
-          userDoc = await firestore.collection('admins').doc(user.uid).get();
-        }
+        // Check unified 'users' collection
+        DocumentSnapshot userDoc = await firestore.collection('users').doc(user.uid).get();
 
         if (userDoc.exists) {
           if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MyHomePage()));

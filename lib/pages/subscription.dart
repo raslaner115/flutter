@@ -5,8 +5,7 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:untitled1/sighn_up.dart';
-
+import 'package:untitled1/sign_up.dart';
 
 class SubscriptionPage extends StatefulWidget {
   final String email;
@@ -33,29 +32,18 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   bool _isLoading = true;
   bool _isStoreAvailable = false;
 
-  // We will query both IDs found in your Play Console screenshot
   static const String _proProductId = 'pro_worker_monthly';
-  static const String _backwardsCompatibleId =
-      'com-hirehub-app-pro-worker-monthly';
+  static const String _backwardsCompatibleId = 'com-hirehub-app-pro-worker-monthly';
 
   @override
   void initState() {
     super.initState();
-
-    final Stream<List<PurchaseDetails>> purchaseUpdated =
-        _inAppPurchase.purchaseStream;
+    final Stream<List<PurchaseDetails>> purchaseUpdated = _inAppPurchase.purchaseStream;
     _subscription = purchaseUpdated.listen(
-      (purchaseDetailsList) {
-        _listenToPurchaseUpdated(purchaseDetailsList);
-      },
-      onDone: () {
-        _subscription.cancel();
-      },
-      onError: (error) {
-        debugPrint("Purchase Stream Error: $error");
-      },
+      (purchaseDetailsList) => _listenToPurchaseUpdated(purchaseDetailsList),
+      onDone: () => _subscription.cancel(),
+      onError: (error) => debugPrint("Purchase Stream Error: $error"),
     );
-
     _initStoreInfo();
   }
 
@@ -76,18 +64,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       return;
     }
 
-    // Querying both the Product ID and the Base Plan ID to ensure we find it
     const Set<String> kIds = <String>{_proProductId, _backwardsCompatibleId};
-    final ProductDetailsResponse response = await _inAppPurchase
-        .queryProductDetails(kIds);
-
-    if (response.error != null) {
-      debugPrint("Query Product Error: ${response.error}");
-    }
-
-    if (response.notFoundIDs.isNotEmpty) {
-      debugPrint("IDs NOT FOUND IN STORE: ${response.notFoundIDs}");
-    }
+    final ProductDetailsResponse response = await _inAppPurchase.queryProductDetails(kIds);
 
     setState(() {
       _products = response.productDetails;
@@ -97,23 +75,19 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   }
 
   void _listenToPurchaseUpdated(List<PurchaseDetails> purchaseDetailsList) {
-    purchaseDetailsList.forEach((PurchaseDetails purchaseDetails) async {
+    for (var purchaseDetails in purchaseDetailsList) {
       if (purchaseDetails.status == PurchaseStatus.error) {
-        debugPrint("Purchase Error: ${purchaseDetails.error}");
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Purchase failed: ${purchaseDetails.error?.message}"),
-          ),
+          SnackBar(content: Text("הרכישה נכשלה: ${purchaseDetails.error?.message}")),
         );
       } else if (purchaseDetails.status == PurchaseStatus.purchased ||
           purchaseDetails.status == PurchaseStatus.restored) {
         _completeSubscription();
       }
-
       if (purchaseDetails.pendingCompletePurchase) {
-        await _inAppPurchase.completePurchase(purchaseDetails);
+        _inAppPurchase.completePurchase(purchaseDetails);
       }
-    });
+    }
   }
 
   Future<void> _completeSubscription() async {
@@ -131,158 +105,237 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return false;
-
       final firestore = FirebaseFirestore.instance;
       
-      // 1. Fetch current data from normal_users (if exists)
-      final normalDoc = await firestore.collection('normal_users').doc(user.uid).get();
-      Map<String, dynamic> baseData = normalDoc.exists ? (normalDoc.data() ?? {}) : {};
+      // Fetch existing user data from unified 'users' collection
+      final userDoc = await firestore.collection('users').doc(user.uid).get();
+      Map<String, dynamic> userData = userDoc.exists ? (userDoc.data() ?? {}) : {};
 
-      // 2. Prepare worker data
-      Map<String, dynamic> workerData = {
-        ...baseData,
-        'isPro': true,
+      userData.addAll({
+        'role': 'worker',
         'isSubscribed': true,
         'subscriptionDate': FieldValue.serverTimestamp(),
-        'isWorker': true,
-        'isNormal': false,
-        'isAdmin': false,
-      };
+      });
 
-      if (widget.pendingUserData != null) {
-        workerData.addAll(widget.pendingUserData!);
-      }
+      if (widget.pendingUserData != null) userData.addAll(widget.pendingUserData!);
 
       if (widget.pendingImage != null) {
-        final storageRef = FirebaseStorage.instance.ref().child(
-          'profile_pictures/${user.uid}.jpg',
-        );
+        final storageRef = FirebaseStorage.instance.ref().child('profile_pictures/${user.uid}.jpg');
         await storageRef.putFile(widget.pendingImage!);
-        workerData['profileImageUrl'] = await storageRef.getDownloadURL();
+        userData['profileImageUrl'] = await storageRef.getDownloadURL();
       }
 
-      // 3. Atomic Migration using WriteBatch
-      WriteBatch batch = firestore.batch();
-      DocumentReference workerRef = firestore.collection('workers').doc(user.uid);
-      DocumentReference normalRef = firestore.collection('normal_users').doc(user.uid);
-      
-      batch.set(workerRef, workerData, SetOptions(merge: true));
-      batch.delete(normalRef);
-      
-      await batch.commit();
+      // Update the same document with new role and subscription status
+      await firestore.collection('users').doc(user.uid).set(userData, SetOptions(merge: true));
       return true;
     } catch (e) {
-      debugPrint("Migration Error: $e");
+      debugPrint("Upgrade Error: $e");
       return false;
     }
   }
 
-  void _buySubscription() {
-    // FOR TESTING: Directly complete subscription bypassing real IAP
-    _completeSubscription();
-  }
+  void _buySubscription() => _completeSubscription();
 
   void _showSuccessDialog({required bool isNewReg}) {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Success'),
-        content: const Text('You are now a Pro Worker!'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              if (isNewReg) {
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => SignUpPage(
-                      pendingWorkerData: widget.pendingUserData,
-                      pendingWorkerImage: widget.pendingImage,
-                      startAtStep: 1,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('מזל טוב!', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: const Text('הפכת לעובד Pro רשום בהצלחה! כעת תוכל ליהנות מכל היתרונות.'),
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context); // Close dialog
+                if (isNewReg) {
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => SignUpPage(
+                        pendingWorkerData: widget.pendingUserData,
+                        pendingWorkerImage: widget.pendingImage,
+                        startAtStep: 1,
+                      ),
                     ),
-                  ),
-                  (route) => false,
-                );
-              } else {
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('Continue'),
-          ),
-        ],
+                    (route) => false,
+                  );
+                } else {
+                  Navigator.pop(context); // Go back from subscription page
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('המשך'),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Pro Subscription'),
-        backgroundColor: const Color(0xFF1976D2),
-        foregroundColor: Colors.white,
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildCard(),
-                  const Spacer(),
-                  ElevatedButton(
-                    onPressed: _buySubscription,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1976D2),
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                    ),
-                    child: const Text(
-                      'Subscribe Now (TEST MODE)',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('מנוי Pro', style: TextStyle(fontWeight: FontWeight.bold)),
+          centerTitle: true,
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          flexibleSpace: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF1976D2), Color(0xFF42A5F5)],
+                begin: Alignment.topRight,
+                end: Alignment.bottomLeft,
               ),
             ),
+          ),
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'שדרג את החשבון שלך',
+                        style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'קבל יותר עבודות ולידים עם מנוי המקצוענים שלנו. הצטרף לקהילת המומחים המובילה!',
+                        style: TextStyle(fontSize: 16, color: Colors.black54, height: 1.5),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 40),
+                      _buildCard(),
+                      const SizedBox(height: 40),
+                      ElevatedButton(
+                        onPressed: _buySubscription,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1976D2),
+                          padding: const EdgeInsets.symmetric(vertical: 18),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                          elevation: 8,
+                          shadowColor: Colors.blueAccent.withOpacity(0.5),
+                        ),
+                        child: const Text(
+                          'הירשם עכשיו למסלול Pro',
+                          style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'החיוב מתבצע באופן חודשי. ניתן לבטל בכל עת.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 13, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+      ),
     );
   }
 
   Widget _buildCard() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1976D2),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        children: [
-          const Text(
-            'PRO WORKER PLAN',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(24, 40, 24, 32),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF0D47A1), Color(0xFF1976D2)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(30),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.blue.withOpacity(0.4),
+                blurRadius: 25,
+                offset: const Offset(0, 15),
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            _products.isNotEmpty ? _products.first.price : '100 ₪ / Month',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 40,
-              fontWeight: FontWeight.bold,
+          child: Column(
+            children: [
+              const Text(
+                'מסלול PRO WORKER',
+                style: TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 1.5),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    _products.isNotEmpty ? _products.first.price.split(' ')[0] : '100',
+                    style: const TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    '₪ / חודש',
+                    style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+              const Divider(color: Colors.white24, height: 48, thickness: 1),
+              _buildFeatureRow('הופעה בראש רשימת העובדים'),
+              _buildFeatureRow('קבלת פניות (לידים) ללא הגבלה'),
+              _buildFeatureRow('תג "מקצוען" מוצמד לפרופיל'),
+              _buildFeatureRow('גישה לכלי ניהול מתקדמים'),
+              _buildFeatureRow('תמיכה טכנית מועדפת (VIP)'),
+            ],
+          ),
+        ),
+        Positioned(
+          top: -20,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.amber,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 4))],
+              ),
+              child: const Text(
+                'הכי פופולרי',
+                style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 14),
+              ),
             ),
           ),
-          const Divider(color: Colors.white24, height: 40),
-          const Text(
-            '• Priority Listing\n• Unlimited Leads\n• Pro Badge',
-            style: TextStyle(color: Colors.white, fontSize: 16),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFeatureRow(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10.0),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: const BoxDecoration(color: Colors.white24, shape: BoxShape.circle),
+            child: const Icon(Icons.check, color: Colors.white, size: 16),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w400)),
           ),
         ],
       ),

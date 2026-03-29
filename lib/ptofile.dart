@@ -12,7 +12,7 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_storage/firebase_storage.dart';
 
 import 'package:untitled1/services/language_provider.dart';
-import 'package:untitled1/sighn_in.dart';
+import 'package:untitled1/sign_in.dart';
 import 'package:untitled1/pages/schedule.dart';
 import 'package:untitled1/pages/settings.dart';
 import 'package:untitled1/pages/subscription.dart';
@@ -46,8 +46,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
   String _email = "";
   String _town = "";
   String _profileImageUrl = "";
-  String _userType = "";
-  String _userCollection = "normal_users";
+  String _userRole = "customer";
   List<String> _userProfessions = [];
   List<Map<String, dynamic>> _userReviews = [];
   List<Map<String, dynamic>> _projects = [];
@@ -89,7 +88,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
   }
 
   void _initTabController() {
-    int tabCount = (_userType == 'worker' || _isOwnProfile) ? 4 : 2;
+    int tabCount = (_userRole == 'worker' || _isOwnProfile) ? 4 : 2;
     _tabController = TabController(length: tabCount, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) {
@@ -115,25 +114,13 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
     }
 
     try {
-      DocumentSnapshot? userDoc;
-      String foundInCollection = "normal_users";
-      
-      final collections = ['normal_users', 'workers', 'users'];
-      for (var col in collections) {
-        final doc = await _firestore.collection(col).doc(targetUid).get();
-        if (doc.exists) {
-          userDoc = doc;
-          foundInCollection = col;
-          break;
-        }
-      }
+      final userDoc = await _firestore.collection('users').doc(targetUid).get();
 
-      if (userDoc != null && userDoc.exists && mounted) {
+      if (userDoc.exists && mounted) {
         final data = userDoc.data() as Map<String, dynamic>;
 
-        String oldType = _userType;
+        String oldRole = _userRole;
         setState(() {
-          _userCollection = foundInCollection;
           _userName = data['name']?.toString() ?? "";
           _bio = data['description']?.toString() ?? "";
           _phoneNumber = data['phone']?.toString() ?? "";
@@ -142,12 +129,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           _town = data['town']?.toString() ?? "";
           _profileImageUrl = data['profileImageUrl']?.toString() ?? "";
           _profileViews = data['profileViews'] ?? 0;
-
-          if (foundInCollection == 'workers') {
-            _userType = 'worker';
-          } else {
-            _userType = 'normal';
-          }
+          _userRole = data['role'] ?? 'customer';
 
           if (data['professions'] is List) {
             _userProfessions = List<String>.from(data['professions']);
@@ -165,7 +147,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           _proLng = data['lng']?.toDouble();
         });
 
-        if (oldType != _userType) {
+        if (oldRole != _userRole) {
           _initTabController();
         }
 
@@ -173,8 +155,8 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           _calculateDistance();
         }
 
-        final reviews = await _fetchSubcollection(targetUid, foundInCollection, 'reviews');
-        final projects = await _fetchSubcollection(targetUid, foundInCollection, 'projects');
+        final reviews = await _fetchSubcollection(targetUid, 'reviews');
+        final projects = await _fetchSubcollection(targetUid, 'projects');
 
         if (mounted) {
           setState(() {
@@ -184,19 +166,12 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
         }
 
         if (currentUser != null && !_isOwnProfile) {
-          DocumentSnapshot? favDoc;
-          for (var col in collections) {
-            final doc = await _firestore.collection(col).doc(currentUser.uid).collection('favorites').doc(targetUid).get();
-            if (doc.exists) {
-              favDoc = doc;
-              break;
-            }
-          }
-          if (mounted) setState(() => _isFavorite = favDoc?.exists ?? false);
+          final favDoc = await _firestore.collection('users').doc(currentUser.uid).collection('favorites').doc(targetUid).get();
+          if (mounted) setState(() => _isFavorite = favDoc.exists);
         }
 
         if (!_isOwnProfile) {
-          _firestore.collection(foundInCollection).doc(targetUid).update({
+          _firestore.collection('users').doc(targetUid).update({
             'profileViews': FieldValue.increment(1)
           });
         }
@@ -283,17 +258,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
       return;
     }
 
-    String currentUserCol = "normal_users";
-    final collections = ['normal_users', 'workers', 'users'];
-    for (var col in collections) {
-      final doc = await _firestore.collection(col).doc(currentUser.uid).get();
-      if (doc.exists) {
-        currentUserCol = col;
-        break;
-      }
-    }
-
-    final favRef = _firestore.collection(currentUserCol).doc(currentUser.uid).collection('favorites').doc(targetUid);
+    final favRef = _firestore.collection('users').doc(currentUser.uid).collection('favorites').doc(targetUid);
 
     try {
       if (_isFavorite) {
@@ -306,7 +271,6 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           'professions': _userProfessions,
           'town': _town,
           'timestamp': FieldValue.serverTimestamp(),
-          'targetCollection': _userCollection,
         });
         if (mounted) setState(() => _isFavorite = true);
       }
@@ -315,9 +279,9 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _fetchSubcollection(String uid, String collection, String subcollectionName) async {
+  Future<List<Map<String, dynamic>>> _fetchSubcollection(String uid, String subcollectionName) async {
     try {
-      final snapshot = await _firestore.collection(collection).doc(uid).collection(subcollectionName).orderBy('timestamp', descending: true).get();
+      final snapshot = await _firestore.collection('users').doc(uid).collection(subcollectionName).orderBy('timestamp', descending: true).get();
       return snapshot.docs.map((doc) {
         final data = Map<String, dynamic>.from(doc.data());
         data['id'] = doc.id;
@@ -530,7 +494,6 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
       MaterialPageRoute(
         builder: (context) => AddReviewPage(
           targetUserId: widget.userId ?? "",
-          targetCollection: _userCollection,
           professions: _userProfessions,
           existingReview: existingReview,
         ),
@@ -567,20 +530,13 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
     if (confirmed == true) {
       setState(() => _isLoading = true);
       try {
-        final docRef = _firestore.collection(_userCollection).doc(user.uid);
-        final docSnap = await docRef.get();
+        await _firestore.collection('users').doc(user.uid).update({
+          'role': 'worker',
+        });
         
-        if (docSnap.exists) {
-          final data = docSnap.data() as Map<String, dynamic>;
-          data['role'] = 'worker'; // Update role field
-          
-          await _firestore.collection('workers').doc(user.uid).set(data);
-          await docRef.delete();
-          
-          await _fetchUserData();
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Account upgraded to worker successfully!')));
-          }
+        await _fetchUserData();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Account upgraded to worker successfully!')));
         }
       } catch (e) {
         debugPrint("Upgrade error: $e");
@@ -654,7 +610,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                     Positioned(bottom: 60, left: 24, right: 24, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Row(children: [
                         Flexible(child: Text(_userName, style: const TextStyle(color: Colors.white, fontSize: 30, fontWeight: FontWeight.bold, letterSpacing: -0.5))),
-                        if (_userType == 'worker') const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Icon(Icons.verified, color: Color(0xFF60A5FA), size: 24)),
+                        if (_userRole == 'worker') const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Icon(Icons.verified, color: Color(0xFF60A5FA), size: 24)),
                       ]),
                       const SizedBox(height: 6),
                       if (_userProfessions.isNotEmpty)
@@ -709,8 +665,9 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
             ),
           ),
         ),
-        bottomNavigationBar: (!_isOwnProfile && _userType == 'worker') ? _buildBottomBar(strings) : null,
-        floatingActionButton: _isOwnProfile ? FloatingActionButton.extended(
+        bottomNavigationBar: (!_isOwnProfile && _userRole == 'worker') ? _buildBottomBar(strings) : null,
+        floatingActionButton: (_isOwnProfile && _tabController.index == 0) ? FloatingActionButton.extended(
+          heroTag: 'profile_fab',
           onPressed: _addProject,
           backgroundColor: const Color(0xFF1976D2),
           icon: const Icon(Icons.add_photo_alternate_rounded, color: Colors.white),
@@ -755,7 +712,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
   }
 
   List<Widget> _buildTabs(Map<String, String> strings) {
-    if (_userType == 'worker' || _isOwnProfile) {
+    if (_userRole == 'worker' || _isOwnProfile) {
       return [
         Tab(text: strings['projects']),
         Tab(text: strings['reviews']),
@@ -768,7 +725,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
   }
 
   List<Widget> _buildTabViews(Map<String, String> strings) {
-    if (_userType == 'worker' || _isOwnProfile) {
+    if (_userRole == 'worker' || _isOwnProfile) {
       final currentUserId = widget.userId ?? FirebaseAuth.instance.currentUser!.uid;
       return [
         _buildProjectsGrid(strings),
@@ -870,7 +827,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                     itemBuilder: (context, index) => ClipRRect(
                       borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
                       child: CachedNetworkImage(
-                        imageUrl: images[index],
+                        imageUrl: images[index], 
                         fit: BoxFit.cover,
                       ),
                     ),
@@ -926,7 +883,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
         }
 
         // 2. Delete document from Firestore
-        await _firestore.collection(_userCollection).doc(FirebaseAuth.instance.currentUser!.uid).collection('projects').doc(project['id']).delete();
+        await _firestore.collection('users').doc(FirebaseAuth.instance.currentUser!.uid).collection('projects').doc(project['id']).delete();
         
         _fetchUserData();
       } catch (e) {
@@ -1091,9 +1048,9 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
 
           if (_isOwnProfile) ...[
             const SizedBox(height: 32),
-            _buildSectionTitle(_userType == 'worker' ? strings['business_tools']! : strings['upgrade_worker']!),
+            _buildSectionTitle(_userRole == 'worker' ? strings['business_tools']! : strings['upgrade_worker']!),
             const SizedBox(height: 16),
-            if (_userType == 'worker')
+            if (_userRole == 'worker')
               GridView.count(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),

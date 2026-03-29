@@ -46,6 +46,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     setState(() => _isLoading = true);
     
     try {
+      // Updated to use 'users' collection
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(widget.userId)
@@ -59,6 +60,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         _avgRating = (data['avgRating'] ?? 0.0).toDouble();
       }
 
+      // Updated to use 'users' collection sub-collection
       final reviewsSnapshot = await FirebaseFirestore.instance
           .collection('users')
           .doc(widget.userId)

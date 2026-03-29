@@ -132,7 +132,8 @@ class _SearchPageState extends State<SearchPage> {
     });
 
     try {
-      Query query = _firestore.collection('workers');
+      // Query 'users' collection with 'worker' role
+      Query query = _firestore.collection('users').where('role', isEqualTo: 'worker');
 
       if (_selectedProfession != null) {
         query = query.where('professions', arrayContains: _selectedProfession!['en']);

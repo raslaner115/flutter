@@ -99,9 +99,10 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
         insuranceUrl = await _uploadToStorage(_insuranceImage!, 'verifications/${user.uid}/insurance.jpg');
       }
 
+      final businessId = _idController.text.trim();
       final verificationData = {
         'userId': user.uid,
-        'businessId': _idController.text.trim(),
+        'businessId': businessId,
         'businessName': _businessNameController.text.trim(),
         'address': _addressController.text.trim(),
         'taxBranch': _taxBranchController.text.trim(),
@@ -118,9 +119,10 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
       // Save to verifications collection
       await FirebaseFirestore.instance.collection('verifications').doc(user.uid).set(verificationData);
 
-      // Update user document so invoice builder can see the dealer type immediately
+      // Update user document in unified 'users' collection
       await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
         'dealerType': _dealerType,
+        'businessId': businessId,
         'businessVerificationStatus': 'pending',
       });
 

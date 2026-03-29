@@ -14,6 +14,8 @@ import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/subscription.dart';
 import 'package:untitled1/map/map_radius_picker.dart';
 import 'package:untitled1/map/location_picker.dart';
+import 'package:untitled1/pages/privacy_policy_page.dart';
+import 'package:untitled1/pages/terms_of_service_page.dart';
 import 'main.dart';
 
 class SignUpPage extends StatefulWidget {
@@ -348,23 +350,17 @@ class _SignUpPageState extends State<SignUpPage> {
         'town': _selectedTown,
         'lat': lat,
         'lng': lng,
-        'isNormal': _userType == UserType.normal,
-        'isWorker': _userType == UserType.worker,
-        'isAdmin': false,
         'profileImageUrl': imageUrl,
         'createdAt': FieldValue.serverTimestamp(),
-        'isAnonymous': user.isAnonymous,
+        'role': _userType == UserType.worker ? 'worker' : 'customer',
       };
-
-      String targetCollection = _userType == UserType.worker ? 'workers' : 'normal_users';
 
       if (_userType == UserType.worker) {
         userData.addAll({
           'professions': _selectedProfessions,
           'optionalPhone': _altPhoneController.text.trim(),
           'description': _descriptionController.text.trim(),
-          'isSubscribed': true,
-          'isPro': true,
+          'isSubscribed': false,
           'workRadius': _workRadius,
           'workCenterLat': _workCenter?.latitude,
           'workCenterLng': _workCenter?.longitude,
@@ -374,7 +370,7 @@ class _SignUpPageState extends State<SignUpPage> {
         });
       }
 
-      await firestore.collection(targetCollection).doc(user.uid).set(userData);
+      await firestore.collection('users').doc(user.uid).set(userData);
       await user.updateDisplayName(finalName);
 
       if (_userType == UserType.worker) {
@@ -407,29 +403,6 @@ class _SignUpPageState extends State<SignUpPage> {
     if (picked != null) setState(() => _image = File(picked.path));
   }
 
-  void _showPolicyDialog(String title, String content) {
-    final strings = _getLocalizedStrings(context);
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1E3A8A))),
-        content: SingleChildScrollView(
-          child: Text(
-            content,
-            style: const TextStyle(fontSize: 14, color: Color(0xFF334155), height: 1.5),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(strings['close']!, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1976D2))),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _submitProfile() {
     if (!_formKey.currentState!.validate()) return;
     final strings = _getLocalizedStrings(context);
@@ -454,8 +427,7 @@ class _SignUpPageState extends State<SignUpPage> {
         'name': _nameController.text.trim(),
         'email': _emailController.text.trim(),
         'town': _selectedTown,
-        'isWorker': true,
-        'isNormal': false,
+        'role': 'worker',
         'professions': _selectedProfessions,
         'optionalPhone': _altPhoneController.text.trim(),
         'description': _descriptionController.text.trim(),
@@ -761,13 +733,17 @@ class _SignUpPageState extends State<SignUpPage> {
                 TextSpan(
                   text: strings['terms_link']!,
                   style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold),
-                  recognizer: TapGestureRecognizer()..onTap = () => _showPolicyDialog(strings['terms_title']!, strings['terms_content']!),
+                  recognizer: TapGestureRecognizer()..onTap = () {
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const TermsOfServicePage()));
+                  },
                 ),
                 TextSpan(text: strings['and']!),
                 TextSpan(
                   text: strings['privacy_link']!,
                   style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold),
-                  recognizer: TapGestureRecognizer()..onTap = () => _showPolicyDialog(strings['privacy_title']!, strings['privacy_content']!),
+                  recognizer: TapGestureRecognizer()..onTap = () {
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyPolicyPage()));
+                  },
                 ),
               ],
             ),

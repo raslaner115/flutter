@@ -31,7 +31,7 @@ class _HomePageState extends State<HomePage> {
   bool _isPopularLoading = true;
   String? _cachedName;
   String? _profileImageUrl;
-  String _userCollection = "normal_users";
+  String _userRole = "customer";
 
   @override
   void initState() {
@@ -149,18 +149,13 @@ class _HomePageState extends State<HomePage> {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null && !user.isAnonymous) {
       try {
-        // Check all collections for the current user's data
-        final collections = ['normal_users', 'workers', 'admins'];
-        for (var col in collections) {
-          final doc = await _firestore.collection(col).doc(user.uid).get();
-          if (doc.exists && mounted) {
-            setState(() {
-              _cachedName = doc.data()?['name']?.toString().split(' ').first;
-              _profileImageUrl = doc.data()?['profileImageUrl']?.toString();
-              _userCollection = col;
-            });
-            break;
-          }
+        final doc = await _firestore.collection('users').doc(user.uid).get();
+        if (doc.exists && mounted) {
+          setState(() {
+            _cachedName = doc.data()?['name']?.toString().split(' ').first;
+            _profileImageUrl = doc.data()?['profileImageUrl']?.toString();
+            _userRole = doc.data()?['role'] ?? 'customer';
+          });
         }
       } catch (e) {
         debugPrint("Error fetching user data: $e");
@@ -236,7 +231,8 @@ class _HomePageState extends State<HomePage> {
     setState(() => _isTopRatedLoading = true);
     
     try {
-      final snapshot = await _firestore.collection('workers')
+      final snapshot = await _firestore.collection('users')
+          .where('role', isEqualTo: 'worker')
           .orderBy('avgRating', descending: true)
           .limit(10)
           .get();
@@ -268,7 +264,8 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _fetchAnyWorkers() async {
     try {
-      final snapshot = await _firestore.collection('workers')
+      final snapshot = await _firestore.collection('users')
+          .where('role', isEqualTo: 'worker')
           .limit(10)
           .get();
       
@@ -379,9 +376,6 @@ class _HomePageState extends State<HomePage> {
 
         final data = snapshot.data!.docs.first.data() as Map<String, dynamic>;
         
-        // If it's a popup, don't show it as a banner as well (or show both? usually banner is better for persistence)
-        // But the user said "popup message", so let's stick to the popup logic added in init.
-
         final timestamp = data['timestamp'] as Timestamp?;
         
         // Only show if the message is from the last 48 hours
@@ -464,7 +458,7 @@ class _HomePageState extends State<HomePage> {
           padding: const EdgeInsets.only(right: 12, left: 12),
           child: StreamBuilder<QuerySnapshot>(
             stream: (user != null && !user.isAnonymous)
-                ? _firestore.collection(_userCollection).doc(user.uid).collection('notifications').where('status', isEqualTo: 'pending').snapshots()
+                ? _firestore.collection('users').doc(user.uid).collection('notifications').where('status', isEqualTo: 'pending').snapshots()
                 : const Stream.empty(),
             builder: (context, snapshot) {
               int count = snapshot.hasData ? snapshot.data!.docs.length : 0;
@@ -517,7 +511,7 @@ class _HomePageState extends State<HomePage> {
                       children: [
                         GestureDetector(
                           onTap: () {
-                            if (_userCollection == 'admins') {
+                            if (_userRole == 'admin') {
                               Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminProfile()));
                             } else {
                               Navigator.push(context, MaterialPageRoute(builder: (_) => const Profile()));

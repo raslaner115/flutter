@@ -27,6 +27,9 @@ class _SchedulePageState extends State<SchedulePage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   List<Map<String, dynamic>> _reminders = [];
+  Map<String, List<Map<String, dynamic>>> _allReminders = {};
+  Map<String, String> _dayNotes = {};
+
   List<String> _availableDates = [];
   List<String> _reminderDates = [];
   Map<String, Map<String, String>> _partialWorkDays = {};
@@ -36,29 +39,43 @@ class _SchedulePageState extends State<SchedulePage> {
   bool _hideScheduleFromOthers = false;
   List<int> _permanentlyDisabledDays = []; // 1=Mon, 7=Sun
 
+  final TextEditingController _notesController = TextEditingController();
+
+  // Updated to use 'users' collection
+  DocumentReference get _scheduleDoc => _firestore
+      .collection('users')
+      .doc(widget.workerId)
+      .collection('Schedule')
+      .doc('info');
+
   @override
   void initState() {
     super.initState();
     _checkOwnership();
     _fetchWorkerScheduleConfig();
-    _fetchReminders();
+  }
+
+  @override
+  void dispose() {
+    _notesController.dispose();
+    super.dispose();
   }
 
   void _checkOwnership() {
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _auth.currentUser;
     if (user != null && user.uid == widget.workerId) {
       setState(() => _isOwnSchedule = true);
     }
   }
 
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
   Future<void> _fetchWorkerScheduleConfig() async {
+    setState(() => _isLoading = true);
     try {
-      final doc = await _firestore
-          .collection('workers')
-          .doc(widget.workerId)
-          .get();
+      final doc = await _scheduleDoc.get();
       if (doc.exists) {
-        final data = doc.data()!;
+        final data = doc.data() as Map<String, dynamic>;
         setState(() {
           _hideScheduleFromOthers = data['hideSchedule'] ?? false;
           _permanentlyDisabledDays = List<int>.from(data['disabledDays'] ?? []);
@@ -83,7 +100,22 @@ class _SchedulePageState extends State<SchedulePage> {
               ),
             );
           }
+
+          if (data.containsKey('dayNotes')) {
+            _dayNotes = Map<String, String>.from(data['dayNotes']);
+          }
+
+          if (data.containsKey('allReminders')) {
+            _allReminders = (data['allReminders'] as Map).map(
+              (k, v) => MapEntry(
+                k.toString(),
+                (v as List).map((item) => Map<String, dynamic>.from(item)).toList(),
+              ),
+            );
+          }
         });
+
+        _updateSelectedDayData();
 
         if (_isOwnSchedule) {
           await _cleanupPastData();
@@ -91,13 +123,23 @@ class _SchedulePageState extends State<SchedulePage> {
       }
     } catch (e) {
       debugPrint("Error fetching worker config: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _updateSelectedDayData() {
+    final dateStr =
+        "${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}";
+    setState(() {
+      _reminders = _allReminders[dateStr] ?? [];
+      _notesController.text = _dayNotes[dateStr] ?? "";
+    });
   }
 
   Future<void> _cleanupPastData() async {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final oneWeekAgo = today.subtract(const Duration(days: 7));
 
     bool docChanged = false;
     List<String> newAvailableDates = List.from(_availableDates);
@@ -106,7 +148,10 @@ class _SchedulePageState extends State<SchedulePage> {
       _partialWorkDays,
     );
     List<Map<String, String>> newVacations = List.from(_vacations);
-    List<String> collectionsToFullyDelete = [];
+    Map<String, String> newDayNotes = Map.from(_dayNotes);
+    Map<String, List<Map<String, dynamic>>> newAllReminders = Map.from(
+      _allReminders,
+    );
 
     newAvailableDates.removeWhere((dateStr) {
       try {
@@ -132,12 +177,15 @@ class _SchedulePageState extends State<SchedulePage> {
           int.parse(parts[1]),
           int.parse(parts[2]),
         );
-        return date.isBefore(today);
+        if (date.isBefore(today)) {
+          docChanged = true;
+          return true;
+        }
       } catch (_) {}
       return false;
     });
 
-    newReminderDates.removeWhere((dateStr) {
+    newDayNotes.removeWhere((dateStr, _) {
       try {
         final parts = dateStr.split('-');
         final date = DateTime(
@@ -145,12 +193,36 @@ class _SchedulePageState extends State<SchedulePage> {
           int.parse(parts[1]),
           int.parse(parts[2]),
         );
-        if (!date.isAfter(oneWeekAgo)) {
+        if (date.isBefore(today)) {
           docChanged = true;
-          collectionsToFullyDelete.add(dateStr);
           return true;
         }
       } catch (_) {}
+      return false;
+    });
+
+    newAllReminders.removeWhere((dateStr, _) {
+      try {
+        final parts = dateStr.split('-');
+        final date = DateTime(
+          int.parse(parts[0]),
+          int.parse(parts[1]),
+          int.parse(parts[2]),
+        );
+        if (date.isBefore(today)) {
+          docChanged = true;
+          return true;
+        }
+      } catch (_) {}
+      return false;
+    });
+
+    newReminderDates.removeWhere((dateStr) {
+      if (!newAllReminders.containsKey(dateStr) ||
+          newAllReminders[dateStr]!.isEmpty) {
+        docChanged = true;
+        return true;
+      }
       return false;
     });
 
@@ -176,73 +248,18 @@ class _SchedulePageState extends State<SchedulePage> {
         _reminderDates = newReminderDates;
         _partialWorkDays = newPartialDays;
         _vacations = newVacations;
+        _dayNotes = newDayNotes;
+        _allReminders = newAllReminders;
       });
 
-      await _firestore.collection('workers').doc(widget.workerId).update({
+      await _scheduleDoc.set({
         'availableDates': _availableDates,
         'reminderDates': _reminderDates,
         'partialWorkDays': _partialWorkDays,
         'vacations': _vacations,
-      });
-
-      for (String dStr in collectionsToFullyDelete) {
-        try {
-          final items = await _firestore
-              .collection('schedules')
-              .doc(widget.workerId)
-              .collection(dStr)
-              .get();
-          final batch = _firestore.batch();
-          for (var doc in items.docs) {
-            batch.delete(doc.reference);
-          }
-          await batch.commit();
-        } catch (_) {}
-      }
-    }
-  }
-
-  Future<void> _fetchReminders() async {
-    setState(() => _isLoading = true);
-    final dateStr =
-        "${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}";
-
-    try {
-      final doc = await _firestore
-          .collection('schedules')
-          .doc(widget.workerId)
-          .collection(dateStr)
-          .orderBy('timestamp', descending: false)
-          .get();
-
-      final loadedReminders = doc.docs.map((e) {
-        final data = e.data();
-        data['id'] = e.id;
-        return data;
-      }).toList();
-
-      setState(() {
-        _reminders = loadedReminders;
-      });
-
-      if (_isOwnSchedule) {
-        if (loadedReminders.isEmpty && _reminderDates.contains(dateStr)) {
-          setState(() => _reminderDates.remove(dateStr));
-          await _firestore.collection('workers').doc(widget.workerId).update({
-            'reminderDates': FieldValue.arrayRemove([dateStr]),
-          });
-        } else if (loadedReminders.isNotEmpty &&
-            !_reminderDates.contains(dateStr)) {
-          setState(() => _reminderDates.add(dateStr));
-          await _firestore.collection('workers').doc(widget.workerId).update({
-            'reminderDates': FieldValue.arrayUnion([dateStr]),
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint("Error fetching reminders: $e");
-    } finally {
-      setState(() => _isLoading = false);
+        'dayNotes': _dayNotes,
+        'allReminders': _allReminders,
+      }, SetOptions(merge: true));
     }
   }
 
@@ -286,6 +303,8 @@ class _SchedulePageState extends State<SchedulePage> {
               'לא ניתן לקבוע חופשה ביום עבודה קיים. בטל את יום העבודה קודם.',
           'working_day': 'יום עבודה',
           'has_reminders': 'תזכורות',
+          'notes': 'הערות ליום זה',
+          'notes_hint': 'כתוב הערות אישיות כאן...',
         };
       default:
         return {
@@ -322,6 +341,8 @@ class _SchedulePageState extends State<SchedulePage> {
               'Cannot set vacation on an existing working day. Cancel working day first.',
           'working_day': 'Working Day',
           'has_reminders': 'Reminders',
+          'notes': 'Daily Notes',
+          'notes_hint': 'Write personal notes here...',
         };
     }
   }
@@ -400,9 +421,9 @@ class _SchedulePageState extends State<SchedulePage> {
       });
     });
 
-    await _firestore.collection('workers').doc(widget.workerId).update({
+    await _scheduleDoc.set({
       'vacations': _vacations,
-    });
+    }, SetOptions(merge: true));
   }
 
   Future<void> _showVacationDialog() async {
@@ -436,11 +457,11 @@ class _SchedulePageState extends State<SchedulePage> {
         _vacations.add({'start': startStr, 'end': endStr});
       });
 
-      await _firestore.collection('workers').doc(widget.workerId).update({
+      await _scheduleDoc.set({
         'vacations': FieldValue.arrayUnion([
           {'start': startStr, 'end': endStr},
         ]),
-      });
+      }, SetOptions(merge: true));
     }
   }
 
@@ -449,13 +470,28 @@ class _SchedulePageState extends State<SchedulePage> {
     final dateStr =
         "${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}";
 
+    final reminder = {
+      'id': DateTime.now().millisecondsSinceEpoch.toString(),
+      'text': text,
+      'timestamp': DateTime.now().toIso8601String(),
+    };
+
+    setState(() {
+      if (!_allReminders.containsKey(dateStr)) {
+        _allReminders[dateStr] = [];
+      }
+      _allReminders[dateStr]!.add(reminder);
+      _reminders = _allReminders[dateStr]!;
+      if (!_reminderDates.contains(dateStr)) {
+        _reminderDates.add(dateStr);
+      }
+    });
+
     try {
-      await _firestore
-          .collection('schedules')
-          .doc(widget.workerId)
-          .collection(dateStr)
-          .add({'text': text, 'timestamp': FieldValue.serverTimestamp()});
-      _fetchReminders();
+      await _scheduleDoc.set({
+        'allReminders': _allReminders,
+        'reminderDates': _reminderDates,
+      }, SetOptions(merge: true));
     } catch (e) {
       debugPrint("Error adding reminder: $e");
     }
@@ -464,16 +500,46 @@ class _SchedulePageState extends State<SchedulePage> {
   Future<void> _deleteReminder(String id) async {
     final dateStr =
         "${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}";
+    setState(() {
+      if (_allReminders.containsKey(dateStr)) {
+        _allReminders[dateStr]!.removeWhere((r) => r['id'] == id);
+        _reminders = _allReminders[dateStr]!;
+        if (_reminders.isEmpty) {
+          _allReminders.remove(dateStr);
+          _reminderDates.remove(dateStr);
+        }
+      }
+    });
+
     try {
-      await _firestore
-          .collection('schedules')
-          .doc(widget.workerId)
-          .collection(dateStr)
-          .doc(id)
-          .delete();
-      _fetchReminders();
+      await _scheduleDoc.set({
+        'allReminders': _allReminders,
+        'reminderDates': _reminderDates,
+      }, SetOptions(merge: true));
     } catch (e) {
       debugPrint("Error deleting reminder: $e");
+    }
+  }
+
+  Future<void> _saveNotes() async {
+    final dateStr =
+        "${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}";
+    final note = _notesController.text;
+
+    setState(() {
+      if (note.isEmpty) {
+        _dayNotes.remove(dateStr);
+      } else {
+        _dayNotes[dateStr] = note;
+      }
+    });
+
+    try {
+      await _scheduleDoc.set({
+        'dayNotes': _dayNotes,
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint("Error saving notes: $e");
     }
   }
 
@@ -515,29 +581,22 @@ class _SchedulePageState extends State<SchedulePage> {
       setState(() {
         _availableDates.remove(dateStr);
         _partialWorkDays.remove(dateStr);
+        _allReminders.remove(dateStr);
+        _reminderDates.remove(dateStr);
+        _reminders = [];
       });
 
-      await _firestore.collection('workers').doc(widget.workerId).update({
+      await _scheduleDoc.set({
         'availableDates': FieldValue.arrayRemove([dateStr]),
         'partialWorkDays.$dateStr': FieldValue.delete(),
-      });
-
-      final items = await _firestore
-          .collection('schedules')
-          .doc(widget.workerId)
-          .collection(dateStr)
-          .get();
-      final batch = _firestore.batch();
-      for (var doc in items.docs) {
-        batch.delete(doc.reference);
-      }
-      await batch.commit();
-      _fetchReminders();
+        'allReminders': _allReminders,
+        'reminderDates': _reminderDates,
+      }, SetOptions(merge: true));
     } else {
       setState(() => _availableDates.add(dateStr));
-      await _firestore.collection('workers').doc(widget.workerId).update({
+      await _scheduleDoc.set({
         'availableDates': FieldValue.arrayUnion([dateStr]),
-      });
+      }, SetOptions(merge: true));
     }
   }
 
@@ -618,10 +677,10 @@ class _SchedulePageState extends State<SchedulePage> {
                   _partialWorkDays[dateStr] = {'from': fStr, 'to': tStr};
                 });
 
-                _firestore.collection('workers').doc(widget.workerId).update({
+                _scheduleDoc.set({
                   'availableDates': FieldValue.arrayUnion([dateStr]),
                   'partialWorkDays.$dateStr': {'from': fStr, 'to': tStr},
-                });
+                }, SetOptions(merge: true));
                 Navigator.pop(context);
               },
               child: Text(strings['save']!),
@@ -672,16 +731,18 @@ class _SchedulePageState extends State<SchedulePage> {
                 child: Column(
                   children: [
                     TableCalendar(
-                      firstDay: DateTime.now().subtract(const Duration(days: 365)),
+                      firstDay:
+                          DateTime.now().subtract(const Duration(days: 365)),
                       lastDay: DateTime.now().add(const Duration(days: 365)),
                       focusedDay: _focusedDay,
-                      selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+                      selectedDayPredicate: (day) =>
+                          isSameDay(_selectedDay, day),
                       onDaySelected: (selectedDay, focusedDay) {
                         setState(() {
                           _selectedDay = selectedDay;
                           _focusedDay = focusedDay;
                         });
-                        _fetchReminders();
+                        _updateSelectedDayData();
                       },
                       calendarStyle: CalendarStyle(
                         todayDecoration: BoxDecoration(
@@ -712,21 +773,27 @@ class _SchedulePageState extends State<SchedulePage> {
                       calendarBuilders: CalendarBuilders(
                         defaultBuilder: (context, day, focusedDay) {
                           final dStr = "${day.year}-${day.month}-${day.day}";
-                          if (_isVacation(day)) return _dayCircle(day, Colors.red);
+                          if (_isVacation(day))
+                            return _dayCircle(day, Colors.red);
                           if (_availableDates.contains(dStr))
                             return _dayCircle(day, Colors.green);
-                          if (_permanentlyDisabledDays.contains(day.weekday)){
+                          if (_permanentlyDisabledDays.contains(day.weekday)) {
                             return _dayCircle(
                               day,
                               Colors.grey.shade300,
                               isTextGrey: true,
-                            );}
+                            );
+                          }
                           return null;
                         },
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 16, left: 16, right: 16),
+                      padding: const EdgeInsets.only(
+                        bottom: 16,
+                        left: 16,
+                        right: 16,
+                      ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -818,9 +885,52 @@ class _SchedulePageState extends State<SchedulePage> {
       children: [
         _buildOwnerControls(strings, isWorkingDay, onVacation, dateStr),
         const SizedBox(height: 20),
+        _buildNotesInput(strings),
+        const SizedBox(height: 20),
         _buildRemindersList(strings),
         _buildAddReminderInput(strings),
       ],
+    );
+  }
+
+  Widget _buildNotesInput(Map<String, String> strings) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            strings['notes']!,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _notesController,
+            maxLines: 3,
+            onChanged: (v) => _saveNotes(),
+            decoration: InputDecoration(
+              hintText: strings['notes_hint'],
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey.shade200),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey.shade200),
+              ),
+              filled: true,
+              fillColor: const Color(0xFFF8FAFC),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

@@ -182,9 +182,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
         updateData['profileImageUrl'] = imageUrl;
       }
 
-      // Use the correct collection from userData
-      String collection = widget.userData['collection'] ?? 'normal_users';
-      await FirebaseFirestore.instance.collection(collection).doc(user.uid).update(updateData);
+      // Update in the unified 'users' collection
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).update(updateData);
       await user.updateDisplayName(_nameController.text.trim());
 
       if (mounted) Navigator.pop(context, true);
@@ -283,7 +282,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                             const SizedBox(height: 16),
                             _buildLocationSection(strings),
                             const SizedBox(height: 16),
-                            if (widget.userData['userType'] == 'worker') ...[
+                            if (widget.userData['role'] == 'worker') ...[
                               _buildWorkRadiusSelector(strings),
                               const SizedBox(height: 16),
                               _buildMultiSelectProfessions(strings),
