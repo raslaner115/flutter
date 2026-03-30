@@ -18,6 +18,9 @@ class _PrivacyPolicyPageState extends State<PrivacyPolicyPage> {
   @override
   void initState() {
     super.initState();
+    // Cache-busting URL to ensure the app fetches the latest version from the server
+    final cacheBusterUrl = "${AppConstants.privacyPolicyUrl}?v=${DateTime.now().millisecondsSinceEpoch}";
+    
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
@@ -34,7 +37,8 @@ class _PrivacyPolicyPageState extends State<PrivacyPolicyPage> {
           },
         ),
       )
-      ..loadRequest(Uri.parse(AppConstants.privacyPolicyUrl));
+      ..clearCache() // Explicitly clear cache to handle aggressive WebView storage
+      ..loadRequest(Uri.parse(cacheBusterUrl));
   }
 
   @override

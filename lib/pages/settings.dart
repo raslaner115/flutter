@@ -11,6 +11,7 @@ import 'package:untitled1/pages/about.dart';
 import 'package:untitled1/pages/account_settings.dart';
 import 'package:untitled1/pages/privacy_policy_page.dart';
 import 'package:untitled1/pages/terms_of_service_page.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -136,6 +137,7 @@ class _SettingsPageState extends State<SettingsPage> {
           'account': 'חשבון',
           'privacy': 'מדיניות פרטיות',
           'terms': 'תנאי שימוש',
+          'delete_account': 'מחיקת חשבון',
           'help': 'עזרה',
           'logout': 'התנתקות',
           'appearance': 'מראה',
@@ -158,6 +160,7 @@ class _SettingsPageState extends State<SettingsPage> {
           'account': 'الحساب',
           'privacy': 'سياسة الخصوصية',
           'terms': 'شروط الخدمة',
+          'delete_account': 'حذف الحساب',
           'help': 'المساعدة',
           'logout': 'تسجيل الخروج',
           'appearance': 'المظهر',
@@ -180,6 +183,7 @@ class _SettingsPageState extends State<SettingsPage> {
           'account': 'Account',
           'privacy': 'Privacy Policy',
           'terms': 'Terms of Service',
+          'delete_account': 'Delete Account',
           'help': 'Help & Support',
           'logout': 'Logout',
           'appearance': 'Appearance',
@@ -216,6 +220,13 @@ class _SettingsPageState extends State<SettingsPage> {
     );
 
     _loadSettings();
+  }
+
+  Future<void> _launchDeleteUrl() async {
+    final Uri url = Uri.parse('https://hire-hub-fe6c4.web.app/delete-account');
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      debugPrint('Could not launch delete account URL');
+    }
   }
 
   @override
@@ -370,6 +381,12 @@ class _SettingsPageState extends State<SettingsPage> {
                             Navigator.push(context, MaterialPageRoute(builder: (_) => const TermsOfServicePage()));
                           },
                         ),
+                        _buildGalaxyTile(
+                          Icons.person_remove_outlined,
+                          strings['delete_account']!,
+                          _launchDeleteUrl,
+                          color: Colors.red,
+                        ),
                       ]),
                       const SizedBox(height: 16),
                       _buildScheduleSection(strings),
@@ -478,10 +495,16 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildGalaxyTile(IconData icon, String title, VoidCallback onTap) {
+  Widget _buildGalaxyTile(IconData icon, String title, VoidCallback onTap, {Color? color}) {
     return ListTile(
-      leading: Icon(icon, color: const Color(0xFF1976D2)),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
+      leading: Icon(icon, color: color ?? const Color(0xFF1976D2)),
+      title: Text(
+        title, 
+        style: TextStyle(
+          fontWeight: FontWeight.w500,
+          color: color,
+        )
+      ),
       trailing: const Icon(Icons.chevron_right_rounded, size: 20),
       onTap: onTap,
     );
@@ -553,6 +576,18 @@ class _SettingsPageState extends State<SettingsPage> {
                   onTap: () {
                     Navigator.push(context, CupertinoPageRoute(builder: (_) => const TermsOfServicePage()));
                   },
+                ),
+                CupertinoListTile(
+                  leading: const Icon(
+                    CupertinoIcons.person_badge_minus,
+                    color: CupertinoColors.destructiveRed,
+                  ),
+                  title: Text(
+                    strings['delete_account']!,
+                    style: const TextStyle(color: CupertinoColors.destructiveRed),
+                  ),
+                  trailing: const CupertinoListTileChevron(),
+                  onTap: _launchDeleteUrl,
                 ),
               ],
             ),

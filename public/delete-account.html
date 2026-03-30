@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delete Account - HireHub</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <style>
+        :root {
+            --primary: #ef4444;
+            --primary-dark: #dc2626;
+            --secondary: #64748b;
+            --bg: #f8fafc;
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+            --radius: 16px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            line-height: 1.6;
+            color: var(--text-main);
+            background-color: var(--bg);
+            padding-bottom: 50px;
+        }
+
+        .header {
+            background: #0f172a;
+            color: white;
+            padding: 60px 20px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 900;
+            margin-bottom: 10px;
+            letter-spacing: -1px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .nav-container {
+            position: sticky;
+            top: 0;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            z-index: 100;
+            padding: 10px 0;
+        }
+
+        .nav-inner {
+            max-width: 900px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 0 20px;
+        }
+
+        .nav-link {
+            padding: 8px 16px;
+            border-radius: 99px;
+            text-decoration: none;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            font-weight: 600;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            transition: 0.2s;
+        }
+
+        .nav-link:hover {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .container {
+            max-width: 700px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            padding: 40px;
+            border-radius: var(--radius);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05);
+            border: 1px solid var(--border);
+        }
+
+        .lang-section {
+            display: none;
+        }
+
+        .lang-section.active {
+            display: block;
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .section-title {
+            font-size: 2rem;
+            font-weight: 800;
+            margin-bottom: 20px;
+            color: var(--primary-dark);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .info-box {
+            background: #fef2f2;
+            border-right: 4px solid var(--primary);
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .ltr .info-box {
+            border-right: none;
+            border-left: 4px solid var(--primary);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-main);
+        }
+
+        input, textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            font-family: inherit;
+            font-size: 1rem;
+        }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        button:hover {
+            background: var(--primary-dark);
+        }
+
+        .rtl { dir: rtl; text-align: right; }
+        .ltr { dir: ltr; text-align: left; }
+
+        footer {
+            text-align: center;
+            margin-top: 60px;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+
+    <header class="header">
+        <h1>HireHub</h1>
+        <p>Account Deletion Request</p>
+    </header>
+
+    <div class="nav-container">
+        <div class="nav-inner">
+            <a href="javascript:void(0)" class="nav-link" onclick="setLang('he')">עברית</a>
+            <a href="javascript:void(0)" class="nav-link" onclick="setLang('en')">English</a>
+            <a href="javascript:void(0)" class="nav-link" onclick="setLang('ar')">العربية</a>
+            <a href="javascript:void(0)" class="nav-link" onclick="setLang('ru')">Русский</a>
+            <a href="javascript:void(0)" class="nav-link" onclick="setLang('am')">አማርኛ</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+
+            <!-- HEBREW -->
+            <div id="lang-he" class="lang-section rtl active">
+                <h1 class="section-title"><i class="fas fa-user-minus"></i> מחיקת חשבון</h1>
+                <div class="info-box">
+                    <strong>שימו לב:</strong> מחיקת החשבון היא פעולה סופית ולא ניתנת לביטול. כל המידע שלך יימחק לצמיתות תוך 30 יום.
+                </div>
+                <form id="form-he">
+                    <div class="form-group">
+                        <label>שם מלא</label>
+                        <input type="text" id="name-he" required placeholder="הכנס את שמך">
+                    </div>
+                    <div class="form-group">
+                        <label>מספר טלפון / אימייל</label>
+                        <input type="text" id="contact-he" required placeholder="הפרטים איתם נרשמת">
+                    </div>
+                    <div class="form-group">
+                        <label>סיבת העזיבה (אופציונלי)</label>
+                        <textarea id="reason-he" rows="3" placeholder="נשמח לדעת איך להשתפר"></textarea>
+                    </div>
+                    <button type="button" onclick="sendRequest('he')">שלח בקשת מחיקה במייל</button>
+                </form>
+            </div>
+
+            <!-- ENGLISH -->
+            <div id="lang-en" class="lang-section ltr">
+                <h1 class="section-title"><i class="fas fa-user-minus"></i> Delete Account</h1>
+                <div class="info-box">
+                    <strong>Warning:</strong> Deleting your account is permanent. All your data will be permanently removed within 30 days.
+                </div>
+                <form id="form-en">
+                    <div class="form-group">
+                        <label>Full Name</label>
+                        <input type="text" id="name-en" required placeholder="Enter your name">
+                    </div>
+                    <div class="form-group">
+                        <label>Phone Number / Email</label>
+                        <input type="text" id="contact-en" required placeholder="Details used for registration">
+                    </div>
+                    <div class="form-group">
+                        <label>Reason for leaving (Optional)</label>
+                        <textarea id="reason-en" rows="3" placeholder="Let us know how we can improve"></textarea>
+                    </div>
+                    <button type="button" onclick="sendRequest('en')">Submit Deletion Request via Email</button>
+                </form>
+            </div>
+
+            <!-- ARABIC -->
+            <div id="lang-ar" class="lang-section rtl">
+                <h1 class="section-title"><i class="fas fa-user-minus"></i> حذف الحساب</h1>
+                <div class="info-box">
+                    <strong>تنبيه:</strong> حذف حسابك هو إجراء نهائي. سيتم حذف جميع بياناتك نهائياً خلال 30 يوماً.
+                </div>
+                <form id="form-ar">
+                    <div class="form-group">
+                        <label>الاسم الكامل</label>
+                        <input type="text" id="name-ar" required placeholder="أدخل اسمك">
+                    </div>
+                    <div class="form-group">
+                        <label>رقم الهاتف / البريد الإلكتروني</label>
+                        <input type="text" id="contact-ar" required placeholder="تفاصيل التسجيل">
+                    </div>
+                    <div class="form-group">
+                        <label>سبب المغادرة (اختياري)</label>
+                        <textarea id="reason-ar" rows="3" placeholder="أخبرنا كيف يمكننا التحسن"></textarea>
+                    </div>
+                    <button type="button" onclick="sendRequest('ar')">إرسال طلب الحذف عبر البريد</button>
+                </form>
+            </div>
+
+            <!-- RUSSIAN -->
+            <div id="lang-ru" class="lang-section ltr">
+                <h1 class="section-title"><i class="fas fa-user-minus"></i> Удалить аккаунт</h1>
+                <div class="info-box">
+                    <strong>Внимание:</strong> Удаление аккаунта необратимо. Все ваши данные будут удалены в течение 30 дней.
+                </div>
+                <form id="form-ru">
+                    <div class="form-group">
+                        <label>Полное имя</label>
+                        <input type="text" id="name-ru" required placeholder="Введите ваше имя">
+                    </div>
+                    <div class="form-group">
+                        <label>Телефон / Email</label>
+                        <input type="text" id="contact-ru" required placeholder="Данные при регистрации">
+                    </div>
+                    <div class="form-group">
+                        <label>Причина ухода (необязательно)</label>
+                        <textarea id="reason-ru" rows="3" placeholder="Как мы можем стать лучше?"></textarea>
+                    </div>
+                    <button type="button" onclick="sendRequest('ru')">Отправить запрос по почте</button>
+                </form>
+            </div>
+
+            <!-- AMHARIC -->
+            <div id="lang-am" class="lang-section ltr">
+                <h1 class="section-title"><i class="fas fa-user-minus"></i> አካውንት ሰርዝ</h1>
+                <div class="info-box">
+                    <strong>ማስጠንቀቂያ:</strong> አካውንትዎን መሰረዝ የመጨረሻ ውሳኔ ነው:: ሁሉም መረጃዎችዎ በ30 ቀናት ውስጥ ይወገዳሉ::
+                </div>
+                <form id="form-am">
+                    <div class="form-group">
+                        <label>ሙሉ ስም</label>
+                        <input type="text" id="name-am" required placeholder="ስምዎን ያስገቡ">
+                    </div>
+                    <div class="form-group">
+                        <label>ስልክ / ኢሜይል</label>
+                        <input type="text" id="contact-am" required placeholder="የተመዘገቡበት መረጃ">
+                    </div>
+                    <div class="form-group">
+                        <label>የመልቀቂያ ምክንያት (አማራጭ)</label>
+                        <textarea id="reason-am" rows="3" placeholder="እንዴት ማሻሻል እንደምንችል ይንገሩን"></textarea>
+                    </div>
+                    <button type="button" onclick="sendRequest('am')">የመሰረዝ ጥያቄ በኢሜይል ላክ</button>
+                </form>
+            </div>
+
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2023 HireHub. All rights reserved.</p>
+    </footer>
+
+    <script>
+        function setLang(lang) {
+            document.querySelectorAll('.lang-section').forEach(s => s.classList.remove('active'));
+            document.getElementById('lang-' + lang).classList.add('active');
+            document.documentElement.dir = (lang === 'he' || lang === 'ar') ? 'rtl' : 'ltr';
+        }
+
+        function sendRequest(lang) {
+            const name = document.getElementById('name-' + lang).value;
+            const contact = document.getElementById('contact-' + lang).value;
+            const reasonElem = document.getElementById('reason-' + lang);
+            const reason = reasonElem ? reasonElem.value : "";
+
+            if (!name || !contact) {
+                alert(lang === 'he' ? "נא למלא את כל שדות החובה" : "Please fill all required fields");
+                return;
+            }
+
+            const subjects = {
+                'he': 'בקשה למחוק חשבון',
+                'en': 'Request to Delete Account',
+                'ar': 'طلب حذف الحساب',
+                'ru': 'Запрос на удаление аккаунта',
+                'am': 'አካውንት እንዲሰረዝ ጥያቄ'
+            };
+
+            const labels = {
+                'he': ['שם', 'פרטי קשר', 'סיבה'],
+                'en': ['Name', 'Contact', 'Reason'],
+                'ar': ['اسم', 'اتصال', 'سبب'],
+                'ru': ['Имя', 'Контакт', 'Причина'],
+                'am': ['ስም', 'አድራሻ', 'ምክንያት']
+            };
+
+            const l = labels[lang];
+            const body = `${l[0]}: ${name}\n${l[1]}: ${contact}\n${l[2]}: ${reason}`;
+
+            const mailtoLink = `mailto:my.hire.hub@gmail.com?subject=${encodeURIComponent(subjects[lang])}&body=${encodeURIComponent(body)}`;
+
+            window.location.href = mailtoLink;
+        }
+    </script>
+</body>
+</html>
