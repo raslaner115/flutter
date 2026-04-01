@@ -1,10 +1,9 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:untitled1/sign_in.dart';
 
+/// A pure UI SplashScreen that does not handle navigation.
+/// Navigation logic is managed by [AuthWrapper] based on Firebase Auth state.
 class SplashScreen extends StatefulWidget {
-  final bool navigateToSignIn;
-  const SplashScreen({super.key, this.navigateToSignIn = true});
+  const SplashScreen({super.key});
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -16,7 +15,6 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   late Animation<double> _opacityAnimation;
   late Animation<double> _slideAnimation;
   late Animation<double> _glowAnimation;
-  Timer? _navigationTimer;
 
   @override
   void initState() {
@@ -54,28 +52,12 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       ),
     );
 
-    _controller.forward();
-
-    if (widget.navigateToSignIn) {
-      _navigationTimer = Timer(const Duration(seconds: 4), () {
-        if (mounted) {
-          Navigator.of(context).pushReplacement(
-            PageRouteBuilder(
-              pageBuilder: (context, animation, secondaryAnimation) => const SignInPage(),
-              transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                return FadeTransition(opacity: animation, child: child);
-              },
-              transitionDuration: const Duration(milliseconds: 800),
-            ),
-          );
-        }
-      });
-    }
+    // Continuous subtle animation while loading
+    _controller.repeat(reverse: true);
   }
 
   @override
   void dispose() {
-    _navigationTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }

@@ -8,20 +8,21 @@ import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:http/http.dart' as http;
 import 'package:firebase_storage/firebase_storage.dart';
 
 import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/sign_in.dart';
 import 'package:untitled1/pages/schedule.dart';
 import 'package:untitled1/pages/settings.dart';
-import 'package:untitled1/pages/subscription.dart';
 import 'package:untitled1/pages/invoice_builder.dart';
 import 'package:untitled1/pages/verify_business.dart';
 import 'package:untitled1/pages/chat_page.dart';
 import 'package:untitled1/pages/analytics_page.dart';
 import 'package:untitled1/pages/add_project.dart';
 import 'package:untitled1/pages/add_review.dart';
+import 'package:untitled1/pages/post_details_page.dart';
+
+import 'package:untitled1/widgets/cached_video_player.dart';
 
 
 class Profile extends StatefulWidget {
@@ -32,8 +33,8 @@ class Profile extends StatefulWidget {
   State<Profile> createState() => _ProfileState();
 }
 
-class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _ProfileState extends State<Profile> with TickerProviderStateMixin {
+  TabController? _tabController;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey<RefreshIndicatorState> _refreshIndicatorKey = GlobalKey<RefreshIndicatorState>();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -89,9 +90,13 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
 
   void _initTabController() {
     int tabCount = (_userRole == 'worker' || _isOwnProfile) ? 4 : 2;
+    
+    // Dispose old controller if it exists
+    _tabController?.dispose();
+    
     _tabController = TabController(length: tabCount, vsync: this);
-    _tabController.addListener(() {
-      if (!_tabController.indexIsChanging) {
+    _tabController!.addListener(() {
+      if (!_tabController!.indexIsChanging) {
         setState(() {});
       }
     });
@@ -140,7 +145,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           }
 
           _isIdVerified = data['isIdVerified'] ?? false;
-          _isBusinessVerified = data['isBusinessVerified'] ?? false;
+          _isBusinessVerified = data['isVerified'] ?? false;
           _isInsured = data['isInsured'] ?? false;
 
           _proLat = data['lat']?.toDouble();
@@ -200,274 +205,113 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
       }
 
       if (userPos != null) {
-        final url = Uri.parse(
-          'https://maps.googleapis.com/maps/api/distancematrix/json'
-          '?origins=${userPos.latitude},${userPos.longitude}'
-          '&destinations=$_proLat,$_proLng'
-          '&key=$_googleMapsApiKey'
+        double distanceInMeters = Geolocator.distanceBetween(
+          userPos.latitude, userPos.longitude, _proLat!, _proLng!
         );
-
-        final response = await http.get(url);
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          if (data['status'] == 'OK' &&
-              data['rows'].isNotEmpty &&
-              data['rows'][0]['elements'].isNotEmpty &&
-              data['rows'][0]['elements'][0]['status'] == 'OK') {
-
-            final distanceText = data['rows'][0]['elements'][0]['distance']['text'];
-
-            if (mounted) {
-              setState(() {
-                _distanceStr = distanceText;
-              });
+        if (mounted) {
+          setState(() {
+            if (distanceInMeters < 1000) {
+              _distanceStr = "${distanceInMeters.toStringAsFixed(0)}m";
+            } else {
+              _distanceStr = "${(distanceInMeters / 1000).toStringAsFixed(1)}km";
             }
-          } else {
-            _calculateStraightLineDistance(userPos);
-          }
-        } else {
-          _calculateStraightLineDistance(userPos);
+          });
         }
       }
     } catch (e) {
-      debugPrint("Distance calc error: $e");
+      debugPrint("Distance error: $e");
     }
   }
 
-  void _calculateStraightLineDistance(Position userPos) {
-    double distance = Geolocator.distanceBetween(
-      userPos.latitude, userPos.longitude, _proLat!, _proLng!
-    );
-
-    if (mounted) {
-      setState(() {
-        if (distance < 1000) {
-          _distanceStr = "${distance.toStringAsFixed(0)}m";
-        } else {
-          _distanceStr = "${(distance / 1000).toStringAsFixed(1)}km";
-        }
-      });
-    }
+  Future<List<Map<String, dynamic>>> _fetchSubcollection(String uid, String sub) async {
+    final snap = await _firestore.collection('users').doc(uid).collection(sub).get();
+    return snap.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
   }
 
   Future<void> _toggleFavorite() async {
     final currentUser = FirebaseAuth.instance.currentUser;
-    final targetUid = widget.userId;
-    if (currentUser == null || targetUid == null || _isGuest()) {
-      _showGuestDialog(context, _getLocalizedStrings(context));
-      return;
-    }
+    if (currentUser == null) return;
 
-    final favRef = _firestore.collection('users').doc(currentUser.uid).collection('favorites').doc(targetUid);
+    final targetUid = widget.userId;
+    if (targetUid == null) return;
 
     try {
+      final favRef = _firestore.collection('users').doc(currentUser.uid).collection('favorites').doc(targetUid);
       if (_isFavorite) {
         await favRef.delete();
-        if (mounted) setState(() => _isFavorite = false);
       } else {
         await favRef.set({
+          'addedAt': FieldValue.serverTimestamp(),
           'name': _userName,
           'profileImageUrl': _profileImageUrl,
           'professions': _userProfessions,
-          'town': _town,
-          'timestamp': FieldValue.serverTimestamp(),
         });
-        if (mounted) setState(() => _isFavorite = true);
       }
+      if (mounted) setState(() => _isFavorite = !_isFavorite);
     } catch (e) {
-      debugPrint("FAVORITE TOGGLE ERROR: $e");
+      debugPrint("Favorite error: $e");
     }
   }
 
-  Future<List<Map<String, dynamic>>> _fetchSubcollection(String uid, String subcollectionName) async {
-    try {
-      final snapshot = await _firestore.collection('users').doc(uid).collection(subcollectionName).orderBy('timestamp', descending: true).get();
-      return snapshot.docs.map((doc) {
-        final data = Map<String, dynamic>.from(doc.data());
-        data['id'] = doc.id;
-        return data;
-      }).toList();
-    } catch (e) {
-      debugPrint("Subcollection error ($subcollectionName): $e");
-      return [];
-    }
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    _authSubscription?.cancel();
-    super.dispose();
-  }
-
-  Map<String, String> _getLocalizedStrings(BuildContext context) {
-    final locale = Provider.of<LanguageProvider>(context, listen: false).locale.languageCode;
-    switch (locale) {
-      case 'he':
-        return {
-          'title': 'פרופיל',
-          'user_name': _userName.isNotEmpty ? _userName : 'שם משתמש',
-          'edit_profile': 'ערוך פרופיל',
-          'share_profile': 'שתף פרופיל',
-          'bio': _bio.isNotEmpty ? _bio : 'כאן יופיע התיאור האישי שלך...',
-          'bio_title': 'אודות',
-          'projects': 'פרויקטים',
-          'reviews': 'ביקורות',
-          'about': 'מידע',
-          'schedule': 'לוח זמנים',
-          'add_project': 'הוסף פרויקט',
-          'call': 'התקשר',
-          'message': 'הודעה',
-          'contact_info': 'מידע ליצירת קשר',
-          'no_reviews': 'אין עדיין ביקורות',
-          'no_projects': 'אין עדיין פרויקטים להצגה',
-          'guest_title': 'התחבר למערכת',
-          'guest_msg': 'פעולה זו דורשת התחברות לחשבון שלך.',
-          'login': 'התחבר',
-          'cancel': 'ביטול',
-          'report': 'דווח על משתמש',
-          'rating_hint': 'כתוב סיבה לדיווח...',
-          'add': 'הוסף',
-          'analytics': 'אנליטיקה',
-          'invoice_builder': 'בונה חשבוניות',
-          'verify_business': 'אימות עסק',
-          'business_tools': 'כלים לניהול עסק',
-          'verified_id': 'מזהה מאומת',
-          'verified_biz': 'עסק מאומת',
-          'insured': 'מבוטח',
-          'views': 'צפיות',
-          'rating': 'דירוג',
-          'write_review': 'כתוב ביקורת',
-          'edit_review': 'ערוך ביקורת',
-          'upgrade_worker': 'שדרג לחשבון עובד',
-          'upgrade_msg': 'האם אתה בטוח שברצונך לשדרג לחשבון עובד? תוכל להוסיף פרויקטים ולקבל ביקורות.',
-          'confirm': 'שדרג',
-        };
-      default:
-        return {
-          'title': 'Profile',
-          'user_name': _userName.isNotEmpty ? _userName : 'User Name',
-          'edit_profile': 'Edit Profile',
-          'share_profile': 'Share Profile',
-          'bio': _bio.isNotEmpty ? _bio : 'Your bio will appear here...',
-          'bio_title': 'Biography',
-          'projects': 'Projects',
-          'reviews': 'Reviews',
-          'about': 'About',
-          'schedule': 'Schedule',
-          'add_project': 'Add Project',
-          'call': 'Call',
-          'message': 'Message',
-          'contact_info': 'Contact Information',
-          'no_reviews': 'No reviews yet',
-          'no_projects': 'No projects to show yet',
-          'guest_title': 'Sign In Required',
-          'guest_msg': 'This action requires you to be signed in to your account.',
-          'login': 'Sign In',
-          'cancel': 'Cancel',
-          'report': 'Report User',
-          'rating_hint': 'Write reason for report...',
-          'add': 'Add',
-          'analytics': 'Analytics',
-          'invoice_builder': 'Invoice Builder',
-          'verify_business': 'Verify Business',
-          'business_tools': 'Business Tools',
-          'verified_id': 'ID Verified',
-          'verified_biz': 'Business Verified',
-          'insured': 'Insured',
-          'views': 'Views',
-          'rating': 'Rating',
-          'write_review': 'Write a Review',
-          'edit_review': 'Edit your Review',
-          'upgrade_worker': 'Upgrade to Worker',
-          'upgrade_msg': 'Are you sure you want to upgrade to a worker account? You will be able to add projects and receive reviews.',
-          'confirm': 'Upgrade',
-        };
-    }
+  bool _isGuest() {
+    final user = FirebaseAuth.instance.currentUser;
+    return user == null || user.isAnonymous;
   }
 
   void _showGuestDialog(BuildContext context, Map<String, String> strings) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(strings['guest_title']!, style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: Text(strings['guest_msg']!),
+        title: Text(strings['guest_title'] ?? "Login Required"),
+        content: Text(strings['guest_msg'] ?? "Please login to use this feature."),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text(strings['cancel']!)),
-          ElevatedButton(
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(strings['cancel'] ?? "Cancel")),
+          TextButton(
             onPressed: () {
               Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const SignInPage()));
+              Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const SignInPage()));
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1976D2), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-            child: Text(strings['login']!),
+            child: Text(strings['login'] ?? "Login")
           ),
         ],
       ),
     );
   }
 
-  bool _isGuest() => FirebaseAuth.instance.currentUser == null;
+  Future<void> _reportUser(Map<String, String> strings) async {
+    // Basic report logic
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Report User"),
+        content: const Text("Are you sure you want to report this user for inappropriate content or behavior?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          TextButton(
+            onPressed: () async {
+              await _firestore.collection('reports').add({
+                'reporterId': FirebaseAuth.instance.currentUser?.uid,
+                'reportedId': widget.userId,
+                'timestamp': FieldValue.serverTimestamp(),
+              });
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Report submitted successfully.")));
+            },
+            child: const Text("Report", style: TextStyle(color: Colors.red))
+          ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _addProject() async {
-    final strings = _getLocalizedStrings(context);
-    if (_isGuest()) {
-      _showGuestDialog(context, strings);
-      return;
-    }
-
     final result = await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const AddProjectPage()),
     );
-
     if (result == true) {
-      _fetchUserData(); // Refresh data to show new project
+      _fetchUserData();
     }
-  }
-
-  Future<void> _reportUser(Map<String, String> strings) async {
-    if (_isGuest()) {
-      _showGuestDialog(context, strings);
-      return;
-    }
-    final reasonController = TextEditingController();
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(strings['report']!, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-        content: TextField(
-          controller: reasonController,
-          decoration: InputDecoration(
-            hintText: strings['rating_hint'],
-            filled: true,
-            fillColor: Colors.grey[100],
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-          ),
-          maxLines: 3,
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text(strings['cancel']!)),
-          ElevatedButton(
-            onPressed: () async {
-              if (reasonController.text.trim().isEmpty) return;
-              await _firestore.collection('reports').add({
-                'reporterId': FirebaseAuth.instance.currentUser!.uid,
-                'targetId': widget.userId ?? FirebaseAuth.instance.currentUser!.uid,
-                'reason': reasonController.text.trim(),
-                'timestamp': FieldValue.serverTimestamp(),
-              });
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report submitted')));
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            child: const Text('Submit'),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _addReview(Map<String, String> strings) async {
@@ -476,14 +320,11 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
       return;
     }
 
-    final currentUser = FirebaseAuth.instance.currentUser;
     Map<String, dynamic>? existingReview;
-    
+    final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser != null) {
       try {
-        existingReview = _userReviews.firstWhere(
-          (r) => r['userId'] == currentUser.uid,
-        );
+        existingReview = _userReviews.firstWhere((r) => r['userId'] == currentUser.uid);
       } catch (_) {
         existingReview = null;
       }
@@ -666,7 +507,7 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           ),
         ),
         bottomNavigationBar: (!_isOwnProfile && _userRole == 'worker') ? _buildBottomBar(strings) : null,
-        floatingActionButton: (_isOwnProfile && _tabController.index == 0) ? FloatingActionButton.extended(
+        floatingActionButton: (_isOwnProfile && _tabController != null && _tabController!.index == 0) ? FloatingActionButton.extended(
           heroTag: 'profile_fab',
           onPressed: _addProject,
           backgroundColor: const Color(0xFF1976D2),
@@ -740,6 +581,11 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
     ];
   }
 
+  bool _isPathVideo(String url) {
+    final lowerUrl = url.toLowerCase();
+    return lowerUrl.contains('.mp4') || lowerUrl.contains('.mov') || lowerUrl.contains('.avi') || lowerUrl.contains('.mkv');
+  }
+
   Widget _buildProjectsGrid(Map<String, String> strings) {
     if (_projects.isEmpty && !_isOwnProfile) {
       return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.photo_library_outlined, size: 64, color: Colors.grey[200]), const SizedBox(height: 16), Text(strings['no_projects']!, style: TextStyle(color: Colors.grey[400]))]));
@@ -766,6 +612,9 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
           );
         }
         final project = _projects[canAdd ? index - 1 : index];
+        final String firstMedia = project['imageUrl'] ?? project['image'] ?? "";
+        final bool isVideo = _isPathVideo(firstMedia);
+
         return GestureDetector(
           onTap: () => _showProjectDetail(project),
           onLongPress: () => _confirmDeleteProject(project),
@@ -776,12 +625,16 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  CachedNetworkImage(
-                    imageUrl: project['imageUrl'] ?? project['image'] ?? "",
-                    fit: BoxFit.cover,
-                    placeholder: (context, url) => Container(color: Colors.grey[100]),
-                    errorWidget: (context, url, error) => const Icon(Icons.error),
-                  ),
+                  isVideo
+                    ? CachedVideoPlayer(url: firstMedia, play: false) // Use cached player
+                    : CachedNetworkImage(
+                      imageUrl: firstMedia,
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) => Container(color: Colors.grey[100]),
+                      errorWidget: (context, url, error) => const Icon(Icons.error),
+                    ),
+                  if (isVideo)
+                    const Center(child: Icon(Icons.play_circle_outline, color: Colors.white, size: 40)),
                   if ((project['imageUrls'] as List?) != null && (project['imageUrls'] as List).length > 1)
                     Positioned(
                       top: 12,
@@ -809,45 +662,14 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
   }
 
   void _showProjectDetail(Map<String, dynamic> project) {
-    final List<dynamic> images = project['imageUrls'] ?? [project['imageUrl'] ?? project['image'] ?? ""];
-    
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (images.length > 1)
-                SizedBox(
-                  height: 300,
-                  child: PageView.builder(
-                    itemCount: images.length,
-                    itemBuilder: (context, index) => ClipRRect(
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
-                      child: CachedNetworkImage(
-                        imageUrl: images[index], 
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  ),
-                )
-              else
-                ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
-                  child: CachedNetworkImage(
-                    imageUrl: images[0],
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              if (project['description'] != null)
-                Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(project['description'], style: const TextStyle(fontSize: 16, height: 1.5, color: Colors.black87)),
-                ),
-            ],
-          ),
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PostDetailsPage(
+          workerId: widget.userId ?? FirebaseAuth.instance.currentUser!.uid,
+          project: project,
+          workerName: _userName,
+          workerProfileImage: _profileImageUrl,
         ),
       ),
     );
@@ -1063,7 +885,13 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
                   _buildModernToolCard(Icons.description_outlined, strings['invoice_builder']!, Colors.teal, () {
                     Navigator.push(context, MaterialPageRoute(builder: (_) => InvoiceBuilderPage(workerName: _userName, workerPhone: _phoneNumber, workerEmail: _email)));
                   }),
-                  _buildModernToolCard(Icons.verified_user_outlined, strings['verify_business']!, Colors.deepOrange, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VerifyBusinessPage()))),
+                  if (!_isBusinessVerified)
+                    _buildModernToolCard(
+                      Icons.verified_user_outlined, 
+                      strings['verify_business']!, 
+                      Colors.deepOrange, 
+                      () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VerifyBusinessPage()))
+                    ),
                 ],
               )
             else
@@ -1159,6 +987,127 @@ class _ProfileState extends State<Profile> with SingleTickerProviderStateMixin {
         ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _tabController?.dispose();
+    _authSubscription?.cancel();
+    super.dispose();
+  }
+
+  Map<String, String> _getLocalizedStrings(BuildContext context) {
+    final locale = Provider.of<LanguageProvider>(context, listen: false).locale.languageCode;
+    switch (locale) {
+      case 'he':
+        return {
+          'title': 'פרופיל',
+          'user_name': _userName.isNotEmpty ? _userName : 'שם משתמש',
+          'edit_profile': 'ערוך פרופיל',
+          'projects': 'פרויקטים',
+          'reviews': 'ביקורות',
+          'schedule': 'לו"ז',
+          'about': 'אודות',
+          'bio_title': 'ביוגרפיה',
+          'bio': _bio.isNotEmpty ? _bio : 'אין תיאור זמין עדיין.',
+          'contact_info': 'מידע ליצירת קשר',
+          'call': 'התקשר',
+          'message': 'הודעה',
+          'share_profile': 'שתף פרופיל',
+          'write_review': 'כתוב ביקורת',
+          'edit_review': 'ערוך ביקורת',
+          'no_projects': 'אין פרויקטים להצגה.',
+          'no_reviews': 'אין ביקורות עדיין.',
+          'add': 'הוסף',
+          'add_project': 'הוסף פרויקט',
+          'verified_id': 'זהות מאומתת',
+          'verified_biz': 'עסק מאומת',
+          'insured': 'מבוטח',
+          'views': 'צפיות',
+          'rating': 'דירוג',
+          'upgrade_worker': 'שדרג לחשבון בעל מקצוע',
+          'upgrade_msg': 'האם ברצונך להפוך לבעל מקצוע? תוכל להציג את העבודות שלך ולקבל פניות מלקוחות.',
+          'confirm': 'אשר',
+          'cancel': 'ביטול',
+          'business_tools': 'כלי עבודה',
+          'analytics': 'אנליטיקה',
+          'invoice_builder': 'יוצר חשבוניות',
+          'verify_business': 'אמת עסק',
+          'change_business': 'עדכן פרטי עסק',
+        };
+      case 'ar':
+        return {
+          'title': 'الملف الشخصي',
+          'user_name': _userName.isNotEmpty ? _userName : 'اسم المستخدم',
+          'edit_profile': 'تعديل الملف الشخصي',
+          'projects': 'مشاريع',
+          'reviews': 'تقييمات',
+          'schedule': 'الجدول',
+          'about': 'حول',
+          'bio_title': 'السيرة الدراسية',
+          'bio': _bio.isNotEmpty ? _bio : 'لا يوجد وصف متاح بعد.',
+          'contact_info': 'معلومات الاتصال',
+          'call': 'اتصال',
+          'message': 'رسالة',
+          'share_profile': 'مشاركة الملف',
+          'write_review': 'أضف تقييم',
+          'edit_review': 'تعديل التقييم',
+          'no_projects': 'لا توجد مشاريع.',
+          'no_reviews': 'لا توجد تقييمات بعد.',
+          'add': 'إضافة',
+          'add_project': 'إضافة مشروع',
+          'verified_id': 'هوية موثقة',
+          'verified_biz': 'عمل موثق',
+          'insured': 'مؤمن عليه',
+          'views': 'مشاهدات',
+          'rating': 'تقييم',
+          'upgrade_worker': 'الترقية لحساب عامل',
+          'upgrade_msg': 'هل تريد الترقية إلى حساب عامل؟ ستتمكن من عرض مشاريعك واستقبال طلبات العملاء.',
+          'confirm': 'تأكيد',
+          'cancel': 'إلغاء',
+          'business_tools': 'أدوات العمل',
+          'analytics': 'التحليلات',
+          'invoice_builder': 'منشئ الفواتير',
+          'verify_business': 'توثيق العمل',
+          'change_business': 'تحديث بيانات العمل',
+        };
+      default:
+        return {
+          'title': 'Profile',
+          'user_name': _userName.isNotEmpty ? _userName : 'User Name',
+          'edit_profile': 'Edit Profile',
+          'projects': 'Projects',
+          'reviews': 'Reviews',
+          'schedule': 'Schedule',
+          'about': 'About',
+          'bio_title': 'Biography',
+          'bio': _bio.isNotEmpty ? _bio : 'No description available yet.',
+          'contact_info': 'Contact Information',
+          'call': 'Call',
+          'message': 'Message',
+          'share_profile': 'Share Profile',
+          'write_review': 'Write Review',
+          'edit_review': 'Edit Review',
+          'no_projects': 'No projects to show.',
+          'no_reviews': 'No reviews yet.',
+          'add': 'Add',
+          'add_project': 'Add Project',
+          'verified_id': 'Verified ID',
+          'verified_biz': 'Verified Biz',
+          'insured': 'Insured',
+          'views': 'Views',
+          'rating': 'Rating',
+          'upgrade_worker': 'Upgrade to Worker',
+          'upgrade_msg': 'Would you like to become a worker? You will be able to showcase your work and receive inquiries.',
+          'confirm': 'Confirm',
+          'cancel': 'Cancel',
+          'business_tools': 'Business Tools',
+          'analytics': 'Analytics',
+          'invoice_builder': 'Invoice Builder',
+          'verify_business': 'Verify Business',
+          'change_business': 'Update Business',
+        };
+    }
   }
 }
 

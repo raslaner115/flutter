@@ -222,13 +222,6 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadSettings();
   }
 
-  Future<void> _launchDeleteUrl() async {
-    final Uri url = Uri.parse('https://hire-hub-fe6c4.web.app/delete-account');
-    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-      debugPrint('Could not launch delete account URL');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final strings = _getLocalizedStrings(context);
@@ -380,12 +373,6 @@ class _SettingsPageState extends State<SettingsPage> {
                           () {
                             Navigator.push(context, MaterialPageRoute(builder: (_) => const TermsOfServicePage()));
                           },
-                        ),
-                        _buildGalaxyTile(
-                          Icons.person_remove_outlined,
-                          strings['delete_account']!,
-                          _launchDeleteUrl,
-                          color: Colors.red,
                         ),
                       ]),
                       const SizedBox(height: 16),
@@ -576,18 +563,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   onTap: () {
                     Navigator.push(context, CupertinoPageRoute(builder: (_) => const TermsOfServicePage()));
                   },
-                ),
-                CupertinoListTile(
-                  leading: const Icon(
-                    CupertinoIcons.person_badge_minus,
-                    color: CupertinoColors.destructiveRed,
-                  ),
-                  title: Text(
-                    strings['delete_account']!,
-                    style: const TextStyle(color: CupertinoColors.destructiveRed),
-                  ),
-                  trailing: const CupertinoListTileChevron(),
-                  onTap: _launchDeleteUrl,
                 ),
               ],
             ),

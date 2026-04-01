@@ -885,7 +885,6 @@ class _SchedulePageState extends State<SchedulePage> {
       children: [
         _buildOwnerControls(strings, isWorkingDay, onVacation, dateStr),
         const SizedBox(height: 20),
-        _buildNotesInput(strings),
         const SizedBox(height: 20),
         _buildRemindersList(strings),
         _buildAddReminderInput(strings),
@@ -893,46 +892,6 @@ class _SchedulePageState extends State<SchedulePage> {
     );
   }
 
-  Widget _buildNotesInput(Map<String, String> strings) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            strings['notes']!,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _notesController,
-            maxLines: 3,
-            onChanged: (v) => _saveNotes(),
-            decoration: InputDecoration(
-              hintText: strings['notes_hint'],
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade200),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade200),
-              ),
-              filled: true,
-              fillColor: const Color(0xFFF8FAFC),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildOwnerControls(
     Map<String, String> strings,

@@ -20,6 +20,7 @@ import 'package:http/http.dart' as http;
 import 'package:gal/gal.dart';
 
 import '../ptofile.dart';
+import '../widgets/cached_video_player.dart';
 
 class ChatPage extends StatefulWidget {
   final String receiverId;
@@ -290,7 +291,7 @@ class _ChatPageState extends State<ChatPage> {
               _selectedMessageIds.add(messageId);
             }
           });
-        } else if (type == 'file' || type == 'video' || type == 'image') {
+        } else if (type == 'file') {
           _openFile(message['url'] ?? "", message['fileName']);
         }
       },
@@ -336,13 +337,12 @@ class _ChatPageState extends State<ChatPage> {
                   ),
                 )
               else if (type == 'video')
-                const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.play_circle_fill, color: Colors.white, size: 30),
-                    SizedBox(width: 8),
-                    Text("Video", style: TextStyle(color: Colors.white)),
-                  ],
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: CachedVideoPlayer(
+                    url: message['url'] ?? "",
+                    play: false, // Don't autoplay in chat list
+                  ),
                 )
               else if (type == 'file')
                 Row(

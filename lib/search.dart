@@ -51,7 +51,7 @@ class _SearchPageState extends State<SearchPage> {
     super.initState();
     _loadProfessions();
     _getCurrentLocation(silent: true);
-    
+
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent + 50) {
         if (_hasMore && !_isFetchingMore && _showWorkerList) {
@@ -781,6 +781,13 @@ class _SearchPageState extends State<SearchPage> {
           displayReviewCount = w['reviewCount'] ?? 0;
         }
 
+        final createdAt = w['createdAt'] as Timestamp?;
+        bool isNew = false;
+        if (createdAt != null) {
+          final diff = DateTime.now().difference(createdAt.toDate());
+          isNew = diff.inDays <= 7;
+        }
+
         return Container(
           margin: const EdgeInsets.only(bottom: 16),
           decoration: BoxDecoration(
@@ -794,142 +801,162 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ],
           ),
-          child: ListTile(
-            contentPadding: const EdgeInsets.all(12),
-            leading: Hero(
-              tag: w['uid'],
-              child: CircleAvatar(
-                radius: 30,
-                backgroundImage:
-                    w['profileImageUrl'] != null &&
-                        w['profileImageUrl'].toString().isNotEmpty
-                    ? NetworkImage(w['profileImageUrl'])
-                    : null,
-                backgroundColor: const Color(0xFFF1F5F9),
-                child:
-                    w['profileImageUrl'] == null ||
-                        w['profileImageUrl'].toString().isEmpty
-                    ? Icon(Icons.person, color: themeColor)
-                    : null,
-              ),
-            ),
-            title: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Flexible(
-                  child: Text(
-                    w['name'] ?? 'Worker',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
-                    overflow: TextOverflow.ellipsis,
+          child: Stack(
+            children: [
+              ListTile(
+                contentPadding: const EdgeInsets.all(12),
+                leading: Hero(
+                  tag: w['uid'],
+                  child: CircleAvatar(
+                    radius: 30,
+                    backgroundImage:
+                        w['profileImageUrl'] != null &&
+                            w['profileImageUrl'].toString().isNotEmpty
+                        ? NetworkImage(w['profileImageUrl'])
+                        : null,
+                    backgroundColor: const Color(0xFFF1F5F9),
+                    child:
+                        w['profileImageUrl'] == null ||
+                            w['profileImageUrl'].toString().isEmpty
+                        ? Icon(Icons.person, color: themeColor)
+                        : null,
                   ),
                 ),
-                const SizedBox(width: 4),
-                if (isIdVerified) const Icon(Icons.assignment_ind, color: Colors.green, size: 14),
-                if (isBusinessVerified) const Padding(padding: EdgeInsets.only(left: 2), child: Icon(Icons.business_center, color: Colors.orange, size: 14)),
-                if (isInsured) const Padding(padding: EdgeInsets.only(left: 2), child: Icon(Icons.shield, color: Colors.blue, size: 14)),
-              ],
-            ),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 4),
-                Row(
+                title: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(
-                      Icons.location_on_rounded,
-                      size: 14,
-                      color: Colors.grey,
-                    ),
-                    const SizedBox(width: 4),
                     Flexible(
                       child: Text(
-                        w['town'] ?? '',
-                        style: const TextStyle(color: Colors.grey, fontSize: 13),
+                        w['name'] ?? 'Worker',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (distanceStr.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      Text(
-                        distanceStr,
-                        style: TextStyle(color: themeColor, fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                    ]
+                    const SizedBox(width: 4),
+                    if (isIdVerified) const Icon(Icons.assignment_ind, color: Colors.green, size: 14),
+                    if (isBusinessVerified) const Padding(padding: EdgeInsets.only(left: 2), child: Icon(Icons.business_center, color: Colors.orange, size: 14)),
+                    if (isInsured) const Padding(padding: EdgeInsets.only(left: 2), child: Icon(Icons.shield, color: Colors.blue, size: 14)),
                   ],
                 ),
-                if (w['professions'] != null && (w['professions'] as List).isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    (w['professions'] as List).join(', '),
-                    style: const TextStyle(color: Colors.grey, fontSize: 12),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ],
-            ),
-            trailing: SizedBox(
-              width: 90,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  if (isServiceSpecific)
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        locale == 'he' ? 'דירוג לשירות זה' : 'Rating for service',
-                        style: TextStyle(fontSize: 8, color: themeColor, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  const SizedBox(height: 1),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.amber.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 4),
+                    Row(
                       children: [
                         const Icon(
-                          Icons.star_rounded,
-                          color: Colors.amber,
+                          Icons.location_on_rounded,
                           size: 14,
+                          color: Colors.grey,
                         ),
-                        const SizedBox(width: 2),
-                        Text(
-                          displayRating.toStringAsFixed(1),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.amber,
-                            fontSize: 12,
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            w['town'] ?? '',
+                            style: const TextStyle(color: Colors.grey, fontSize: 13),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        if (distanceStr.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            distanceStr,
+                            style: TextStyle(color: themeColor, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ]
                       ],
                     ),
-                  ),
-                  if (displayReviewCount > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 1, right: 4),
-                      child: Text(
-                        "($displayReviewCount)",
-                        style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.w500),
+                    if (w['professions'] != null && (w['professions'] as List).isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        (w['professions'] as List).join(', '),
+                        style: const TextStyle(color: Colors.grey, fontSize: 12),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
+                    ],
+                  ],
+                ),
+                trailing: SizedBox(
+                  width: 90,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      if (isServiceSpecific)
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            locale == 'he' ? 'דירוג לשירות זה' : 'Rating for service',
+                            style: TextStyle(fontSize: 8, color: themeColor, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      const SizedBox(height: 1),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.star_rounded,
+                              color: Colors.amber,
+                              size: 14,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              displayRating.toStringAsFixed(1),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.amber,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1, right: 4),
+                        child: Text(
+                          "($displayReviewCount)",
+                          style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => Profile(userId: w['uid']),
+                  ),
+                ),
+              ),
+              if (isNew)
+                Positioned(
+                  top: 8,
+                  left: locale == 'he' ? null : 8,
+                  right: locale == 'he' ? 8 : null,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                ],
-              ),
-            ),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => Profile(userId: w['uid']),
-              ),
-            ),
+                    child: Text(
+                      locale == 'he' ? 'חדש' : 'NEW',
+                      style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+            ],
           ),
         );
       },

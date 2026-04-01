@@ -129,6 +129,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
       if (mounted) {
         Navigator.pop(context, true);
       }
+
     } catch (e) {
       debugPrint("Review upload error: $e");
       if (mounted) {

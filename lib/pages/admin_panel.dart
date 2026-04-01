@@ -20,6 +20,75 @@ class AdminPanel extends StatefulWidget {
 class _AdminPanelState extends State<AdminPanel> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  final Map<String, IconData> _availableIcons = {
+    'plumbing': Icons.plumbing,
+    'electrical_services': Icons.electrical_services,
+    'carpenter': Icons.carpenter,
+    'format_paint': Icons.format_paint,
+    'vpn_key': Icons.vpn_key,
+    'park': Icons.park,
+    'ac_unit': Icons.ac_unit,
+    'cleaning_services': Icons.cleaning_services,
+    'build': Icons.build,
+    'handyman': Icons.handyman,
+    'foundation': Icons.foundation,
+    'grid_view': Icons.grid_view,
+    'settings': Icons.settings,
+    'home_repair_service': Icons.home_repair_service,
+    'computer': Icons.computer,
+    'content_cut': Icons.content_cut,
+    'checkroom': Icons.checkroom,
+    'local_shipping': Icons.local_shipping,
+    'pest_control': Icons.pest_control,
+    'solar_power': Icons.solar_power,
+    'chair': Icons.chair,
+    'format_shapes': Icons.format_shapes,
+    'architecture': Icons.architecture,
+    'school': Icons.school,
+    'child_care': Icons.child_care,
+    'photo_camera': Icons.photo_camera,
+    'music_note': Icons.music_note,
+    'face': Icons.face,
+    'medical_services': Icons.medical_services,
+    'self_improvement': Icons.self_improvement,
+    'window': Icons.window,
+    'pool': Icons.pool,
+    'fitness_center': Icons.fitness_center,
+    'pets': Icons.pets,
+    'home': Icons.home,
+    'waves': Icons.waves,
+    'dry_cleaning': Icons.dry_cleaning,
+    'event': Icons.event,
+    'restaurant': Icons.restaurant,
+    'security': Icons.security,
+    'delivery_dining': Icons.delivery_dining,
+    'local_car_wash': Icons.local_car_wash,
+    'spa': Icons.spa,
+    'restaurant_menu': Icons.restaurant_menu,
+    'flight': Icons.flight,
+    'real_estate_agent': Icons.real_estate_agent,
+    'gavel': Icons.gavel,
+    'calculate': Icons.calculate,
+    'translate': Icons.translate,
+    'format_color_fill': Icons.format_color_fill,
+    'square_foot': Icons.square_foot,
+    'videocam': Icons.videocam,
+    'public': Icons.public,
+    'psychology': Icons.psychology,
+    'add_a_photo': Icons.add_a_photo,
+    'flight_takeoff': Icons.flight_takeoff,
+    'piano': Icons.piano,
+    'language': Icons.language,
+    'functions': Icons.functions,
+    'science': Icons.science,
+    'biotech': Icons.biotech,
+    'eco': Icons.eco,
+    'history_edu': Icons.history_edu,
+    'palette': Icons.palette,
+    'pedal_bike': Icons.pedal_bike,
+    'engineering': Icons.engineering,
+  };
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -568,25 +637,103 @@ class _AdminPanelState extends State<AdminPanel> {
   }
 
   void _addCategoryDialog(BuildContext context) {
-    final controller = TextEditingController();
+    final enController = TextEditingController();
+    final heController = TextEditingController();
+    final arController = TextEditingController();
+    final ruController = TextEditingController();
+    final amController = TextEditingController();
+    String selectedIcon = 'engineering';
+    String selectedColor = '#1976D2';
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add Category'),
-        content: TextField(controller: controller, decoration: const InputDecoration(hintText: 'Enter profession name')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () async {
-              if (controller.text.isEmpty) return;
-              await _firestore.collection('metadata').doc('professions').update({
-                'list': FieldValue.arrayUnion([controller.text.trim()])
-              });
-              if (context.mounted) Navigator.pop(context);
-            },
-            child: const Text('Add'),
-          )
-        ],
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Add New Profession'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: enController, decoration: const InputDecoration(labelText: 'Name (English)')),
+                TextField(controller: heController, decoration: const InputDecoration(labelText: 'Name (Hebrew)')),
+                TextField(controller: arController, decoration: const InputDecoration(labelText: 'Name (Arabic)')),
+                TextField(controller: ruController, decoration: const InputDecoration(labelText: 'Name (Russian)')),
+                TextField(controller: amController, decoration: const InputDecoration(labelText: 'Name (Amharic)')),
+                const SizedBox(height: 20),
+                const Text('Select Icon:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 150,
+                  width: double.maxFinite,
+                  child: GridView.builder(
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 5),
+                    itemCount: _availableIcons.length,
+                    itemBuilder: (context, index) {
+                      String key = _availableIcons.keys.elementAt(index);
+                      bool isSelected = selectedIcon == key;
+                      return IconButton(
+                        icon: Icon(_availableIcons[key], color: isSelected ? Colors.red[900] : Colors.grey),
+                        onPressed: () => setDialogState(() => selectedIcon = key),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text('Select Color:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 10,
+                  children: ['#1976D2', '#D32F2F', '#388E3C', '#FBC02D', '#7B1FA2', '#E64A19', '#455A64'].map((color) {
+                    bool isSelected = selectedColor == color;
+                    return GestureDetector(
+                      onTap: () => setDialogState(() => selectedColor = color),
+                      child: Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: Color(int.parse(color.replaceFirst('#', '0xFF'))),
+                          shape: BoxShape.circle,
+                          border: isSelected ? Border.all(color: Colors.black, width: 2) : null,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () async {
+                if (enController.text.isEmpty) return;
+                
+                final String docId = enController.text.trim().toLowerCase().replaceAll(' ', '_');
+                final professionData = {
+                  'id': docId,
+                  'en': enController.text.trim(),
+                  'he': heController.text.trim(),
+                  'ar': arController.text.trim(),
+                  'ru': ruController.text.trim(),
+                  'am': amController.text.trim(),
+                  'logo': selectedIcon,
+                  'color': selectedColor,
+                  'updatedAt': FieldValue.serverTimestamp(),
+                };
+
+                await _firestore.collection('professions').doc(docId).set(professionData);
+                
+                await _firestore.collection('metadata').doc('professions').update({
+                  'list': FieldValue.arrayUnion([enController.text.trim()]),
+                  'items': FieldValue.arrayUnion([professionData]),
+                });
+
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: const Text('Add'),
+            )
+          ],
+        ),
       ),
     );
   }

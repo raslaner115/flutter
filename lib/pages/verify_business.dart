@@ -27,11 +27,37 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
   
   String _dealerType = 'exempt'; // 'exempt' (פטור) or 'licensed' (מורשה)
   bool _isUploading = false;
+  bool _isLoadingStatus = true;
+  String? _currentStatus; // 'pending', 'verified', 'rejected', or null
+  
   bool _acceptedTerms = false;
   bool _acceptedDataPrivacy = false;
   bool _isLegalDeclarationSigned = false;
   
   final ImagePicker _picker = ImagePicker();
+
+  @override
+  void initState() {
+    super.initState();
+    _checkCurrentStatus();
+  }
+
+  Future<void> _checkCurrentStatus() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('verifications').doc(user.uid).get();
+        if (doc.exists && mounted) {
+          setState(() {
+            _currentStatus = doc.data()?['status'];
+          });
+        }
+      } catch (e) {
+        debugPrint("Status check error: $e");
+      }
+    }
+    if (mounted) setState(() => _isLoadingStatus = false);
+  }
 
   @override
   void dispose() {
@@ -181,7 +207,9 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
           foregroundColor: Colors.white,
           elevation: 0,
         ),
-        body: _isUploading 
+        body: _isLoadingStatus 
+          ? const Center(child: CircularProgressIndicator())
+          : _isUploading 
           ? const Center(child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -190,6 +218,8 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
                 Text("מעלה מסמכים ומאמת...", style: TextStyle(fontWeight: FontWeight.bold)),
               ],
             ))
+          : _currentStatus == 'pending' || _currentStatus == 'verified'
+          ? _buildStatusScreen(isHe)
           : SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: Form(
@@ -197,6 +227,8 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    if (_currentStatus == 'rejected')
+                      _buildRejectedNotice(isHe),
                     _buildStepHeader(1, isHe ? 'פרטי העסק והרישום' : 'Business & Registration Details'),
                     const SizedBox(height: 16),
                     TextFormField(
@@ -301,6 +333,82 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
                 ),
               ),
             ),
+      ),
+    );
+  }
+
+  Widget _buildStatusScreen(bool isHe) {
+    bool isPending = _currentStatus == 'pending';
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isPending ? Icons.hourglass_bottom_rounded : Icons.verified_rounded,
+              size: 80,
+              color: isPending ? Colors.orange : Colors.green,
+            ),
+            const SizedBox(height: 24),
+            Text(
+              isPending 
+                ? (isHe ? 'הבקשה בבדיקה' : 'Verification Pending')
+                : (isHe ? 'העסק מאומת' : 'Business Verified'),
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              isPending
+                ? (isHe 
+                    ? 'שלחת כבר בקשת אימות. הצוות שלנו בודק את המסמכים שלך. בדרך כלל זה לוקח עד 48 שעות.' 
+                    : 'You have already submitted a verification request. Our team is reviewing your documents. This usually takes up to 48 hours.')
+                : (isHe 
+                    ? 'מזל טוב! העסק שלך מאומת במערכת.' 
+                    : 'Congratulations! Your business is verified in our system.'),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[600], height: 1.5),
+            ),
+            const SizedBox(height: 40),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                ),
+                child: Text(isHe ? 'חזור לפרופיל' : 'Back to Profile'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRejectedNotice(bool isHe) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.red[50],
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.red[100]!),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: Colors.red),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              isHe 
+                ? 'בקשת האימות הקודמת שלך נדחתה. אנא בדוק את המסמכים ושלח שוב.' 
+                : 'Your previous verification request was rejected. Please check your documents and resubmit.',
+              style: TextStyle(color: Colors.red[900], fontSize: 13, fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -7,6 +7,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/edit_profile.dart';
 import 'package:untitled1/services/phone_auth_page.dart';
+import 'package:untitled1/pages/verify_business.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class AccountSettingsPage extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -19,12 +21,14 @@ class AccountSettingsPage extends StatefulWidget {
 class _AccountSettingsPageState extends State<AccountSettingsPage> {
   late String _currentPhone;
   String _userRole = "customer";
+  bool _isBusinessVerified = false;
 
   @override
   void initState() {
     super.initState();
     _currentPhone = widget.userData['phone'] ?? 'N/A';
     _userRole = widget.userData['role'] ?? "customer";
+    _isBusinessVerified = widget.userData['isVerified'] ?? false;
   }
 
   Map<String, String> _getLocalizedStrings(
@@ -50,6 +54,8 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
           'admin': 'מנהל',
           'change_phone': 'שנה מספר טלפון',
           'phone_updated': 'מספר הטלפון עודכן בהצלחה',
+          'delete_account': 'מחיקת חשבון',
+          'change_business': 'עדכן פרטי עסק',
         };
       case 'ar':
         return {
@@ -65,6 +71,8 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
           'admin': 'مسؤول',
           'change_phone': 'تغيير رقم الهاتف',
           'phone_updated': 'تم تحديث رقم الهاتف بنجاح',
+          'delete_account': 'حذف الحساب',
+          'change_business': 'تحديث بيانات العمل',
         };
       default:
         return {
@@ -80,6 +88,8 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
           'admin': 'Admin',
           'change_phone': 'Change Phone Number',
           'phone_updated': 'Phone number updated successfully',
+          'delete_account': 'Delete Account',
+          'change_business': 'Update Business Info',
         };
     }
   }
@@ -127,6 +137,13 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _launchDeleteUrl() async {
+    final Uri url = Uri.parse('https://hire-hub-fe6c4.web.app/delete-account');
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      debugPrint('Could not launch delete account URL');
+    }
   }
 
   @override
@@ -186,6 +203,28 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                     title: Text(strings['change_phone']!),
                     trailing: const CupertinoListTileChevron(),
                     onTap: _onChangePhone,
+                  ),
+                  if (_userRole == 'worker' && _isBusinessVerified)
+                  CupertinoListTile(
+                    leading: const Icon(
+                      CupertinoIcons.briefcase,
+                      color: CupertinoColors.systemIndigo,
+                    ),
+                    title: Text(strings['change_business']!),
+                    trailing: const CupertinoListTileChevron(),
+                    onTap: () => Navigator.push(context, CupertinoPageRoute(builder: (_) => const VerifyBusinessPage())),
+                  ),
+                  CupertinoListTile(
+                    leading: const Icon(
+                      CupertinoIcons.person_badge_minus,
+                      color: CupertinoColors.destructiveRed,
+                    ),
+                    title: Text(
+                      strings['delete_account']!,
+                      style: const TextStyle(color: CupertinoColors.destructiveRed),
+                    ),
+                    trailing: const CupertinoListTileChevron(),
+                    onTap: _launchDeleteUrl,
                   ),
                 ],
               ),
@@ -250,6 +289,21 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                 strings['change_phone']!,
                 _onChangePhone,
               ),
+              if (_userRole == 'worker' && _isBusinessVerified) ...[
+                const Divider(height: 1, indent: 50),
+                _buildTile(
+                  Icons.business_center_outlined,
+                  strings['change_business']!,
+                  () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VerifyBusinessPage())),
+                ),
+              ],
+              const Divider(height: 1, indent: 50),
+              _buildTile(
+                Icons.person_remove_outlined,
+                strings['delete_account']!,
+                _launchDeleteUrl,
+                color: Colors.red,
+              ),
             ]),
             const SizedBox(height: 24),
             Padding(
@@ -300,10 +354,16 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
     );
   }
 
-  Widget _buildTile(IconData icon, String title, VoidCallback onTap) {
+  Widget _buildTile(IconData icon, String title, VoidCallback onTap, {Color? color}) {
     return ListTile(
-      leading: Icon(icon, color: const Color(0xFF1976D2)),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
+      leading: Icon(icon, color: color ?? const Color(0xFF1976D2)),
+      title: Text(
+        title, 
+        style: TextStyle(
+          fontWeight: FontWeight.w500,
+          color: color,
+        )
+      ),
       trailing: const Icon(Icons.chevron_right, size: 20),
       onTap: onTap,
     );

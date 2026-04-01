@@ -56,7 +56,6 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
     }
 
     try {
-      // Admins are also in the 'users' collection with role 'admin'
       final doc = await _firestore.collection('users').doc(user.uid).get();
       if (doc.exists && mounted) {
         final data = doc.data() as Map<String, dynamic>;

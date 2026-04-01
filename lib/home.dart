@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:untitled1/ptofile.dart';
 import 'package:untitled1/pages/admin_profile.dart';
 import 'package:untitled1/services/language_provider.dart';
@@ -26,20 +27,48 @@ class _HomePageState extends State<HomePage> {
   String? _lastPopupId;
 
   List<Map<String, dynamic>> _topRatedWorkers = [];
+  List<Map<String, dynamic>> _newWorkers = [];
   List<Map<String, dynamic>> _popularCategories = [];
   bool _isTopRatedLoading = true;
+  bool _isNewWorkersLoading = true;
   bool _isPopularLoading = true;
   String? _cachedName;
   String? _profileImageUrl;
   String _userRole = "customer";
+  Position? _currentPosition;
 
   @override
   void initState() {
     super.initState();
+    _initData();
+    _listenForPopups();
+  }
+
+  Future<void> _initData() async {
+    await _getCurrentLocation();
     _fetchTopRatedWorkers();
+    _fetchNewWorkers();
     _fetchCurrentUserName();
     _fetchPopularCategories();
-    _listenForPopups();
+  }
+
+  Future<void> _getCurrentLocation() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return;
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) return;
+      }
+      
+      if (permission == LocationPermission.deniedForever) return;
+
+      _currentPosition = await Geolocator.getCurrentPosition();
+    } catch (e) {
+      debugPrint("Location error: $e");
+    }
   }
 
   @override
@@ -234,14 +263,9 @@ class _HomePageState extends State<HomePage> {
       final snapshot = await _firestore.collection('users')
           .where('role', isEqualTo: 'worker')
           .orderBy('avgRating', descending: true)
-          .limit(10)
+          .limit(30) // Fetch more to filter locally
           .get();
       
-      if (snapshot.docs.isEmpty) {
-        await _fetchAnyWorkers();
-        return;
-      }
-
       final workers = snapshot.docs.map((doc) {
         var userData = doc.data();
         userData['uid'] = doc.id;
@@ -250,25 +274,49 @@ class _HomePageState extends State<HomePage> {
         return userData;
       }).toList();
 
+      final filtered = _filterByProximity(workers);
+
       if (mounted) {
         setState(() {
-          _topRatedWorkers = workers;
+          _topRatedWorkers = filtered.take(10).toList();
           _isTopRatedLoading = false;
         });
       }
     } catch (e) {
       debugPrint("HOME OPTIMIZED FETCH ERROR: $e");
-      await _fetchAnyWorkers();
+      if (mounted) setState(() => _isTopRatedLoading = false);
     }
   }
 
-  Future<void> _fetchAnyWorkers() async {
+  List<Map<String, dynamic>> _filterByProximity(List<Map<String, dynamic>> workers) {
+    if (_currentPosition == null) return workers;
+
+    return workers.where((w) {
+      if (w['lat'] == null || w['lng'] == null) return false;
+      
+      double distanceInMeters = Geolocator.distanceBetween(
+        _currentPosition!.latitude, 
+        _currentPosition!.longitude, 
+        w['lat'].toDouble(), 
+        w['lng'].toDouble()
+      );
+      
+      double radiusInKm = (w['serviceRadius'] ?? 20.0).toDouble();
+      return (distanceInMeters / 1000) <= radiusInKm;
+    }).toList();
+  }
+
+  Future<void> _fetchNewWorkers() async {
+    if (!mounted) return;
+    setState(() => _isNewWorkersLoading = true);
+
     try {
       final snapshot = await _firestore.collection('users')
           .where('role', isEqualTo: 'worker')
-          .limit(10)
+          .orderBy('createdAt', descending: true)
+          .limit(7)
           .get();
-      
+
       final workers = snapshot.docs.map((doc) {
         var userData = doc.data();
         userData['uid'] = doc.id;
@@ -279,13 +327,13 @@ class _HomePageState extends State<HomePage> {
 
       if (mounted) {
         setState(() {
-          _topRatedWorkers = workers;
-          _isTopRatedLoading = false;
+          _newWorkers = workers;
+          _isNewWorkersLoading = false;
         });
       }
     } catch (e) {
-      debugPrint("HOME FALLBACK FETCH ERROR: $e");
-      if (mounted) setState(() => _isTopRatedLoading = false);
+      debugPrint("Fetch new workers error: $e");
+      if (mounted) setState(() => _isNewWorkersLoading = false);
     }
   }
 
@@ -300,9 +348,27 @@ class _HomePageState extends State<HomePage> {
           'search_hint': 'חפש מקצוען (למשל: אינסטלטור)...',
           'categories': 'קטגוריות פופולריות',
           'see_all': 'הכל',
-          'top_rated': 'מקצוענים מובילים בשבילך',
+          'top_rated': 'מקצוענים מובילך בשבילך',
+          'new_team': 'חדש בצוות HireHub',
           'view_all': 'ראה עוד',
           'broadcast_title': 'הודעת מערכת',
+          'new_tag': 'חדש',
+          'no_reviews': 'אין ביקורות',
+        };
+      case 'ar':
+        return {
+          'welcome': 'مرحباً،',
+          'guest': 'ضيف',
+          'find_pros': 'ما هي الخدمة التي تحتاجها اليوم؟',
+          'search_hint': 'ابحث عن محترف (مثلاً: سباك)...',
+          'categories': 'الفئات الشائعة',
+          'see_all': 'الكل',
+          'top_rated': 'المحترفون الأعلى تقييماً',
+          'new_team': 'جديد في فريق HireHub',
+          'view_all': 'عرض الكل',
+          'broadcast_title': 'بلاغ النظام',
+          'new_tag': 'جديد',
+          'no_reviews': 'لا توجد تقييمات',
         };
       default:
         return {
@@ -313,8 +379,11 @@ class _HomePageState extends State<HomePage> {
           'categories': 'Popular Categories',
           'see_all': 'See all',
           'top_rated': 'Top Rated Professionals',
+          'new_team': 'New to HireHub Team',
           'view_all': 'View all',
           'broadcast_title': 'System Broadcast',
+          'new_tag': 'NEW',
+          'no_reviews': 'No reviews',
         };
     }
   }
@@ -333,9 +402,7 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: const Color(0xFFF8FAFC),
         body: RefreshIndicator(
           onRefresh: () async {
-            await _fetchTopRatedWorkers();
-            await _fetchCurrentUserName();
-            await _fetchPopularCategories();
+            await _initData();
           },
           child: CustomScrollView(
             slivers: [
@@ -348,6 +415,8 @@ class _HomePageState extends State<HomePage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildCategories(context, localized, theme),
+                      const SizedBox(height: 8),
+                      _buildNewToTeamSection(context, localized, theme),
                       const SizedBox(height: 8),
                       _buildTopRatedSection(context, localized, theme),
                       const SizedBox(height: 32),
@@ -663,6 +732,8 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+
+
   Widget _buildTopRatedSection(BuildContext context, Map<String, dynamic> strings, ThemeData theme) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -693,84 +764,164 @@ class _HomePageState extends State<HomePage> {
                 itemBuilder: (context, index) => _buildWorkerSkeleton(),
               )
             : _topRatedWorkers.isEmpty
-              ? const Center(child: Padding(padding: EdgeInsets.all(32), child: Text("No pros found")))
+              ? const Center(child: Padding(padding: EdgeInsets.all(32), child: Text("No pros found nearby")))
               : ListView.builder(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: _topRatedWorkers.length,
                   itemBuilder: (context, index) {
                     final worker = _topRatedWorkers[index];
-                    return GestureDetector(
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => Profile(userId: worker['uid']))),
-                      child: Container(
-                        width: 160,
-                        margin: const EdgeInsets.symmetric(horizontal: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            ClipRRect(
-                              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                              child: (worker['profileImageUrl'] != null && worker['profileImageUrl'].toString().isNotEmpty)
-                                ? CachedNetworkImage(
-                                    imageUrl: worker['profileImageUrl'],
-                                    height: 110,
-                                    width: 160,
-                                    fit: BoxFit.cover,
-                                    placeholder: (context, url) => Container(color: const Color(0xFFE2E8F0)),
-                                    errorWidget: (context, url, error) => const Icon(Icons.error),
-                                  )
-                                : Container(height: 110, width: 160, color: const Color(0xFFE2E8F0), child: const Icon(Icons.person, size: 40, color: Colors.white)),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    worker['name'] ?? 'Worker',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E293B)),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    (worker['professions'] as List?)?.join(', ') ?? 'Service',
-                                    style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    children: [
-                                      const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        worker['avgRating'].toStringAsFixed(1),
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF1E293B)),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        "(${worker['reviewCount']})",
-                                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
+                    return _buildWorkerCard(worker, null, strings);
                   },
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _buildNewToTeamSection(BuildContext context, Map<String, dynamic> strings, ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+          child: Text(
+            strings['new_team'],
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+          ),
+        ),
+        SizedBox(
+          height: 220,
+          child: _isNewWorkersLoading
+              ? ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: 5,
+            itemBuilder: (context, index) => _buildWorkerSkeleton(),
+          )
+              : _newWorkers.isEmpty
+              ? const SizedBox.shrink()
+              : ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: _newWorkers.length,
+            itemBuilder: (context, index) {
+              final worker = _newWorkers[index];
+              final createdAt = worker['createdAt'] as Timestamp?;
+              bool isNew = false;
+              if (createdAt != null) {
+                final diff = DateTime.now().difference(createdAt.toDate());
+                isNew = diff.inDays <= 7;
+              }
+
+              return _buildWorkerCard(worker, isNew ? strings['new_tag'] : null, strings);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWorkerCard(Map<String, dynamic> worker, String? tag, Map<String, dynamic> strings) {
+    return GestureDetector(
+      onTap: () {
+        if (worker['role'] == 'admin') {
+          Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminProfile()));
+        } else {
+          Navigator.push(context, MaterialPageRoute(builder: (context) => Profile(userId: worker['uid'])));
+        }
+      },
+      child: Container(
+        width: 160,
+        margin: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+        ),
+        child: Stack(
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                  child: (worker['profileImageUrl'] != null && worker['profileImageUrl'].toString().isNotEmpty)
+                    ? CachedNetworkImage(
+                        imageUrl: worker['profileImageUrl'],
+                        height: 110,
+                        width: 160,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) => Container(color: const Color(0xFFE2E8F0)),
+                        errorWidget: (context, url, error) => const Icon(Icons.error),
+                      )
+                    : Container(height: 110, width: 160, color: const Color(0xFFE2E8F0), child: const Icon(Icons.person, size: 40, color: Colors.white)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        worker['name'] ?? 'Worker',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E293B)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        (worker['professions'] as List?)?.join(', ') ?? 'Service',
+                        style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          if ((worker['reviewCount'] ?? 0) > 0) ...[
+                            const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
+                            const SizedBox(width: 4),
+                            Text(
+                              worker['avgRating'].toStringAsFixed(1),
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF1E293B)),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              "(${worker['reviewCount']})",
+                              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                            ),
+                          ] else ...[
+                            Text(
+                              strings['no_reviews'],
+                              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontStyle: FontStyle.italic),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (tag != null)
+              Positioned(
+                top: 8,
+                left: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    tag,
+                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 

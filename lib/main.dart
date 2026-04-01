@@ -17,13 +17,15 @@ import 'package:untitled1/widgets/splash_screen.dart';
 import 'package:untitled1/pages/inbox_page.dart';
 import 'package:untitled1/pages/chat_page.dart';
 import 'package:untitled1/services/notification_service.dart';
+import 'package:untitled1/sign_in.dart';
 import 'services/firebase_options.dart';
 
 void main() async {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  
+  // Preserve native splash while initializing Firebase and other services.
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
   
-  // Only hide the navigation bar and status bar on mobile for a full-screen experience
   if (!kIsWeb) {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
@@ -36,13 +38,11 @@ void main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
     
-    // Enable Firestore persistence
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
       cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
     );
     
-    // Initialize notifications
     await NotificationService.init().timeout(
       const Duration(seconds: 5),
       onTimeout: () => debugPrint("Notification initialization timed out"),
@@ -64,7 +64,7 @@ void main() async {
     ),
   );
   
-  // Remove the native splash screen
+  // Native splash is removed once the Flutter app is ready to take over.
   FlutterNativeSplash.remove();
 }
 
@@ -89,7 +89,6 @@ class _MyAppState extends State<MyApp> {
   void initState() {
     super.initState();
     if (widget.isFirebaseInitialized) {
-      // Listen for notification taps
       NotificationService.selectNotificationStream.stream.listen((String? payload) {
         if (payload != null && payload.isNotEmpty) {
           try {
@@ -185,6 +184,8 @@ class _ErrorScreen extends StatelessWidget {
   }
 }
 
+/// AuthWrapper manages the navigation state based on Firebase Authentication changes.
+/// It acts as the gatekeeper for the application.
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
 
@@ -193,18 +194,22 @@ class AuthWrapper extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
+        // 1. Loading State: Display custom SplashScreen while Firebase is checking auth status.
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const SplashScreen(navigateToSignIn: true);
+          return const SplashScreen();
         }
 
         final user = snapshot.data;
+        
+        // 2. Authenticated State: Navigate to the Home Page.
         if (user != null) {
           NotificationService.startListening();
           return const MyHomePage();
         }
 
+        // 3. Unauthenticated State: Navigate to the Sign In Page.
         NotificationService.stopListening();
-        return const SplashScreen(navigateToSignIn: true);
+        return const SignInPage();
       },
     );
   }
@@ -248,12 +253,15 @@ class _MyHomePageState extends State<MyHomePage> {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       try {
-        final doc = await FirebaseFirestore.instance.collection('admins').doc(user.uid).get();
+        final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
         if (mounted && doc.exists) {
-          setState(() {
-            _isAdmin = true;
-            _pages[4] = const AdminProfile();
-          });
+          final data = doc.data() as Map<String, dynamic>;
+          if (data['role'] == 'admin') {
+            setState(() {
+              _isAdmin = true;
+              _pages[4] = const AdminProfile();
+            });
+          }
         }
       } catch (e) {
         debugPrint("Admin check error: $e");
