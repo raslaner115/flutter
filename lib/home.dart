@@ -10,9 +10,11 @@ import 'package:untitled1/pages/admin_profile.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/search.dart';
 import 'package:untitled1/pages/notifications.dart';
+import 'package:untitled1/pages/location_manager_page.dart';
 import 'package:untitled1/widgets/skeleton.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:untitled1/services/location_context_service.dart';
 import 'dart:async';
 
 class HomePage extends StatefulWidget {
@@ -35,7 +37,7 @@ class _HomePageState extends State<HomePage> {
   String? _cachedName;
   String? _profileImageUrl;
   String _userRole = "customer";
-  Position? _currentPosition;
+  AppLocation? _currentPosition;
 
   @override
   void initState() {
@@ -54,20 +56,22 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _getCurrentLocation() async {
     try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) return;
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) return;
-      }
-      
-      if (permission == LocationPermission.deniedForever) return;
-
-      _currentPosition = await Geolocator.getCurrentPosition();
+      _currentPosition = await LocationContextService.getActiveLocation();
     } catch (e) {
       debugPrint("Location error: $e");
+    }
+  }
+
+  Future<void> _openLocationManager() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const LocationManagerPage()),
+    );
+
+    if (changed == true) {
+      await _getCurrentLocation();
+      await _fetchTopRatedWorkers();
+      if (mounted) setState(() {});
     }
   }
 
@@ -85,22 +89,22 @@ class _HomePageState extends State<HomePage> {
         .limit(1)
         .snapshots()
         .listen((snapshot) {
-      if (snapshot.docs.isNotEmpty) {
-        final doc = snapshot.docs.first;
-        final data = doc.data();
-        final id = doc.id;
+          if (snapshot.docs.isNotEmpty) {
+            final doc = snapshot.docs.first;
+            final data = doc.data();
+            final id = doc.id;
 
-        // Only show if it's a new popup and from the last 24 hours
-        final timestamp = data['timestamp'] as Timestamp?;
-        if (timestamp != null) {
-          final diff = DateTime.now().difference(timestamp.toDate());
-          if (diff.inHours < 24 && _lastPopupId != id) {
-            _lastPopupId = id;
-            _showAdPopup(data);
+            // Only show if it's a new popup and from the last 24 hours
+            final timestamp = data['timestamp'] as Timestamp?;
+            if (timestamp != null) {
+              final diff = DateTime.now().difference(timestamp.toDate());
+              if (diff.inHours < 24 && _lastPopupId != id) {
+                _lastPopupId = id;
+                _showAdPopup(data);
+              }
+            }
           }
-        }
-      }
-    });
+        });
   }
 
   void _showAdPopup(Map<String, dynamic> data) {
@@ -113,7 +117,9 @@ class _HomePageState extends State<HomePage> {
           children: [
             if (data['imageUrl'] != null)
               ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20),
+                ),
                 child: CachedNetworkImage(
                   imageUrl: data['imageUrl'],
                   height: 200,
@@ -127,7 +133,10 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   Text(
                     data['title'] ?? 'Announcement',
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 12),
@@ -145,13 +154,16 @@ class _HomePageState extends State<HomePage> {
                           child: const Text('Close'),
                         ),
                       ),
-                      if (data['link'] != null && data['link'].toString().isNotEmpty)
+                      if (data['link'] != null &&
+                          data['link'].toString().isNotEmpty)
                         Expanded(
                           child: ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF1976D2),
                               foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
                             ),
                             onPressed: () async {
                               final url = Uri.parse(data['link']);
@@ -197,9 +209,13 @@ class _HomePageState extends State<HomePage> {
     setState(() => _isPopularLoading = true);
 
     try {
-      final String response = await rootBundle.loadString('assets/profeissions.json');
+      final String response = await rootBundle.loadString(
+        'assets/profeissions.json',
+      );
       final List<dynamic> allProfsJson = json.decode(response);
-      final List<Map<String, dynamic>> allProfs = allProfsJson.map((e) => Map<String, dynamic>.from(e)).toList();
+      final List<Map<String, dynamic>> allProfs = allProfsJson
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
 
       List<Map<String, dynamic>> popular = [];
 
@@ -215,25 +231,39 @@ class _HomePageState extends State<HomePage> {
         if (snapshot.docs.isNotEmpty) {
           for (var doc in snapshot.docs) {
             final enName = doc.id;
-            final profDetails = allProfs.cast<Map<String, dynamic>?>().firstWhere(
-              (p) => p?['en'].toString().toLowerCase() == enName.toLowerCase(),
-              orElse: () => null,
-            );
+            final profDetails = allProfs
+                .cast<Map<String, dynamic>?>()
+                .firstWhere(
+                  (p) =>
+                      p?['en'].toString().toLowerCase() == enName.toLowerCase(),
+                  orElse: () => null,
+                );
             if (profDetails != null) {
               popular.add(profDetails);
             }
           }
         }
       } catch (firestoreError) {
-        debugPrint("Firestore analytics fetch failed (using defaults): $firestoreError");
+        debugPrint(
+          "Firestore analytics fetch failed (using defaults): $firestoreError",
+        );
       }
 
       if (popular.isEmpty) {
-        final defaults = ['Plumber', 'Electrician', 'Carpenter', 'Painter', 'AC Technician', 'Handyman', 'Gardener', 'Cleaner'];
+        final defaults = [
+          'Plumber',
+          'Electrician',
+          'Carpenter',
+          'Painter',
+          'AC Technician',
+          'Handyman',
+          'Gardener',
+          'Cleaner',
+        ];
         for (var name in defaults) {
           final prof = allProfs.cast<Map<String, dynamic>?>().firstWhere(
-            (p) => p?['en'] == name, 
-            orElse: () => null
+            (p) => p?['en'] == name,
+            orElse: () => null,
           );
           if (prof != null) popular.add(prof);
         }
@@ -258,14 +288,15 @@ class _HomePageState extends State<HomePage> {
   Future<void> _fetchTopRatedWorkers() async {
     if (!mounted) return;
     setState(() => _isTopRatedLoading = true);
-    
+
     try {
-      final snapshot = await _firestore.collection('users')
+      final snapshot = await _firestore
+          .collection('users')
           .where('role', isEqualTo: 'worker')
           .orderBy('avgRating', descending: true)
           .limit(30) // Fetch more to filter locally
           .get();
-      
+
       final workers = snapshot.docs.map((doc) {
         var userData = doc.data();
         userData['uid'] = doc.id;
@@ -288,19 +319,21 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  List<Map<String, dynamic>> _filterByProximity(List<Map<String, dynamic>> workers) {
+  List<Map<String, dynamic>> _filterByProximity(
+    List<Map<String, dynamic>> workers,
+  ) {
     if (_currentPosition == null) return workers;
 
     return workers.where((w) {
       if (w['lat'] == null || w['lng'] == null) return false;
-      
+
       double distanceInMeters = Geolocator.distanceBetween(
-        _currentPosition!.latitude, 
-        _currentPosition!.longitude, 
-        w['lat'].toDouble(), 
-        w['lng'].toDouble()
+        _currentPosition!.latitude,
+        _currentPosition!.longitude,
+        w['lat'].toDouble(),
+        w['lng'].toDouble(),
       );
-      
+
       double radiusInKm = (w['serviceRadius'] ?? 20.0).toDouble();
       return (distanceInMeters / 1000) <= radiusInKm;
     }).toList();
@@ -311,7 +344,8 @@ class _HomePageState extends State<HomePage> {
     setState(() => _isNewWorkersLoading = true);
 
     try {
-      final snapshot = await _firestore.collection('users')
+      final snapshot = await _firestore
+          .collection('users')
           .where('role', isEqualTo: 'worker')
           .orderBy('createdAt', descending: true)
           .limit(7)
@@ -337,8 +371,14 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Map<String, dynamic> _getLocalizedStrings(BuildContext context, {bool listen = true}) {
-    final locale = Provider.of<LanguageProvider>(context, listen: listen).locale.languageCode;
+  Map<String, dynamic> _getLocalizedStrings(
+    BuildContext context, {
+    bool listen = true,
+  }) {
+    final locale = Provider.of<LanguageProvider>(
+      context,
+      listen: listen,
+    ).locale.languageCode;
     switch (locale) {
       case 'he':
         return {
@@ -392,7 +432,9 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final localized = _getLocalizedStrings(context);
     final theme = Theme.of(context);
-    final localeCode = Provider.of<LanguageProvider>(context).locale.languageCode;
+    final localeCode = Provider.of<LanguageProvider>(
+      context,
+    ).locale.languageCode;
     final isRtl = localeCode == 'he' || localeCode == 'ar';
     final user = FirebaseAuth.instance.currentUser;
 
@@ -444,13 +486,14 @@ class _HomePageState extends State<HomePage> {
         }
 
         final data = snapshot.data!.docs.first.data() as Map<String, dynamic>;
-        
+
         final timestamp = data['timestamp'] as Timestamp?;
-        
+
         // Only show if the message is from the last 48 hours
         if (timestamp != null) {
           final diff = DateTime.now().difference(timestamp.toDate());
-          if (diff.inHours > 48) return const SliverToBoxAdapter(child: SizedBox.shrink());
+          if (diff.inHours > 48)
+            return const SliverToBoxAdapter(child: SizedBox.shrink());
         }
 
         return SliverToBoxAdapter(
@@ -474,7 +517,11 @@ class _HomePageState extends State<HomePage> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.campaign_rounded, color: Colors.white, size: 32),
+                const Icon(
+                  Icons.campaign_rounded,
+                  color: Colors.white,
+                  size: 32,
+                ),
                 const SizedBox(width: 16),
                 Expanded(
                   child: Column(
@@ -500,7 +547,11 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white70, size: 20),
+                  icon: const Icon(
+                    Icons.close,
+                    color: Colors.white70,
+                    size: 20,
+                  ),
                   onPressed: () {
                     // In a real app, you'd save this locally to hide for the session
                   },
@@ -513,9 +564,14 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildSliverAppBar(Map<String, dynamic> strings, ThemeData theme, User? user) {
-    String displayName = _cachedName ?? user?.displayName?.split(' ').first ?? strings['guest'];
-    
+  Widget _buildSliverAppBar(
+    Map<String, dynamic> strings,
+    ThemeData theme,
+    User? user,
+  ) {
+    String displayName =
+        _cachedName ?? user?.displayName?.split(' ').first ?? strings['guest'];
+
     return SliverAppBar(
       expandedHeight: 250,
       floating: false,
@@ -523,11 +579,20 @@ class _HomePageState extends State<HomePage> {
       elevation: 0,
       backgroundColor: const Color(0xFF1976D2),
       actions: [
+        IconButton(
+          icon: const Icon(Icons.place_outlined, color: Colors.white),
+          onPressed: _openLocationManager,
+        ),
         Padding(
           padding: const EdgeInsets.only(right: 12, left: 12),
           child: StreamBuilder<QuerySnapshot>(
             stream: (user != null && !user.isAnonymous)
-                ? _firestore.collection('users').doc(user.uid).collection('notifications').where('status', isEqualTo: 'pending').snapshots()
+                ? _firestore
+                      .collection('users')
+                      .doc(user.uid)
+                      .collection('notifications')
+                      .where('status', isEqualTo: 'pending')
+                      .snapshots()
                 : const Stream.empty(),
             builder: (context, snapshot) {
               int count = snapshot.hasData ? snapshot.data!.docs.length : 0;
@@ -535,8 +600,17 @@ class _HomePageState extends State<HomePage> {
                 alignment: Alignment.center,
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.notifications_none_rounded, color: Colors.white, size: 28),
-                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsPage())),
+                    icon: const Icon(
+                      Icons.notifications_none_rounded,
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const NotificationsPage(),
+                      ),
+                    ),
                   ),
                   if (count > 0)
                     Positioned(
@@ -544,14 +618,28 @@ class _HomePageState extends State<HomePage> {
                       top: 8,
                       child: Container(
                         padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                        constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                        child: Text('$count', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 16,
+                          minHeight: 16,
+                        ),
+                        child: Text(
+                          '$count',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
                       ),
                     ),
                 ],
               );
-            }
+            },
           ),
         ),
       ],
@@ -569,7 +657,10 @@ class _HomePageState extends State<HomePage> {
               Positioned(
                 top: -20,
                 right: -20,
-                child: CircleAvatar(radius: 80, backgroundColor: Colors.white.withOpacity(0.05)),
+                child: CircleAvatar(
+                  radius: 80,
+                  backgroundColor: Colors.white.withOpacity(0.05),
+                ),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 70, 24, 20),
@@ -581,29 +672,54 @@ class _HomePageState extends State<HomePage> {
                         GestureDetector(
                           onTap: () {
                             if (_userRole == 'admin') {
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminProfile()));
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const AdminProfile(),
+                                ),
+                              );
                             } else {
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => const Profile()));
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const Profile(),
+                                ),
+                              );
                             }
                           },
                           child: CircleAvatar(
                             radius: 22,
                             backgroundColor: Colors.white.withOpacity(0.2),
-                            backgroundImage: (_profileImageUrl != null && _profileImageUrl!.isNotEmpty)
+                            backgroundImage:
+                                (_profileImageUrl != null &&
+                                    _profileImageUrl!.isNotEmpty)
                                 ? CachedNetworkImageProvider(_profileImageUrl!)
                                 : null,
-                            child: (_profileImageUrl == null || _profileImageUrl!.isEmpty)
-                                ? const Icon(Icons.person, color: Colors.white, size: 20)
+                            child:
+                                (_profileImageUrl == null ||
+                                    _profileImageUrl!.isEmpty)
+                                ? const Icon(
+                                    Icons.person,
+                                    color: Colors.white,
+                                    size: 20,
+                                  )
                                 : null,
                           ),
                         ),
                         const SizedBox(width: 12),
                         Text(
                           '${strings['welcome']} $displayName',
-                          style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 16),
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.9),
+                            fontSize: 16,
+                          ),
                         ),
                         const SizedBox(width: 8),
-                        const Icon(Icons.waving_hand, color: Colors.amber, size: 18),
+                        const Icon(
+                          Icons.waving_hand,
+                          color: Colors.amber,
+                          size: 18,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -629,13 +745,20 @@ class _HomePageState extends State<HomePage> {
           height: 60,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
           child: GestureDetector(
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SearchPage())),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const SearchPage()),
+            ),
             child: Container(
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10, offset: const Offset(0, 4)),
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
                 ],
               ),
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -645,7 +768,10 @@ class _HomePageState extends State<HomePage> {
                   const SizedBox(width: 12),
                   Text(
                     strings['search_hint'],
-                    style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
+                    style: const TextStyle(
+                      color: Color(0xFF94A3B8),
+                      fontSize: 14,
+                    ),
                   ),
                 ],
               ),
@@ -656,7 +782,11 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildCategories(BuildContext context, Map<String, dynamic> strings, ThemeData theme) {
+  Widget _buildCategories(
+    BuildContext context,
+    Map<String, dynamic> strings,
+    ThemeData theme,
+  ) {
     final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
 
     return Column(
@@ -669,11 +799,24 @@ class _HomePageState extends State<HomePage> {
             children: [
               Text(
                 strings['categories'],
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1E293B),
+                ),
               ),
               TextButton(
-                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SearchPage())),
-                child: Text(strings['see_all'], style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.w600)),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const SearchPage()),
+                ),
+                child: Text(
+                  strings['see_all'],
+                  style: const TextStyle(
+                    color: Color(0xFF1976D2),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ],
           ),
@@ -681,60 +824,76 @@ class _HomePageState extends State<HomePage> {
         SizedBox(
           height: 110,
           child: _isPopularLoading
-            ? ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: 5,
-                itemBuilder: (context, index) => _buildCategorySkeleton(),
-              )
-            : ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: _popularCategories.length,
-                itemBuilder: (context, index) {
-                  final cat = _popularCategories[index];
-                  final displayName = cat[locale] ?? cat['en'];
-                  final colorHex = cat['color'] ?? "#1E3A8A";
-                  final color = _getColorFromHex(colorHex);
+              ? ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: 5,
+                  itemBuilder: (context, index) => _buildCategorySkeleton(),
+                )
+              : ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _popularCategories.length,
+                  itemBuilder: (context, index) {
+                    final cat = _popularCategories[index];
+                    final displayName = cat[locale] ?? cat['en'];
+                    final colorHex = cat['color'] ?? "#1E3A8A";
+                    final color = _getColorFromHex(colorHex);
 
-                  return GestureDetector(
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => SearchPage(initialTrade: cat['en']))),
-                    child: Container(
-                      width: 85,
-                      margin: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Column(
-                        children: [
-                          Container(
-                            height: 64,
-                            width: 64,
-                            decoration: BoxDecoration(
-                              color: color.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Icon(_getIcon(cat['logo']), color: color, size: 28),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            displayName,
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
+                    return GestureDetector(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              SearchPage(initialTrade: cat['en']),
+                        ),
                       ),
-                    ),
-                  );
-                },
-              ),
+                      child: Container(
+                        width: 85,
+                        margin: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Column(
+                          children: [
+                            Container(
+                              height: 64,
+                              width: 64,
+                              decoration: BoxDecoration(
+                                color: color.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Icon(
+                                _getIcon(cat['logo']),
+                                color: color,
+                                size: 28,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              displayName,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF475569),
+                              ),
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
         ),
       ],
     );
   }
 
-
-
-  Widget _buildTopRatedSection(BuildContext context, Map<String, dynamic> strings, ThemeData theme) {
+  Widget _buildTopRatedSection(
+    BuildContext context,
+    Map<String, dynamic> strings,
+    ThemeData theme,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -745,11 +904,24 @@ class _HomePageState extends State<HomePage> {
             children: [
               Text(
                 strings['top_rated'],
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1E293B),
+                ),
               ),
               TextButton(
-                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SearchPage())),
-                child: Text(strings['view_all'], style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.w600)),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const SearchPage()),
+                ),
+                child: Text(
+                  strings['view_all'],
+                  style: const TextStyle(
+                    color: Color(0xFF1976D2),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ],
           ),
@@ -757,14 +929,19 @@ class _HomePageState extends State<HomePage> {
         SizedBox(
           height: 220,
           child: _isTopRatedLoading
-            ? ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: 5,
-                itemBuilder: (context, index) => _buildWorkerSkeleton(),
-              )
-            : _topRatedWorkers.isEmpty
-              ? const Center(child: Padding(padding: EdgeInsets.all(32), child: Text("No pros found nearby")))
+              ? ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: 5,
+                  itemBuilder: (context, index) => _buildWorkerSkeleton(),
+                )
+              : _topRatedWorkers.isEmpty
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Text("No pros found nearby"),
+                  ),
+                )
               : ListView.builder(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -779,7 +956,11 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildNewToTeamSection(BuildContext context, Map<String, dynamic> strings, ThemeData theme) {
+  Widget _buildNewToTeamSection(
+    BuildContext context,
+    Map<String, dynamic> strings,
+    ThemeData theme,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -787,48 +968,70 @@ class _HomePageState extends State<HomePage> {
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
           child: Text(
             strings['new_team'],
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1E293B),
+            ),
           ),
         ),
         SizedBox(
           height: 220,
           child: _isNewWorkersLoading
               ? ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: 5,
-            itemBuilder: (context, index) => _buildWorkerSkeleton(),
-          )
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: 5,
+                  itemBuilder: (context, index) => _buildWorkerSkeleton(),
+                )
               : _newWorkers.isEmpty
               ? const SizedBox.shrink()
               : ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: _newWorkers.length,
-            itemBuilder: (context, index) {
-              final worker = _newWorkers[index];
-              final createdAt = worker['createdAt'] as Timestamp?;
-              bool isNew = false;
-              if (createdAt != null) {
-                final diff = DateTime.now().difference(createdAt.toDate());
-                isNew = diff.inDays <= 7;
-              }
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _newWorkers.length,
+                  itemBuilder: (context, index) {
+                    final worker = _newWorkers[index];
+                    final createdAt = worker['createdAt'] as Timestamp?;
+                    bool isNew = false;
+                    if (createdAt != null) {
+                      final diff = DateTime.now().difference(
+                        createdAt.toDate(),
+                      );
+                      isNew = diff.inDays <= 7;
+                    }
 
-              return _buildWorkerCard(worker, isNew ? strings['new_tag'] : null, strings);
-            },
-          ),
+                    return _buildWorkerCard(
+                      worker,
+                      isNew ? strings['new_tag'] : null,
+                      strings,
+                    );
+                  },
+                ),
         ),
       ],
     );
   }
 
-  Widget _buildWorkerCard(Map<String, dynamic> worker, String? tag, Map<String, dynamic> strings) {
+  Widget _buildWorkerCard(
+    Map<String, dynamic> worker,
+    String? tag,
+    Map<String, dynamic> strings,
+  ) {
     return GestureDetector(
       onTap: () {
         if (worker['role'] == 'admin') {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminProfile()));
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const AdminProfile()),
+          );
         } else {
-          Navigator.push(context, MaterialPageRoute(builder: (context) => Profile(userId: worker['uid'])));
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => Profile(userId: worker['uid']),
+            ),
+          );
         }
       },
       child: Container(
@@ -837,7 +1040,13 @@ class _HomePageState extends State<HomePage> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: Stack(
           children: [
@@ -845,17 +1054,32 @@ class _HomePageState extends State<HomePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                  child: (worker['profileImageUrl'] != null && worker['profileImageUrl'].toString().isNotEmpty)
-                    ? CachedNetworkImage(
-                        imageUrl: worker['profileImageUrl'],
-                        height: 110,
-                        width: 160,
-                        fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(color: const Color(0xFFE2E8F0)),
-                        errorWidget: (context, url, error) => const Icon(Icons.error),
-                      )
-                    : Container(height: 110, width: 160, color: const Color(0xFFE2E8F0), child: const Icon(Icons.person, size: 40, color: Colors.white)),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(20),
+                  ),
+                  child:
+                      (worker['profileImageUrl'] != null &&
+                          worker['profileImageUrl'].toString().isNotEmpty)
+                      ? CachedNetworkImage(
+                          imageUrl: worker['profileImageUrl'],
+                          height: 110,
+                          width: 160,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) =>
+                              Container(color: const Color(0xFFE2E8F0)),
+                          errorWidget: (context, url, error) =>
+                              const Icon(Icons.error),
+                        )
+                      : Container(
+                          height: 110,
+                          width: 160,
+                          color: const Color(0xFFE2E8F0),
+                          child: const Icon(
+                            Icons.person,
+                            size: 40,
+                            color: Colors.white,
+                          ),
+                        ),
                 ),
                 Padding(
                   padding: const EdgeInsets.all(12),
@@ -864,14 +1088,22 @@ class _HomePageState extends State<HomePage> {
                     children: [
                       Text(
                         worker['name'] ?? 'Worker',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E293B)),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: Color(0xFF1E293B),
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        (worker['professions'] as List?)?.join(', ') ?? 'Service',
-                        style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                        (worker['professions'] as List?)?.join(', ') ??
+                            'Service',
+                        style: const TextStyle(
+                          color: Color(0xFF64748B),
+                          fontSize: 12,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -879,21 +1111,36 @@ class _HomePageState extends State<HomePage> {
                       Row(
                         children: [
                           if ((worker['reviewCount'] ?? 0) > 0) ...[
-                            const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
+                            const Icon(
+                              Icons.star_rounded,
+                              color: Colors.amber,
+                              size: 16,
+                            ),
                             const SizedBox(width: 4),
                             Text(
                               worker['avgRating'].toStringAsFixed(1),
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF1E293B)),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                                color: Color(0xFF1E293B),
+                              ),
                             ),
                             const SizedBox(width: 4),
                             Text(
                               "(${worker['reviewCount']})",
-                              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                              style: const TextStyle(
+                                color: Color(0xFF94A3B8),
+                                fontSize: 12,
+                              ),
                             ),
                           ] else ...[
                             Text(
                               strings['no_reviews'],
-                              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontStyle: FontStyle.italic),
+                              style: const TextStyle(
+                                color: Color(0xFF94A3B8),
+                                fontSize: 12,
+                                fontStyle: FontStyle.italic,
+                              ),
                             ),
                           ],
                         ],
@@ -908,14 +1155,21 @@ class _HomePageState extends State<HomePage> {
                 top: 8,
                 left: 8,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.red,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
                     tag,
-                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
@@ -986,73 +1240,140 @@ class _HomePageState extends State<HomePage> {
 
   IconData _getIcon(String? name) {
     switch (name) {
-      case 'plumbing': return Icons.plumbing;
-      case 'electrical_services': return Icons.electrical_services;
-      case 'carpenter': return Icons.carpenter;
-      case 'format_paint': return Icons.format_paint;
-      case 'vpn_key': return Icons.vpn_key;
-      case 'park': return Icons.park;
-      case 'ac_unit': return Icons.ac_unit;
-      case 'cleaning_services': return Icons.cleaning_services;
-      case 'build': return Icons.build;
-      case 'handyman': return Icons.handyman;
-      case 'foundation': return Icons.foundation;
-      case 'grid_view': return Icons.grid_view;
-      case 'settings': return Icons.settings;
-      case 'home_repair_service': return Icons.home_repair_service;
-      case 'computer': return Icons.computer;
-      case 'content_cut': return Icons.content_cut;
-      case 'checkroom': return Icons.checkroom;
-      case 'local_shipping': return Icons.local_shipping;
-      case 'pest_control': return Icons.pest_control;
-      case 'solar_power': return Icons.solar_power;
-      case 'chair': return Icons.chair;
-      case 'format_shapes': return Icons.format_shapes;
-      case 'architecture': return Icons.architecture;
-      case 'school': return Icons.school;
-      case 'child_care': return Icons.child_care;
-      case 'photo_camera': return Icons.photo_camera;
-      case 'music_note': return Icons.music_note;
-      case 'face': return Icons.face;
-      case 'medical_services': return Icons.medical_services;
-      case 'self_improvement': return Icons.self_improvement;
-      case 'window': return Icons.window;
-      case 'pool': return Icons.pool;
-      case 'fitness_center': return Icons.fitness_center;
-      case 'pets': return Icons.pets;
-      case 'home': return Icons.home;
-      case 'waves': return Icons.waves;
-      case 'dry_cleaning': return Icons.dry_cleaning;
-      case 'event': return Icons.event;
-      case 'restaurant': return Icons.restaurant;
-      case 'security': return Icons.security;
-      case 'delivery_dining': return Icons.delivery_dining;
-      case 'local_car_wash': return Icons.local_car_wash;
-      case 'spa': return Icons.spa;
-      case 'restaurant_menu': return Icons.restaurant_menu;
-      case 'flight': return Icons.flight;
-      case 'real_estate_agent': return Icons.real_estate_agent;
-      case 'gavel': return Icons.gavel;
-      case 'calculate': return Icons.calculate;
-      case 'translate': return Icons.translate;
-      case 'format_color_fill': return Icons.format_color_fill;
-      case 'square_foot': return Icons.square_foot;
-      case 'videocam': return Icons.videocam;
-      case 'public': return Icons.public;
-      case 'psychology': return Icons.psychology;
-      case 'add_a_photo': return Icons.add_a_photo;
-      case 'flight_takeoff': return Icons.flight_takeoff;
-      case 'piano': return Icons.piano;
-      case 'language': return Icons.language;
-      case 'functions': return Icons.functions;
-      case 'science': return Icons.science;
-      case 'biotech': return Icons.biotech;
-      case 'eco': return Icons.eco;
-      case 'history_edu': return Icons.history_edu;
-      case 'palette': return Icons.palette;
-      case 'pedal_bike': return Icons.pedal_bike;
-      case 'engineering': return Icons.engineering;
-      default: return Icons.work_rounded;
+      case 'plumbing':
+        return Icons.plumbing;
+      case 'electrical_services':
+        return Icons.electrical_services;
+      case 'carpenter':
+        return Icons.carpenter;
+      case 'format_paint':
+        return Icons.format_paint;
+      case 'vpn_key':
+        return Icons.vpn_key;
+      case 'park':
+        return Icons.park;
+      case 'ac_unit':
+        return Icons.ac_unit;
+      case 'cleaning_services':
+        return Icons.cleaning_services;
+      case 'build':
+        return Icons.build;
+      case 'handyman':
+        return Icons.handyman;
+      case 'foundation':
+        return Icons.foundation;
+      case 'grid_view':
+        return Icons.grid_view;
+      case 'settings':
+        return Icons.settings;
+      case 'home_repair_service':
+        return Icons.home_repair_service;
+      case 'computer':
+        return Icons.computer;
+      case 'content_cut':
+        return Icons.content_cut;
+      case 'checkroom':
+        return Icons.checkroom;
+      case 'local_shipping':
+        return Icons.local_shipping;
+      case 'pest_control':
+        return Icons.pest_control;
+      case 'solar_power':
+        return Icons.solar_power;
+      case 'chair':
+        return Icons.chair;
+      case 'format_shapes':
+        return Icons.format_shapes;
+      case 'architecture':
+        return Icons.architecture;
+      case 'school':
+        return Icons.school;
+      case 'child_care':
+        return Icons.child_care;
+      case 'photo_camera':
+        return Icons.photo_camera;
+      case 'music_note':
+        return Icons.music_note;
+      case 'face':
+        return Icons.face;
+      case 'medical_services':
+        return Icons.medical_services;
+      case 'self_improvement':
+        return Icons.self_improvement;
+      case 'window':
+        return Icons.window;
+      case 'pool':
+        return Icons.pool;
+      case 'fitness_center':
+        return Icons.fitness_center;
+      case 'pets':
+        return Icons.pets;
+      case 'home':
+        return Icons.home;
+      case 'waves':
+        return Icons.waves;
+      case 'dry_cleaning':
+        return Icons.dry_cleaning;
+      case 'event':
+        return Icons.event;
+      case 'restaurant':
+        return Icons.restaurant;
+      case 'security':
+        return Icons.security;
+      case 'delivery_dining':
+        return Icons.delivery_dining;
+      case 'local_car_wash':
+        return Icons.local_car_wash;
+      case 'spa':
+        return Icons.spa;
+      case 'restaurant_menu':
+        return Icons.restaurant_menu;
+      case 'flight':
+        return Icons.flight;
+      case 'real_estate_agent':
+        return Icons.real_estate_agent;
+      case 'gavel':
+        return Icons.gavel;
+      case 'calculate':
+        return Icons.calculate;
+      case 'translate':
+        return Icons.translate;
+      case 'format_color_fill':
+        return Icons.format_color_fill;
+      case 'square_foot':
+        return Icons.square_foot;
+      case 'videocam':
+        return Icons.videocam;
+      case 'public':
+        return Icons.public;
+      case 'psychology':
+        return Icons.psychology;
+      case 'add_a_photo':
+        return Icons.add_a_photo;
+      case 'flight_takeoff':
+        return Icons.flight_takeoff;
+      case 'piano':
+        return Icons.piano;
+      case 'language':
+        return Icons.language;
+      case 'functions':
+        return Icons.functions;
+      case 'science':
+        return Icons.science;
+      case 'biotech':
+        return Icons.biotech;
+      case 'eco':
+        return Icons.eco;
+      case 'history_edu':
+        return Icons.history_edu;
+      case 'palette':
+        return Icons.palette;
+      case 'pedal_bike':
+        return Icons.pedal_bike;
+      case 'engineering':
+        return Icons.engineering;
+      default:
+        return Icons.work_rounded;
     }
   }
 }

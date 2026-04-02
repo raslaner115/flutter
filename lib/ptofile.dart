@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -21,6 +22,8 @@ import 'package:untitled1/pages/analytics_page.dart';
 import 'package:untitled1/pages/add_project.dart';
 import 'package:untitled1/pages/add_review.dart';
 import 'package:untitled1/pages/post_details_page.dart';
+import 'package:untitled1/pages/location_manager_page.dart';
+import 'package:untitled1/services/location_context_service.dart';
 
 import 'package:untitled1/widgets/cached_video_player.dart';
 
@@ -35,6 +38,7 @@ class Profile extends StatefulWidget {
 
 class _ProfileState extends State<Profile> with TickerProviderStateMixin {
   static const String _vpdDocId = 'currentWeek';
+  static const int _counterShardCount = 20;
   static const List<String> _weekDayKeys = [
     'sunday',
     'monday',
@@ -77,8 +81,6 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
   double? _proLat;
   double? _proLng;
 
-  final String _googleMapsApiKey = "AIzaSyCL9zie59-f_Hiyqj_dYtaMziReezcd6fU";
-
   @override
   void initState() {
     super.initState();
@@ -92,6 +94,46 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
     });
 
     _fetchUserData();
+  }
+
+  String _weekKey(DateTime date) {
+    final start = _startOfWeek(date);
+    return '${start.year.toString().padLeft(4, '0')}-${start.month.toString().padLeft(2, '0')}-${start.day.toString().padLeft(2, '0')}';
+  }
+
+  int _randomShard() => Random().nextInt(_counterShardCount);
+
+  Future<int> _readShardedProfileViews(String userId) async {
+    final shards = await _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('metrics')
+        .doc('profileViews')
+        .collection('shards')
+        .get();
+
+    int total = 0;
+    for (final doc in shards.docs) {
+      final data = doc.data();
+      final count = data['count'];
+      if (count is num) total += count.toInt();
+    }
+    return total;
+  }
+
+  Future<void> _incrementShardedProfileViews(String workerId) async {
+    final shardRef = _firestore
+        .collection('users')
+        .doc(workerId)
+        .collection('metrics')
+        .doc('profileViews')
+        .collection('shards')
+        .doc(_randomShard().toString());
+
+    await shardRef.set({
+      'count': FieldValue.increment(1),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   void _checkInitialOwnership() {
@@ -167,7 +209,11 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
 
     final workerRef = _firestore.collection('users').doc(workerId);
     final proRatingRef = workerRef.collection('ProRating').doc(professionDocId);
-    final vpdRef = proRatingRef.collection('VPD').doc(_vpdDocId);
+    final shardRef = proRatingRef
+        .collection('VPD')
+        .doc(_vpdDocId)
+        .collection('shards')
+        .doc(_randomShard().toString());
 
     await proRatingRef.set({
       'profession': normalizedProfession,
@@ -178,13 +224,15 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
       final now = DateTime.now();
       final dayKey = _dayKeyForDate(now);
       final weekStart = _startOfWeek(now);
+      final currentWeekKey = _weekKey(now);
 
-      final snapshot = await tx.get(vpdRef);
+      final snapshot = await tx.get(shardRef);
       final current = _emptyWeekMap();
 
       if (snapshot.exists) {
         final data = snapshot.data() as Map<String, dynamic>;
-        if (_isCurrentWeek(data['weekStart'])) {
+        if (data['weekKey'] == currentWeekKey ||
+            _isCurrentWeek(data['weekStart'])) {
           for (final day in _weekDayKeys) {
             final value = data[day];
             if (value is num) current[day] = value.toInt();
@@ -197,8 +245,9 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
       current[dayKey] = (current[dayKey] ?? 0) + 1;
       current['TVTW'] = (current['TVTW'] ?? 0) + 1;
 
-      tx.set(vpdRef, {
+      tx.set(shardRef, {
         ...current,
+        'weekKey': currentWeekKey,
         'weekStart': Timestamp.fromDate(weekStart),
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
@@ -289,6 +338,15 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
           });
         }
 
+        if (_isOwnProfile) {
+          final shardedViews = await _readShardedProfileViews(targetUid);
+          if (mounted && shardedViews > 0) {
+            setState(() {
+              _profileViews = shardedViews;
+            });
+          }
+        }
+
         if (currentUser != null && !_isOwnProfile) {
           final favDoc = await _firestore
               .collection('users')
@@ -300,9 +358,7 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
         }
 
         if (!_isOwnProfile) {
-          _firestore.collection('users').doc(targetUid).update({
-            'profileViews': FieldValue.increment(1),
-          });
+          await _incrementShardedProfileViews(targetUid);
 
           final viewedProfession = widget.viewedProfession?.trim() ?? '';
           if (viewedProfession.isNotEmpty) {
@@ -310,6 +366,13 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
               workerId: targetUid,
               profession: viewedProfession,
             );
+          }
+
+          final shardedViews = await _readShardedProfileViews(targetUid);
+          if (mounted) {
+            setState(() {
+              _profileViews = shardedViews;
+            });
           }
         }
 
@@ -327,15 +390,7 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
     if (_proLat == null || _proLng == null) return;
 
     try {
-      Position? userPos;
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (serviceEnabled) {
-        LocationPermission permission = await Geolocator.checkPermission();
-        if (permission == LocationPermission.always ||
-            permission == LocationPermission.whileInUse) {
-          userPos = await Geolocator.getCurrentPosition();
-        }
-      }
+      final userPos = await LocationContextService.getActiveLocation();
 
       if (userPos != null) {
         double distanceInMeters = Geolocator.distanceBetween(
@@ -357,6 +412,17 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
       }
     } catch (e) {
       debugPrint("Distance error: $e");
+    }
+  }
+
+  Future<void> _openLocationManager() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const LocationManagerPage()),
+    );
+
+    if (changed == true && !_isOwnProfile) {
+      await _calculateDistance();
     }
   }
 
@@ -664,6 +730,10 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
                 stretch: true,
                 backgroundColor: const Color(0xFF1976D2),
                 actions: [
+                  IconButton(
+                    icon: const Icon(Icons.place_outlined),
+                    onPressed: _openLocationManager,
+                  ),
                   IconButton(
                     icon: const Icon(Icons.share_outlined),
                     onPressed: () => _shareProfile(strings),

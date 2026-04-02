@@ -68,6 +68,11 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     return fallback;
   }
 
+  String _weekKey(DateTime date) {
+    final start = _startOfWeek(date);
+    return '${start.year.toString().padLeft(4, '0')}-${start.month.toString().padLeft(2, '0')}-${start.day.toString().padLeft(2, '0')}';
+  }
+
   DateTime _startOfWeek(DateTime date) {
     final dayStart = DateTime(date.year, date.month, date.day);
     final offsetToSunday = dayStart.weekday % 7;
@@ -126,6 +131,45 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     return normalized;
   }
 
+  Future<Map<String, int>> _readVpdWeekFromShards(
+    DocumentReference<Map<String, dynamic>> proRatingRef,
+  ) async {
+    final legacyDoc = await proRatingRef.collection('VPD').doc(_vpdDocId).get();
+
+    final shards = await proRatingRef
+        .collection('VPD')
+        .doc(_vpdDocId)
+        .collection('shards')
+        .get();
+
+    if (shards.docs.isEmpty) {
+      if (!legacyDoc.exists) return _emptyWeekMap();
+      return _normalizeWeekData(legacyDoc.data() ?? {});
+    }
+
+    final currentWeekKey = _weekKey(DateTime.now());
+    final summed = _emptyWeekMap();
+
+    for (final doc in shards.docs) {
+      final data = doc.data();
+      final weekKey = data['weekKey']?.toString();
+
+      if (weekKey != null && weekKey != currentWeekKey) continue;
+      if (weekKey == null && !_isCurrentWeek(data['weekStart'])) continue;
+
+      for (final day in _weekDayKeys) {
+        summed[day] = (summed[day] ?? 0) + _asInt(data[day]);
+      }
+      summed['TVTW'] = (summed['TVTW'] ?? 0) + _asInt(data['TVTW']);
+    }
+
+    if ((summed['TVTW'] ?? 0) == 0) {
+      summed['TVTW'] = _sumWeekCounts(_extractWeekCounts(summed));
+    }
+
+    return summed;
+  }
+
   Future<Map<String, Map<String, int>>> _fetchProfessionWeeklyViews(
     QuerySnapshot<Map<String, dynamic>> proRatingSnapshot,
   ) async {
@@ -134,14 +178,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     for (final proDoc in proRatingSnapshot.docs) {
       final data = proDoc.data();
       final profession = (data['profession'] ?? proDoc.id).toString();
-
-      final vpdDoc = await proDoc.reference
-          .collection('VPD')
-          .doc(_vpdDocId)
-          .get();
-
-      if (!vpdDoc.exists) continue;
-      result[profession] = _normalizeWeekData(vpdDoc.data() ?? {});
+      result[profession] = await _readVpdWeekFromShards(proDoc.reference);
     }
 
     return result;
