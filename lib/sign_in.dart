@@ -83,6 +83,15 @@ class _SignInPageState extends State<SignInPage> {
     return '+972$digits';
   }
 
+  Future<bool> _isPhoneRegistered(String normalizedPhone) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .where('phone', isEqualTo: normalizedPhone)
+        .limit(1)
+        .get();
+    return snapshot.docs.isNotEmpty;
+  }
+
   Future<void> _sendCode() async {
     final strings = _getLocalizedStrings(context);
     String input = _phoneController.text.trim();
@@ -102,6 +111,42 @@ class _SignInPageState extends State<SignInPage> {
 
     setState(() => _loading = true);
     try {
+      final isRegistered = await _isPhoneRegistered(phone);
+      if (!isRegistered) {
+        if (mounted) {
+          setState(() => _loading = false);
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text(
+                strings['not_registered_title'] ?? 'User Not Registered',
+              ),
+              content: Text(
+                strings['not_registered_body'] ??
+                    'The phone number you entered is not registered.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(strings['ok'] ?? 'OK'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SignUpPage()),
+                    );
+                  },
+                  child: Text(strings['signup'] ?? 'Sign Up'),
+                ),
+              ],
+            ),
+          );
+        }
+        return;
+      }
+
       await AnalyticsService.logSignInCodeRequested();
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: phone,
@@ -567,7 +612,10 @@ class _SignInPageState extends State<SignInPage> {
           ),
           child: Text(
             strings['signup'] ?? 'Sign Up',
-            style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold),
+            style: const TextStyle(
+              color: Color(0xFF1976D2),
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
       ],

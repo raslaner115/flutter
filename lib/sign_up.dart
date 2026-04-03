@@ -57,6 +57,7 @@ class _SignUpPageState extends State<SignUpPage> {
   List<String> _selectedProfessions = [];
 
   bool _loading = false;
+  bool _autoCompletingFromPaidWorker = false;
   bool _agreedToPolicy = false;
   bool _codeSent = false;
   String _verificationId = "";
@@ -112,10 +113,36 @@ class _SignUpPageState extends State<SignUpPage> {
           widget.pendingWorkerData!['optionalPhone'] ?? "";
       _descriptionController.text =
           widget.pendingWorkerData!['description'] ?? "";
+      _phoneController.text =
+          widget.pendingWorkerData!['phone'] ??
+          (FirebaseAuth.instance.currentUser?.phoneNumber ?? '');
       _agreedToPolicy = true;
     } else {
       _userType = UserType.normal;
     }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _tryFinalizePaidWorkerRegistrationAfterSubscription();
+    });
+  }
+
+  Future<void> _tryFinalizePaidWorkerRegistrationAfterSubscription() async {
+    if (_autoCompletingFromPaidWorker) return;
+    if (widget.pendingWorkerData == null) return;
+    if (widget.pendingWorkerData?['isSubscribed'] != true) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.phoneNumber == null || user.phoneNumber!.isEmpty) {
+      return;
+    }
+
+    _autoCompletingFromPaidWorker = true;
+    if (mounted) {
+      setState(() {
+        _loading = true;
+      });
+    }
+    await _commitUserDataToDatabase();
   }
 
   @override
@@ -253,7 +280,7 @@ class _SignUpPageState extends State<SignUpPage> {
         phoneNumber: phone,
         verificationCompleted: (PhoneAuthCredential credential) async {
           await FirebaseAuth.instance.signInWithCredential(credential);
-          await _commitUserDataToDatabase();
+          await _onPhoneVerifiedAndSignedIn();
         },
         verificationFailed: (e) {
           if (mounted) {
@@ -300,7 +327,7 @@ class _SignUpPageState extends State<SignUpPage> {
         smsCode: _codeController.text.trim(),
       );
       await FirebaseAuth.instance.signInWithCredential(credential);
-      await _commitUserDataToDatabase();
+      await _onPhoneVerifiedAndSignedIn();
     } catch (e) {
       if (mounted) {
         setState(() => _loading = false);
@@ -309,6 +336,54 @@ class _SignUpPageState extends State<SignUpPage> {
         ).showSnackBar(SnackBar(content: Text(strings['error_verify']!)));
       }
     }
+  }
+
+  Map<String, dynamic> _buildWorkerPendingDataWithPhone() {
+    return {
+      'name': _nameController.text.trim(),
+      'email': _emailController.text.trim(),
+      'phone': _normalizePhone(_phoneController.text.trim()),
+      'town': _selectedTown,
+      'role': 'worker',
+      'isSubscribed': false,
+      'subscriptionStatus': 'inactive',
+      'subscriptionCanceled': false,
+      'professions': _selectedProfessions,
+      'optionalPhone': _altPhoneController.text.trim(),
+      'description': _descriptionController.text.trim(),
+      'workRadius': _workRadius,
+      'workCenterLat': _workCenter?.latitude,
+      'workCenterLng': _workCenter?.longitude,
+      'avgRating': 0.0,
+      'reviewCount': 0,
+    };
+  }
+
+  Future<void> _onPhoneVerifiedAndSignedIn() async {
+    if (_userType == UserType.worker &&
+        widget.pendingWorkerData?['isSubscribed'] != true) {
+      final workerPendingData = _buildWorkerPendingDataWithPhone();
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _codeSent = false;
+        });
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => SubscriptionPage(
+              email: _emailController.text.trim(),
+              pendingUserData: workerPendingData,
+              pendingImage: _image,
+              isNewRegistration: true,
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    await _commitUserDataToDatabase();
   }
 
   Future<void> _getCurrentLocation() async {
@@ -411,11 +486,26 @@ class _SignUpPageState extends State<SignUpPage> {
       };
 
       if (_userType == UserType.worker) {
+        final bool hasActiveSubscriptionFromPending =
+            widget.pendingWorkerData?['isSubscribed'] == true;
+
         userData.addAll({
           'professions': _selectedProfessions,
           'optionalPhone': _altPhoneController.text.trim(),
           'description': _descriptionController.text.trim(),
-          'isSubscribed': false,
+          'isSubscribed': hasActiveSubscriptionFromPending,
+          'subscriptionStatus': hasActiveSubscriptionFromPending
+              ? 'active'
+              : 'inactive',
+          'subscriptionCanceled': false,
+          'subscriptionProductId':
+              widget.pendingWorkerData?['subscriptionProductId'],
+          'subscriptionPlatform':
+              widget.pendingWorkerData?['subscriptionPlatform'],
+          'subscriptionPurchaseId':
+              widget.pendingWorkerData?['subscriptionPurchaseId'],
+          'subscriptionTransactionDate':
+              widget.pendingWorkerData?['subscriptionTransactionDate'],
           'workRadius': _workRadius,
           'workCenterLat': _workCenter?.latitude,
           'workCenterLng': _workCenter?.longitude,
@@ -492,32 +582,9 @@ class _SignUpPageState extends State<SignUpPage> {
     }
 
     if (_userType == UserType.worker) {
-      final workerPendingData = {
-        'name': _nameController.text.trim(),
-        'email': _emailController.text.trim(),
-        'town': _selectedTown,
-        'role': 'worker',
-        'professions': _selectedProfessions,
-        'optionalPhone': _altPhoneController.text.trim(),
-        'description': _descriptionController.text.trim(),
-        'workRadius': _workRadius,
-        'workCenterLat': _workCenter?.latitude,
-        'workCenterLng': _workCenter?.longitude,
-        'avgRating': 0.0,
-        'reviewCount': 0,
-      };
-
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => SubscriptionPage(
-            email: _emailController.text.trim(),
-            pendingUserData: workerPendingData,
-            pendingImage: _image,
-            isNewRegistration: true,
-          ),
-        ),
-      );
+      setState(() {
+        _currentStep = SignUpStep.phone;
+      });
     } else {
       setState(() => _currentStep = SignUpStep.phone);
     }

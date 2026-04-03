@@ -5,6 +5,7 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:untitled1/sign_up.dart';
 
 class SubscriptionPage extends StatefulWidget {
@@ -28,12 +29,85 @@ class SubscriptionPage extends StatefulWidget {
 class _SubscriptionPageState extends State<SubscriptionPage> {
   final InAppPurchase _inAppPurchase = InAppPurchase.instance;
   late StreamSubscription<List<PurchaseDetails>> _subscription;
+  final TextEditingController _promoCodeController = TextEditingController();
   List<ProductDetails> _products = [];
   bool _isLoading = true;
+  bool _storeAvailable = true;
+  bool _isPurchasing = false;
+  String? _storeNotice;
+  String? _promoError;
+  String? _appliedPromoCode;
+  String? _promoInfo;
+  Map<String, dynamic>? _newRegistrationSubscriptionData;
 
   static const String _proProductId = 'pro_worker_monthly';
   static const String _backwardsCompatibleId =
       'com-hirehub-app-pro-worker-monthly';
+
+  static const Set<String> _allowedSubscriptionIds = {
+    _proProductId,
+    _backwardsCompatibleId,
+  };
+
+  ProductDetails? get _selectedProduct {
+    for (final product in _products) {
+      if (product.id == _proProductId) return product;
+    }
+    for (final product in _products) {
+      if (product.id == _backwardsCompatibleId) return product;
+    }
+    return _products.isNotEmpty ? _products.first : null;
+  }
+
+  String get _monthlyPriceLabel => _selectedProduct?.price ?? '100 ₪';
+
+  static const List<Map<String, dynamic>> _proCapabilities = [
+    {
+      'icon': Icons.dashboard_customize_rounded,
+      'title': 'דאשבורד מקצועי',
+      'subtitle': 'תמונת מצב מלאה על פניות, הכנסות וביצועים במקום אחד.',
+    },
+    {
+      'icon': Icons.event_available_rounded,
+      'title': 'מערכת הזמנות חכמה',
+      'subtitle': 'ניהול בקשות עבודה, אישור/דחייה ותיעדוף יומי אוטומטי.',
+    },
+    {
+      'icon': Icons.manage_accounts_rounded,
+      'title': 'ניהול לידים ולקוחות',
+      'subtitle': 'מעקב אחרי כל ליד מהפנייה הראשונה ועד סגירת העבודה.',
+    },
+    {
+      'icon': Icons.analytics_rounded,
+      'title': 'ניתוח נתונים מתקדם',
+      'subtitle': 'דוחות על שיעור סגירה, זמני תגובה ומקורות פניות.',
+    },
+    {
+      'icon': Icons.calendar_month_rounded,
+      'title': 'יומן עבודה מובנה',
+      'subtitle': 'תכנון משימות ותיאום תורים ללא כפילויות.',
+    },
+    {
+      'icon': Icons.notifications_active_rounded,
+      'title': 'התראות בזמן אמת',
+      'subtitle': 'עדכונים מיידיים על פניות חדשות, הודעות ושינויים בהזמנות.',
+    },
+    {
+      'icon': Icons.forum_rounded,
+      'title': 'הודעות וצ׳אט עם לקוחות',
+      'subtitle': 'תקשורת מהירה מתוך האפליקציה לסגירת עבודות מהר יותר.',
+    },
+    {
+      'icon': Icons.workspace_premium_rounded,
+      'title': 'חשיפה ותדמית Pro',
+      'subtitle': 'הבלטה בתוצאות החיפוש ותג מקצוען שמחזק אמון.',
+    },
+    {
+      'icon': Icons.support_agent_rounded,
+      'title': 'תמיכת VIP',
+      'subtitle': 'עדיפות בפניות תמיכה וליווי אישי לעסקים פעילים.',
+    },
+  ];
 
   @override
   void initState() {
@@ -51,7 +125,38 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   @override
   void dispose() {
     _subscription.cancel();
+    _promoCodeController.dispose();
     super.dispose();
+  }
+
+  void _applyPromoCode() {
+    final rawCode = _promoCodeController.text.trim().toUpperCase();
+    if (rawCode.isEmpty) {
+      setState(() {
+        _promoError = 'הכנס קוד קופון.';
+      });
+      return;
+    }
+
+    setState(() {
+      _promoError = null;
+      _appliedPromoCode = rawCode;
+      _promoInfo =
+          'הקוד נשמר. יש לממש אותו בגוגל פליי ואז ללחוץ על "שחזור רכישה".';
+    });
+  }
+
+  Future<void> _openPlayRedeemPage() async {
+    final uri = Uri.parse('https://play.google.com/redeem');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('לא ניתן לפתוח את עמוד המימוש של גוגל פליי.'),
+        ),
+      );
+    }
   }
 
   Future<void> _initStoreInfo() async {
@@ -59,6 +164,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     final bool isAvailable = await _inAppPurchase.isAvailable();
     if (!isAvailable) {
       setState(() {
+        _storeAvailable = false;
+        _storeNotice = 'חנות הרכישות אינה זמינה כרגע במכשיר זה.';
         _isLoading = false;
       });
       return;
@@ -68,8 +175,22 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     final ProductDetailsResponse response = await _inAppPurchase
         .queryProductDetails(kIds);
 
+    final String notFoundJoined = response.notFoundIDs.join(', ');
+    final bool hasMatchingProduct = response.productDetails.any(
+      (p) => _allowedSubscriptionIds.contains(p.id),
+    );
+
     setState(() {
       _products = response.productDetails;
+      _storeAvailable = hasMatchingProduct;
+      if (response.notFoundIDs.isNotEmpty) {
+        _storeNotice =
+            'מוצר המנוי לא נמצא בחנות עבור האפליקציה הזו: $notFoundJoined';
+      } else if (!hasMatchingProduct) {
+        _storeNotice = 'לא נמצאה חבילת Pro זמינה לרכישה כרגע עבור חשבון זה.';
+      } else {
+        _storeNotice = null;
+      }
       _isLoading = false;
     });
   }
@@ -77,6 +198,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   void _listenToPurchaseUpdated(List<PurchaseDetails> purchaseDetailsList) {
     for (var purchaseDetails in purchaseDetailsList) {
       if (purchaseDetails.status == PurchaseStatus.error) {
+        if (mounted) setState(() => _isPurchasing = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text("הרכישה נכשלה: ${purchaseDetails.error?.message}"),
@@ -84,7 +206,23 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         );
       } else if (purchaseDetails.status == PurchaseStatus.purchased ||
           purchaseDetails.status == PurchaseStatus.restored) {
-        _completeSubscription();
+        if (mounted) setState(() => _isPurchasing = false);
+
+        if (!_allowedSubscriptionIds.contains(purchaseDetails.productID)) {
+          debugPrint('Ignoring non-Pro purchase: ${purchaseDetails.productID}');
+        } else if (_isPurchaseDataInvalid(purchaseDetails)) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('אימות הרכישה נכשל. נסה שוב או בצע שחזור רכישה.'),
+              ),
+            );
+          }
+        } else {
+          _completeSubscription(purchaseDetails: purchaseDetails);
+        }
+      } else if (purchaseDetails.status == PurchaseStatus.canceled) {
+        if (mounted) setState(() => _isPurchasing = false);
       }
       if (purchaseDetails.pendingCompletePurchase) {
         _inAppPurchase.completePurchase(purchaseDetails);
@@ -92,18 +230,44 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     }
   }
 
-  Future<void> _completeSubscription() async {
+  bool _isPurchaseDataInvalid(PurchaseDetails details) {
+    final token = details.verificationData.serverVerificationData.trim();
+    return token.isEmpty;
+  }
+
+  Future<void> _completeSubscription({
+    required PurchaseDetails purchaseDetails,
+  }) async {
     if (widget.isNewRegistration) {
+      _newRegistrationSubscriptionData = {
+        'isSubscribed': true,
+        'subscriptionStatus': 'active',
+        'subscriptionCanceled': false,
+        'appliedPromoCode': _appliedPromoCode,
+        'subscriptionProductId': purchaseDetails.productID,
+        'subscriptionPlatform': purchaseDetails.verificationData.source,
+        'subscriptionPurchaseId': purchaseDetails.purchaseID,
+        'subscriptionTransactionDate': purchaseDetails.transactionDate,
+      };
+      await _savePurchaseMetadata(purchaseDetails);
       _showSuccessDialog(isNewReg: true);
     } else {
       setState(() => _isLoading = true);
-      bool success = await _finalizeWorkerUpgrade();
+      bool success = await _finalizeWorkerUpgrade(purchaseDetails);
       setState(() => _isLoading = false);
-      if (success) _showSuccessDialog(isNewReg: false);
+      if (success) {
+        _showSuccessDialog(isNewReg: false);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('הרכישה זוהתה אך ההפעלה נכשלה. נסה שוב.'),
+          ),
+        );
+      }
     }
   }
 
-  Future<bool> _finalizeWorkerUpgrade() async {
+  Future<bool> _finalizeWorkerUpgrade(PurchaseDetails purchaseDetails) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return false;
@@ -118,6 +282,14 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       userData.addAll({
         'role': 'worker',
         'isSubscribed': true,
+        'subscriptionStatus': 'active',
+        'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
+        'subscriptionCanceled': false,
+        'appliedPromoCode': _appliedPromoCode,
+        'subscriptionProductId': purchaseDetails.productID,
+        'subscriptionPlatform': purchaseDetails.verificationData.source,
+        'subscriptionPurchaseId': purchaseDetails.purchaseID,
+        'subscriptionTransactionDate': purchaseDetails.transactionDate,
         'subscriptionDate': FieldValue.serverTimestamp(),
       });
 
@@ -137,6 +309,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
           .collection('users')
           .doc(user.uid)
           .set(userData, SetOptions(merge: true));
+
+      await _savePurchaseMetadata(purchaseDetails);
       return true;
     } catch (e) {
       debugPrint("Upgrade Error: $e");
@@ -144,7 +318,70 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     }
   }
 
-  void _buySubscription() => _completeSubscription();
+  Future<void> _savePurchaseMetadata(PurchaseDetails purchaseDetails) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final firestore = FirebaseFirestore.instance;
+    await firestore
+        .collection('users')
+        .doc(user.uid)
+        .collection('subscriptionPayments')
+        .add({
+          'productId': purchaseDetails.productID,
+          'status': purchaseDetails.status.name,
+          'promoCode': _appliedPromoCode,
+          'purchaseId': purchaseDetails.purchaseID,
+          'transactionDate': purchaseDetails.transactionDate,
+          'verificationSource': purchaseDetails.verificationData.source,
+          'verificationToken':
+              purchaseDetails.verificationData.serverVerificationData,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+  }
+
+  Future<void> _buySubscription() async {
+    if (!_storeAvailable || _isPurchasing) return;
+    final product = _selectedProduct;
+    if (product == null) {
+      setState(() {
+        _storeNotice = 'לא נמצאה חבילת Pro זמינה לרכישה כרגע.';
+      });
+      return;
+    }
+
+    setState(() => _isPurchasing = true);
+    try {
+      final purchaseParam = PurchaseParam(productDetails: product);
+      await _inAppPurchase.buyNonConsumable(purchaseParam: purchaseParam);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isPurchasing = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('שגיאה בהתחלת רכישה: $e')));
+      }
+    }
+  }
+
+  Future<void> _restoreSubscription() async {
+    try {
+      setState(() => _isPurchasing = true);
+      await _inAppPurchase.restorePurchases();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('שחזור רכישות הופעל. בודקים זכאות...')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isPurchasing = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('שגיאה בשחזור רכישות: $e')));
+      }
+    }
+  }
 
   void _showSuccessDialog({required bool isNewReg}) {
     showDialog(
@@ -168,11 +405,15 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               onPressed: () {
                 Navigator.pop(context); // Close dialog
                 if (isNewReg) {
+                  final pendingData = <String, dynamic>{
+                    ...?widget.pendingUserData,
+                    ...?_newRegistrationSubscriptionData,
+                  };
                   Navigator.pushAndRemoveUntil(
                     context,
                     MaterialPageRoute(
                       builder: (context) => SignUpPage(
-                        pendingWorkerData: widget.pendingUserData,
+                        pendingWorkerData: pendingData,
                         pendingWorkerImage: widget.pendingImage,
                         startAtStep: 1,
                       ),
@@ -201,6 +442,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
+        backgroundColor: const Color(0xFFF4F8FF),
         appBar: AppBar(
           title: const Text(
             'מנוי Pro',
@@ -218,15 +460,27 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               ),
             ),
           ),
+          actions: [
+            IconButton(
+              tooltip: 'רענן',
+              onPressed: _isLoading ? null : _initStoreInfo,
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          ],
         ),
+        bottomNavigationBar: _buildBottomActionBar(),
         body: _isLoading
             ? const Center(child: CircularProgressIndicator())
             : SingleChildScrollView(
                 child: Padding(
-                  padding: const EdgeInsets.all(24.0),
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 140),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      _buildHeaderHero(),
+                      const SizedBox(height: 14),
+                      _buildQuickValueChips(),
+                      const SizedBox(height: 24),
                       const Text(
                         'שדרג את החשבון שלך',
                         style: TextStyle(
@@ -248,37 +502,302 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                       ),
                       const SizedBox(height: 40),
                       _buildCard(),
-                      const SizedBox(height: 40),
-                      ElevatedButton(
-                        onPressed: _buySubscription,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1976D2),
-                          padding: const EdgeInsets.symmetric(vertical: 18),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(15),
-                          ),
-                          elevation: 8,
-                          shadowColor: Colors.blueAccent.withOpacity(0.5),
-                        ),
-                        child: const Text(
-                          'הירשם עכשיו למסלול Pro',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'החיוב מתבצע באופן חודשי. ניתן לבטל בכל עת.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 13, color: Colors.grey),
-                      ),
+                      const SizedBox(height: 18),
+                      _buildPromoCodeSection(),
+                      const SizedBox(height: 28),
+                      if (_storeNotice != null) ...[
+                        _buildStoreNotice(_storeNotice!),
+                        const SizedBox(height: 22),
+                      ],
+                      _buildHowItWorks(),
+                      const SizedBox(height: 24),
+                      _buildProCapabilitiesSection(),
+                      const SizedBox(height: 24),
+                      _buildGrowthStats(),
                     ],
                   ),
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _buildBottomActionBar() {
+    return SafeArea(
+      minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 22,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ElevatedButton(
+              onPressed: (!_storeAvailable || _isPurchasing)
+                  ? null
+                  : () {
+                      _buySubscription();
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0D47A1),
+                minimumSize: const Size.fromHeight(52),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: _isPurchasing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.4,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Text(
+                      'הצטרפות ל-Pro · $_monthlyPriceLabel',
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: _isPurchasing ? null : _restoreSubscription,
+              child: const Text('כבר רכשת? שחזור רכישה'),
+            ),
+            const Text(
+              'החיוב חודשי וניתן לבטל בכל עת דרך חנות האפליקציות.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeaderHero() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0B4FC2), Color(0xFF1E88E5), Color(0xFF48B3FF)],
+          begin: Alignment.topRight,
+          end: Alignment.bottomLeft,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.blue.withOpacity(0.28),
+            blurRadius: 24,
+            offset: const Offset(0, 14),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Row(
+            children: [
+              Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 26),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'HireHub Pro לעסקים שרוצים לגדול',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 14),
+          Text(
+            'המסלול שמעניק לך כלים מקצועיים לניהול עבודה, לקוחות והכנסות במקום אחד.',
+            style: TextStyle(color: Colors.white, fontSize: 15, height: 1.5),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickValueChips() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      alignment: WrapAlignment.center,
+      children: const [
+        _ChipLabel(text: 'Dashboard מתקדם'),
+        _ChipLabel(text: 'מערכת הזמנות'),
+        _ChipLabel(text: 'ניהול לידים'),
+        _ChipLabel(text: 'דוחות ביצועים'),
+      ],
+    );
+  }
+
+  Widget _buildStoreNotice(String message) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF4E5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFFD08A)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, color: Color(0xFF8A5A00)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Color(0xFF734800),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHowItWorks() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF4FF),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'איך זה עובד?',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF10336F),
+            ),
+          ),
+          SizedBox(height: 10),
+          _FlowLine(
+            title: 'נרשמים למסלול Pro',
+            subtitle: 'הפעלה מהירה מתוך האפליקציה.',
+          ),
+          _FlowLine(
+            title: 'מקבלים את כל הכלים',
+            subtitle: 'דאשבורד, הזמנות, לידים ותקשורת עם לקוחות.',
+          ),
+          _FlowLine(
+            title: 'מנהלים וצומחים',
+            subtitle: 'יותר חשיפה, יותר פניות ויותר עבודות סגורות.',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPromoCodeSection() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFD9E6FF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'קוד קופון',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF10336F),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _promoCodeController,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: true,
+                    fillColor: const Color(0xFFF6F9FF),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              ElevatedButton(
+                onPressed: _applyPromoCode,
+                child: const Text('החל'),
+              ),
+            ],
+          ),
+          if (_promoError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _promoError!,
+              style: const TextStyle(color: Colors.red, fontSize: 12),
+            ),
+          ],
+          if (_promoInfo != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _promoInfo!,
+              style: const TextStyle(
+                color: Color(0xFF1B7F3A),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          if (_appliedPromoCode != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              'קוד שנשמר: $_appliedPromoCode',
+              style: const TextStyle(
+                color: Color(0xFF0D3F91),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: _openPlayRedeemPage,
+            icon: const Icon(Icons.open_in_new_rounded),
+            label: const Text('מימוש קוד בגוגל פליי'),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'קודי פרומו של Google Play ממומשים מחוץ לאפליקציה. לאחר המימוש לחץ על "כבר רכשת? שחזור רכישה".',
+            style: TextStyle(fontSize: 11, color: Colors.black54),
+          ),
+        ],
       ),
     );
   }
@@ -343,7 +862,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 ],
               ),
               const Divider(color: Colors.white24, height: 48, thickness: 1),
-              _buildFeatureRow('הופעה בראש רשימת העובדים'),
               _buildFeatureRow('קבלת פניות (לידים) ללא הגבלה'),
               _buildFeatureRow('תג "מקצוען" מוצמד לפרופיל'),
               _buildFeatureRow('גישה לכלי ניהול מתקדמים'),
@@ -351,36 +869,145 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             ],
           ),
         ),
-        Positioned(
-          top: -20,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.amber,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Colors.black26,
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: const Text(
-                'הכי פופולרי',
-                style: TextStyle(
-                  color: Colors.black,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
+      ],
+    );
+  }
+
+  Widget _buildProCapabilitiesSection() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFE6EEFF)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'מה מקבלים במסלול Pro?',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF0F2E67),
             ),
           ),
+          const SizedBox(height: 8),
+          const Text(
+            'כל היכולות שעוזרות לך לנהל עסק מקצועי ולסגור יותר עבודות.',
+            style: TextStyle(fontSize: 14, color: Colors.black54, height: 1.45),
+          ),
+          const SizedBox(height: 16),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final bool isNarrow = constraints.maxWidth < 520;
+              final double itemWidth = isNarrow
+                  ? constraints.maxWidth
+                  : (constraints.maxWidth - 12) / 2;
+
+              return Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: _proCapabilities
+                    .map(
+                      (capability) => SizedBox(
+                        width: itemWidth,
+                        child: _buildCapabilityTile(
+                          icon: capability['icon'] as IconData,
+                          title: capability['title'] as String,
+                          subtitle: capability['subtitle'] as String,
+                        ),
+                      ),
+                    )
+                    .toList(),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCapabilityTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFF7FAFF), Color(0xFFEEF5FF)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-      ],
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E88E5).withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: const Color(0xFF1E88E5), size: 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF0D2C61),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Colors.black54,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGrowthStats() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D47A1),
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: const Wrap(
+        alignment: WrapAlignment.spaceAround,
+        spacing: 20,
+        runSpacing: 10,
+        children: [
+          _StatChip(title: '24/7', subtitle: 'גישה למערכת'),
+          _StatChip(title: '1', subtitle: 'מרכז ניהול אחד'),
+          _StatChip(title: 'Pro', subtitle: 'חשיפה מוגברת'),
+        ],
+      ),
     );
   }
 
@@ -409,6 +1036,103 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _StatChip extends StatelessWidget {
+  final String title;
+  final String subtitle;
+
+  const _StatChip({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          style: const TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+      ],
+    );
+  }
+}
+
+class _FlowLine extends StatelessWidget {
+  final String title;
+  final String subtitle;
+
+  const _FlowLine({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 3),
+            child: Icon(Icons.check_circle, color: Color(0xFF1E88E5), size: 18),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF10336F),
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(fontSize: 13, color: Colors.black54),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChipLabel extends StatelessWidget {
+  final String text;
+
+  const _ChipLabel({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFD8E5FF)),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Color(0xFF0D3F91),
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+        ),
       ),
     );
   }

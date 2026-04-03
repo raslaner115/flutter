@@ -22,6 +22,7 @@ import 'package:untitled1/pages/add_project.dart';
 import 'package:untitled1/pages/add_review.dart';
 import 'package:untitled1/pages/post_details_page.dart';
 import 'package:untitled1/pages/location_manager_page.dart';
+import 'package:untitled1/pages/subscription.dart';
 import 'package:untitled1/services/location_context_service.dart';
 
 import 'package:untitled1/widgets/cached_video_player.dart';
@@ -72,6 +73,11 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
 
   bool _isOwnProfile = false;
   bool _isLoading = true;
+  bool _isSubscribed = false;
+  String _subscriptionStatus = 'inactive';
+  DateTime? _subscriptionDate;
+  DateTime? _subscriptionExpiresAt;
+  bool _subscriptionSyncInProgress = false;
 
   bool _isIdVerified = false;
   bool _isBusinessVerified = false;
@@ -320,6 +326,45 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
     });
   }
 
+  DateTime? _toDate(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is String) return DateTime.tryParse(value);
+    return null;
+  }
+
+  Future<void> _enforceSubscriptionLifecycle(String uid) async {
+    if (_subscriptionSyncInProgress || _userRole != 'worker') return;
+
+    final now = DateTime.now();
+    final DateTime? effectiveExpiry =
+        _subscriptionExpiresAt ??
+        _subscriptionDate?.add(const Duration(days: 30));
+
+    if (_subscriptionStatus == 'inactive' &&
+        _isSubscribed &&
+        effectiveExpiry != null &&
+        now.isAfter(effectiveExpiry)) {
+      _subscriptionSyncInProgress = true;
+      try {
+        await _firestore.collection('users').doc(uid).update({
+          'isSubscribed': false,
+          'subscriptionStatus': 'inactive',
+          'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
+        });
+        if (mounted) {
+          setState(() {
+            _isSubscribed = false;
+            _subscriptionStatus = 'inactive';
+          });
+        }
+      } catch (e) {
+        debugPrint('Subscription lifecycle sync failed: $e');
+      } finally {
+        _subscriptionSyncInProgress = false;
+      }
+    }
+  }
+
   Future<void> _fetchUserData() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     final targetUid = widget.userId ?? currentUser?.uid;
@@ -355,6 +400,12 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
           _profileImageUrl = data['profileImageUrl']?.toString() ?? "";
           _profileViews = data['profileViews'] ?? 0;
           _userRole = data['role'] ?? 'customer';
+          _isSubscribed = data['isSubscribed'] == true;
+          _subscriptionStatus =
+              data['subscriptionStatus']?.toString().toLowerCase() ??
+              (_isSubscribed ? 'active' : 'inactive');
+          _subscriptionDate = _toDate(data['subscriptionDate']);
+          _subscriptionExpiresAt = _toDate(data['subscriptionExpiresAt']);
 
           if (data['professions'] is List) {
             _userProfessions = List<String>.from(data['professions']);
@@ -427,6 +478,8 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
             });
           }
         }
+
+        await _enforceSubscriptionLifecycle(targetUid);
 
         if (mounted) setState(() => _isLoading = false);
       } else {
@@ -1669,6 +1722,10 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
                   : strings['upgrade_worker']!,
             ),
             const SizedBox(height: 16),
+            if (_userRole == 'worker' && _subscriptionStatus == 'inactive') ...[
+              _buildRenewSubscriptionCard(strings),
+              const SizedBox(height: 16),
+            ],
             if (_userRole == 'worker' && currentUserId != null)
               GridView.count(
                 shrinkWrap: true,
@@ -1907,6 +1964,59 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildRenewSubscriptionCard(Map<String, String> strings) {
+    final DateTime? effectiveExpiry =
+        _subscriptionExpiresAt ??
+        _subscriptionDate?.add(const Duration(days: 30));
+    final String expiryText = effectiveExpiry != null
+        ? '${effectiveExpiry.day.toString().padLeft(2, '0')}/${effectiveExpiry.month.toString().padLeft(2, '0')}/${effectiveExpiry.year}'
+        : strings['unknown'] ?? 'Unknown';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF4E5),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFFCC80)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            strings['subscription_inactive'] ?? 'Subscription is inactive',
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF8A4F00),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${strings['subscription_expires'] ?? 'Access expires on'}: $expiryText',
+            style: const TextStyle(fontSize: 13, color: Color(0xFF7A4A00)),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SubscriptionPage(email: _email),
+                ),
+              );
+            },
+            icon: const Icon(Icons.workspace_premium_rounded),
+            label: Text(strings['renew_subscription'] ?? 'Renew Subscription'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1976D2),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _tabController?.dispose();
@@ -1956,6 +2066,10 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
           'invoice_builder': 'יוצר חשבוניות',
           'verify_business': 'אמת עסק',
           'change_business': 'עדכן פרטי עסק',
+          'renew_subscription': 'חדש מנוי',
+          'subscription_inactive': 'המנוי אינו פעיל',
+          'subscription_expires': 'הגישה מסתיימת בתאריך',
+          'unknown': 'לא ידוע',
         };
       case 'ar':
         return {
@@ -1993,6 +2107,10 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
           'invoice_builder': 'منشئ الفواتير',
           'verify_business': 'توثيق العمل',
           'change_business': 'تحديث بيانات العمل',
+          'renew_subscription': 'تجديد الاشتراك',
+          'subscription_inactive': 'الاشتراك غير نشط',
+          'subscription_expires': 'تنتهي الصلاحية في',
+          'unknown': 'غير معروف',
         };
       default:
         return {
@@ -2030,6 +2148,10 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
           'invoice_builder': 'Invoice Builder',
           'verify_business': 'Verify Business',
           'change_business': 'Update Business',
+          'renew_subscription': 'Renew Subscription',
+          'subscription_inactive': 'Subscription is inactive',
+          'subscription_expires': 'Access expires on',
+          'unknown': 'Unknown',
         };
     }
   }
