@@ -8,6 +8,7 @@ import 'package:untitled1/pages/invoice_builder.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart' as intl;
+import 'package:untitled1/services/subscription_access_service.dart';
 
 class SupportBotPage extends StatefulWidget {
   const SupportBotPage({super.key});
@@ -40,10 +41,12 @@ class _SupportBotPageState extends State<SupportBotPage>
   String _userRole = 'customer';
   String? _lastIntent;
   late AnimationController _dotsController;
+  late final Future<SubscriptionAccessState> _accessFuture;
 
   @override
   void initState() {
     super.initState();
+    _accessFuture = SubscriptionAccessService.getCurrentUserState();
     _dotsController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -790,7 +793,28 @@ class _SupportBotPageState extends State<SupportBotPage>
     final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
     final isRtl = locale == 'he' || locale == 'ar';
 
-    return Directionality(
+    return FutureBuilder<SubscriptionAccessState>(
+      future: _accessFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.data?.isUnsubscribedWorker == true) {
+          return Directionality(
+            textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+            child: SubscriptionAccessService.buildLockedScaffold(
+              title: isRtl ? 'עוזר HireHub' : 'HireHub AI Assistant',
+              message: isRtl
+                  ? 'צ׳אט הבוט זמין רק לבעלי מנוי Pro פעיל.'
+                  : 'The bot chat is available only with an active Pro subscription.',
+            ),
+          );
+        }
+
+        return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         backgroundColor: const Color(0xFFF1F5FB),
@@ -907,6 +931,8 @@ class _SupportBotPageState extends State<SupportBotPage>
           ],
         ),
       ),
+        );
+      },
     );
   }
 

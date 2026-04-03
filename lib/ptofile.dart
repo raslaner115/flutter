@@ -24,6 +24,7 @@ import 'package:untitled1/pages/post_details_page.dart';
 import 'package:untitled1/pages/location_manager_page.dart';
 import 'package:untitled1/pages/subscription.dart';
 import 'package:untitled1/services/location_context_service.dart';
+import 'package:untitled1/services/subscription_access_service.dart';
 
 import 'package:untitled1/widgets/cached_video_player.dart';
 
@@ -86,6 +87,14 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
   String _distanceStr = "";
   double? _proLat;
   double? _proLng;
+
+  bool get _hasActiveWorkerSubscription {
+    return SubscriptionAccessService.hasActiveWorkerSubscriptionFromData({
+      'role': _userRole,
+      'isSubscribed': _isSubscribed,
+      'subscriptionStatus': _subscriptionStatus,
+    });
+  }
 
   @override
   void initState() {
@@ -340,28 +349,48 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
         _subscriptionExpiresAt ??
         _subscriptionDate?.add(const Duration(days: 30));
 
-    if (_subscriptionStatus == 'inactive' &&
-        _isSubscribed &&
-        effectiveExpiry != null &&
-        now.isAfter(effectiveExpiry)) {
-      _subscriptionSyncInProgress = true;
-      try {
+    if (!_isSubscribed ||
+        effectiveExpiry == null ||
+        now.isBefore(effectiveExpiry)) {
+      return;
+    }
+
+    _subscriptionSyncInProgress = true;
+    try {
+      if (_subscriptionStatus == 'active') {
+        DateTime nextExpiry = effectiveExpiry;
+        while (!now.isBefore(nextExpiry)) {
+          nextExpiry = nextExpiry.add(const Duration(days: 30));
+        }
+
+        await _firestore.collection('users').doc(uid).update({
+          'subscriptionExpiresAt': Timestamp.fromDate(nextExpiry),
+          'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
+        });
+
+        if (mounted) {
+          setState(() {
+            _subscriptionExpiresAt = nextExpiry;
+          });
+        }
+      } else {
         await _firestore.collection('users').doc(uid).update({
           'isSubscribed': false,
           'subscriptionStatus': 'inactive',
           'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
         });
+
         if (mounted) {
           setState(() {
             _isSubscribed = false;
             _subscriptionStatus = 'inactive';
           });
         }
-      } catch (e) {
-        debugPrint('Subscription lifecycle sync failed: $e');
-      } finally {
-        _subscriptionSyncInProgress = false;
       }
+    } catch (e) {
+      debugPrint('Subscription lifecycle sync failed: $e');
+    } finally {
+      _subscriptionSyncInProgress = false;
     }
   }
 
@@ -1059,7 +1088,10 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
             ),
           ),
         ),
-        bottomNavigationBar: (!_isOwnProfile && _userRole == 'worker')
+        bottomNavigationBar:
+            (!_isOwnProfile &&
+                _userRole == 'worker' &&
+                _hasActiveWorkerSubscription)
             ? _buildBottomBar(strings)
             : null,
         floatingActionButton:
@@ -1722,7 +1754,8 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
                   : strings['upgrade_worker']!,
             ),
             const SizedBox(height: 16),
-            if (_userRole == 'worker' && _subscriptionStatus == 'inactive') ...[
+            if (_userRole == 'worker' &&
+                (_subscriptionStatus == 'inactive' || !_isSubscribed)) ...[
               _buildRenewSubscriptionCard(strings),
               const SizedBox(height: 16),
             ],
@@ -1735,41 +1768,45 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
                 mainAxisSpacing: 16,
                 childAspectRatio: 1.5,
                 children: [
-                  _buildModernToolCard(
-                    Icons.analytics_outlined,
-                    strings['analytics']!,
-                    Colors.indigo,
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => AnalyticsPage(
-                          userId: currentUserId,
-                          strings: strings,
+                  if (_hasActiveWorkerSubscription)
+                    _buildModernToolCard(
+                      Icons.analytics_outlined,
+                      strings['analytics']!,
+                      Colors.indigo,
+                      () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AnalyticsPage(
+                            userId: currentUserId,
+                            strings: strings,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  _buildModernToolCard(
-                    Icons.description_outlined,
-                    strings['invoice_builder']!,
-                    Colors.teal,
-                    () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => InvoiceBuilderPage(
-                            workerName: _userName,
-                            workerPhone: _phoneNumber,
-                            workerEmail: _email,
+                  if (_hasActiveWorkerSubscription)
+                    _buildModernToolCard(
+                      Icons.description_outlined,
+                      strings['invoice_builder']!,
+                      Colors.teal,
+                      () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => InvoiceBuilderPage(
+                              workerName: _userName,
+                              workerPhone: _phoneNumber,
+                              workerEmail: _email,
+                            ),
                           ),
-                        ),
-                      );
-                    },
-                  ),
-                  if (!_isBusinessVerified)
+                        );
+                      },
+                    ),
+                  if (_hasActiveWorkerSubscription)
                     _buildModernToolCard(
                       Icons.verified_user_outlined,
-                      strings['verify_business']!,
+                      _isBusinessVerified
+                          ? strings['change_business']!
+                          : strings['verify_business']!,
                       Colors.deepOrange,
                       () => Navigator.push(
                         context,

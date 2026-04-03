@@ -10,6 +10,7 @@ import 'package:untitled1/services/language_provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart' as firebase_storage;
+import 'package:untitled1/services/subscription_access_service.dart';
 
 class InvoiceItem {
   final String description;
@@ -70,10 +71,12 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
   pw.MemoryImage? _cachedLogo;
   Map<String, String>? _cachedStrings;
   String? _lastLocale;
+  late final Future<SubscriptionAccessState> _accessFuture;
 
   @override
   void initState() {
     super.initState();
+    _accessFuture = SubscriptionAccessService.getCurrentUserState();
     // Temporary invoice number until worker info is fetched
     _invoiceNumber = "${intl.DateFormat('yyyy').format(DateTime.now())}-0000";
 
@@ -674,7 +677,28 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     final isRtl = Provider.of<LanguageProvider>(context).locale.languageCode == 'he' ||
         Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
 
-    return Directionality(
+    return FutureBuilder<SubscriptionAccessState>(
+      future: _accessFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.data?.isUnsubscribedWorker == true) {
+          return Directionality(
+            textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+            child: SubscriptionAccessService.buildLockedScaffold(
+              title: strings['title']!,
+              message: isRtl
+                  ? 'יצירת חשבוניות זמינה רק לבעלי מנוי Pro פעיל.'
+                  : 'Invoice creation is available only with an active Pro subscription.',
+            ),
+          );
+        }
+
+        return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         backgroundColor: const Color(0xFFF8FAFC),
@@ -893,6 +917,8 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           ),
         ),
       ),
+        );
+      },
     );
   }
 

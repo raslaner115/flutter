@@ -362,6 +362,9 @@ class _SignUpPageState extends State<SignUpPage> {
   Future<void> _onPhoneVerifiedAndSignedIn() async {
     if (_userType == UserType.worker &&
         widget.pendingWorkerData?['isSubscribed'] != true) {
+      // Persist all entered data immediately after phone verification,
+      // then continue the Pro subscription step.
+      await _commitUserDataToDatabase(navigateToHome: false);
       final workerPendingData = _buildWorkerPendingDataWithPhone();
       if (mounted) {
         setState(() {
@@ -434,7 +437,7 @@ class _SignUpPageState extends State<SignUpPage> {
     }
   }
 
-  Future<void> _commitUserDataToDatabase() async {
+  Future<void> _commitUserDataToDatabase({bool navigateToHome = true}) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
@@ -488,6 +491,14 @@ class _SignUpPageState extends State<SignUpPage> {
       if (_userType == UserType.worker) {
         final bool hasActiveSubscriptionFromPending =
             widget.pendingWorkerData?['isSubscribed'] == true;
+        final DateTime now = DateTime.now();
+        final DateTime defaultExpiry = now.add(const Duration(days: 30));
+        final DateTime? pendingDate = DateTime.tryParse(
+          widget.pendingWorkerData?['subscriptionDate']?.toString() ?? '',
+        );
+        final DateTime? pendingExpiry = DateTime.tryParse(
+          widget.pendingWorkerData?['subscriptionExpiresAt']?.toString() ?? '',
+        );
 
         userData.addAll({
           'professions': _selectedProfessions,
@@ -509,7 +520,12 @@ class _SignUpPageState extends State<SignUpPage> {
           'workRadius': _workRadius,
           'workCenterLat': _workCenter?.latitude,
           'workCenterLng': _workCenter?.longitude,
-          'subscriptionDate': FieldValue.serverTimestamp(),
+          'subscriptionDate': hasActiveSubscriptionFromPending
+              ? Timestamp.fromDate(pendingDate ?? now)
+              : null,
+          'subscriptionExpiresAt': hasActiveSubscriptionFromPending
+              ? Timestamp.fromDate(pendingExpiry ?? defaultExpiry)
+              : null,
           'avgRating': 0.0,
           'reviewCount': 0,
         });
@@ -531,7 +547,7 @@ class _SignUpPageState extends State<SignUpPage> {
         } catch (_) {}
       }
 
-      if (mounted) {
+      if (mounted && navigateToHome) {
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (context) => const MyHomePage()),

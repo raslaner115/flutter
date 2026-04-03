@@ -5,7 +5,6 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:untitled1/sign_up.dart';
 
 class SubscriptionPage extends StatefulWidget {
@@ -29,15 +28,11 @@ class SubscriptionPage extends StatefulWidget {
 class _SubscriptionPageState extends State<SubscriptionPage> {
   final InAppPurchase _inAppPurchase = InAppPurchase.instance;
   late StreamSubscription<List<PurchaseDetails>> _subscription;
-  final TextEditingController _promoCodeController = TextEditingController();
   List<ProductDetails> _products = [];
   bool _isLoading = true;
   bool _storeAvailable = true;
   bool _isPurchasing = false;
   String? _storeNotice;
-  String? _promoError;
-  String? _appliedPromoCode;
-  String? _promoInfo;
   Map<String, dynamic>? _newRegistrationSubscriptionData;
 
   static const String _proProductId = 'pro_worker_monthly';
@@ -125,38 +120,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   @override
   void dispose() {
     _subscription.cancel();
-    _promoCodeController.dispose();
     super.dispose();
-  }
-
-  void _applyPromoCode() {
-    final rawCode = _promoCodeController.text.trim().toUpperCase();
-    if (rawCode.isEmpty) {
-      setState(() {
-        _promoError = 'הכנס קוד קופון.';
-      });
-      return;
-    }
-
-    setState(() {
-      _promoError = null;
-      _appliedPromoCode = rawCode;
-      _promoInfo =
-          'הקוד נשמר. יש לממש אותו בגוגל פליי ואז ללחוץ על "שחזור רכישה".';
-    });
-  }
-
-  Future<void> _openPlayRedeemPage() async {
-    final uri = Uri.parse('https://play.google.com/redeem');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('לא ניתן לפתוח את עמוד המימוש של גוגל פליי.'),
-        ),
-      );
-    }
   }
 
   Future<void> _initStoreInfo() async {
@@ -175,7 +139,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     final ProductDetailsResponse response = await _inAppPurchase
         .queryProductDetails(kIds);
 
-    final String notFoundJoined = response.notFoundIDs.join(', ');
     final bool hasMatchingProduct = response.productDetails.any(
       (p) => _allowedSubscriptionIds.contains(p.id),
     );
@@ -184,8 +147,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       _products = response.productDetails;
       _storeAvailable = hasMatchingProduct;
       if (response.notFoundIDs.isNotEmpty) {
-        _storeNotice =
-            'מוצר המנוי לא נמצא בחנות עבור האפליקציה הזו: $notFoundJoined';
+        _storeNotice = null;
       } else if (!hasMatchingProduct) {
         _storeNotice = 'לא נמצאה חבילת Pro זמינה לרכישה כרגע עבור חשבון זה.';
       } else {
@@ -239,11 +201,15 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     required PurchaseDetails purchaseDetails,
   }) async {
     if (widget.isNewRegistration) {
+      final now = DateTime.now();
       _newRegistrationSubscriptionData = {
         'isSubscribed': true,
         'subscriptionStatus': 'active',
         'subscriptionCanceled': false,
-        'appliedPromoCode': _appliedPromoCode,
+        'subscriptionDate': now.toIso8601String(),
+        'subscriptionExpiresAt': now
+            .add(const Duration(days: 30))
+            .toIso8601String(),
         'subscriptionProductId': purchaseDetails.productID,
         'subscriptionPlatform': purchaseDetails.verificationData.source,
         'subscriptionPurchaseId': purchaseDetails.purchaseID,
@@ -272,6 +238,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return false;
       final firestore = FirebaseFirestore.instance;
+      final now = DateTime.now();
 
       // Fetch existing user data from unified 'users' collection
       final userDoc = await firestore.collection('users').doc(user.uid).get();
@@ -285,12 +252,14 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         'subscriptionStatus': 'active',
         'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
         'subscriptionCanceled': false,
-        'appliedPromoCode': _appliedPromoCode,
         'subscriptionProductId': purchaseDetails.productID,
         'subscriptionPlatform': purchaseDetails.verificationData.source,
         'subscriptionPurchaseId': purchaseDetails.purchaseID,
         'subscriptionTransactionDate': purchaseDetails.transactionDate,
-        'subscriptionDate': FieldValue.serverTimestamp(),
+        'subscriptionDate': Timestamp.fromDate(now),
+        'subscriptionExpiresAt': Timestamp.fromDate(
+          now.add(const Duration(days: 30)),
+        ),
       });
 
       if (widget.pendingUserData != null)
@@ -330,7 +299,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         .add({
           'productId': purchaseDetails.productID,
           'status': purchaseDetails.status.name,
-          'promoCode': _appliedPromoCode,
           'purchaseId': purchaseDetails.purchaseID,
           'transactionDate': purchaseDetails.transactionDate,
           'verificationSource': purchaseDetails.verificationData.source,
@@ -502,8 +470,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                       ),
                       const SizedBox(height: 40),
                       _buildCard(),
-                      const SizedBox(height: 18),
-                      _buildPromoCodeSection(),
                       const SizedBox(height: 28),
                       if (_storeNotice != null) ...[
                         _buildStoreNotice(_storeNotice!),
@@ -707,95 +673,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
           _FlowLine(
             title: 'מנהלים וצומחים',
             subtitle: 'יותר חשיפה, יותר פניות ויותר עבודות סגורות.',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPromoCodeSection() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFD9E6FF)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'קוד קופון',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF10336F),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _promoCodeController,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: InputDecoration(
-                    isDense: true,
-                    filled: true,
-                    fillColor: const Color(0xFFF6F9FF),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              ElevatedButton(
-                onPressed: _applyPromoCode,
-                child: const Text('החל'),
-              ),
-            ],
-          ),
-          if (_promoError != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _promoError!,
-              style: const TextStyle(color: Colors.red, fontSize: 12),
-            ),
-          ],
-          if (_promoInfo != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _promoInfo!,
-              style: const TextStyle(
-                color: Color(0xFF1B7F3A),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-          if (_appliedPromoCode != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              'קוד שנשמר: $_appliedPromoCode',
-              style: const TextStyle(
-                color: Color(0xFF0D3F91),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: _openPlayRedeemPage,
-            icon: const Icon(Icons.open_in_new_rounded),
-            label: const Text('מימוש קוד בגוגל פליי'),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'קודי פרומו של Google Play ממומשים מחוץ לאפליקציה. לאחר המימוש לחץ על "כבר רכשת? שחזור רכישה".',
-            style: TextStyle(fontSize: 11, color: Colors.black54),
           ),
         ],
       ),

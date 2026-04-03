@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/services/analytics_service.dart';
 import 'package:untitled1/services/location_context_service.dart';
+import 'package:untitled1/services/subscription_access_service.dart';
 import 'package:untitled1/ptofile.dart';
 import 'package:untitled1/pages/location_manager_page.dart';
 
@@ -281,7 +282,7 @@ class _SearchPageState extends State<SearchPage> {
           data['avgRating'] = (data['avgRating'] ?? 0.0).toDouble();
           data['reviewCount'] = data['reviewCount'] ?? 0;
           return data;
-        }).toList();
+        }).where(SubscriptionAccessService.hasActiveWorkerSubscriptionFromData).toList();
 
         if (mounted && currentId == _fetchSessionId) {
           setState(() {
@@ -405,6 +406,10 @@ class _SearchPageState extends State<SearchPage> {
     setState(() {
       if (_showWorkerList) {
         _filteredWorkers = _allWorkers.where((w) {
+          if (!SubscriptionAccessService.hasActiveWorkerSubscriptionFromData(w)) {
+            return false;
+          }
+
           final workerProfsEn =
               (w['professions'] as List?)
                   ?.map((e) => _normalizeSearchText(e.toString()))

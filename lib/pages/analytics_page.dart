@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' as intl;
 import 'package:provider/provider.dart';
 import 'package:untitled1/services/language_provider.dart';
+import 'package:untitled1/services/subscription_access_service.dart';
 
 class AnalyticsPage extends StatefulWidget {
   final String userId;
@@ -53,6 +54,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   Map<String, Map<String, int>> _professionWeeklyViews = {};
   List<int> _weeklyViewCounts = List.filled(7, 0);
   int _lifetimeProfileViews = 0;
+  late final Future<SubscriptionAccessState> _accessFuture;
 
   String _normalizeLocaleCode(String code) {
     final normalized = code.toLowerCase();
@@ -332,6 +334,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   @override
   void initState() {
     super.initState();
+    _accessFuture = SubscriptionAccessService.getCurrentUserState();
     _fetchAnalytics();
   }
 
@@ -780,11 +783,32 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     // Rebuild this page when app language changes from settings.
     Provider.of<LanguageProvider>(context);
 
-    if (_isLoading && _totalJobs == 0) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
+    final isRtl = _localeCode == 'he' || _localeCode == 'ar';
 
-    return Scaffold(
+    return FutureBuilder<SubscriptionAccessState>(
+      future: _accessFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+
+        if (snapshot.data?.isUnsubscribedWorker == true) {
+          return Directionality(
+            textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+            child: SubscriptionAccessService.buildLockedScaffold(
+              title: _t('analytics_title'),
+              message: isRtl
+                  ? 'עמוד האנליטיקה זמין רק לבעלי מנוי Pro פעיל.'
+                  : 'Analytics is available only with an active Pro subscription.',
+            ),
+          );
+        }
+
+        if (_isLoading && _totalJobs == 0) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+
+        return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: Text(
@@ -827,6 +851,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           ),
         ),
       ),
+        );
+      },
     );
   }
 

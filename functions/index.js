@@ -1,5 +1,6 @@
 const admin = require("firebase-admin");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
 
 admin.initializeApp();
@@ -76,3 +77,110 @@ exports.sendChatPushOnNotificationCreate = onDocumentCreated(
     }
   }
 );
+
+exports.syncWorkerSubscriptionLifecycle = onSchedule(
+  {
+    schedule: "every 24 hours",
+    region: "us-central1",
+    timeZone: "UTC",
+  },
+  async () => {
+    const db = admin.firestore();
+    const now = new Date();
+    const pageSize = 300;
+
+    let lastDoc = null;
+    let scanned = 0;
+    let extended = 0;
+    let deactivated = 0;
+
+    while (true) {
+      let query = db
+        .collection("users")
+        .where("role", "==", "worker")
+        .where("isSubscribed", "==", true)
+        .orderBy(admin.firestore.FieldPath.documentId())
+        .limit(pageSize);
+
+      if (lastDoc) {
+        query = query.startAfter(lastDoc.id);
+      }
+
+      const snap = await query.get();
+      if (snap.empty) break;
+
+      const batch = db.batch();
+
+      for (const doc of snap.docs) {
+        scanned += 1;
+
+        const data = doc.data() || {};
+        const status = String(data.subscriptionStatus || "inactive").toLowerCase();
+        const isSubscribed = data.isSubscribed === true;
+        if (!isSubscribed) continue;
+
+        const subscriptionDate = toDate(data.subscriptionDate);
+        let expiry = toDate(data.subscriptionExpiresAt);
+        if (!expiry && subscriptionDate) {
+          expiry = addDays(subscriptionDate, 30);
+        }
+
+        if (!expiry || now < expiry) {
+          continue;
+        }
+
+        if (status === "active") {
+          let nextExpiry = new Date(expiry.getTime());
+          while (now >= nextExpiry) {
+            nextExpiry = addDays(nextExpiry, 30);
+          }
+
+          batch.update(doc.ref, {
+            subscriptionExpiresAt: admin.firestore.Timestamp.fromDate(nextExpiry),
+            subscriptionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          extended += 1;
+        } else {
+          batch.update(doc.ref, {
+            isSubscribed: false,
+            subscriptionStatus: "inactive",
+            subscriptionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          deactivated += 1;
+        }
+      }
+
+      await batch.commit();
+      lastDoc = snap.docs[snap.docs.length - 1];
+
+      if (snap.size < pageSize) {
+        break;
+      }
+    }
+
+    logger.info("Worker subscription lifecycle sync completed", {
+      scanned,
+      extended,
+      deactivated,
+    });
+  }
+);
+
+function toDate(value) {
+  if (!value) return null;
+  if (value instanceof admin.firestore.Timestamp) {
+    return value.toDate();
+  }
+  if (value instanceof Date) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
+
+function addDays(date, days) {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}

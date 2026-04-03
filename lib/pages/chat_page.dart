@@ -17,6 +17,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:http/http.dart' as http;
 import 'package:untitled1/ptofile.dart';
+import 'package:untitled1/services/subscription_access_service.dart';
 
 import '../widgets/cached_video_player.dart';
 
@@ -51,13 +52,16 @@ class _ChatPageState extends State<ChatPage> {
   final Set<String> _selectedMessageIds = {};
 
   bool _isWorker = false;
+  bool _canCreateInvoices = false;
   String? _currentUserName;
   String? _currentUserPhone;
   String? _currentUserEmail;
+  late final Future<SubscriptionAccessState> _accessFuture;
 
   @override
   void initState() {
     super.initState();
+    _accessFuture = SubscriptionAccessService.getCurrentUserState();
     WidgetsBinding.instance.addObserver(_lifecycleObserver);
     _checkUserType();
     final currentUserId = _auth.currentUser!.uid;
@@ -108,6 +112,11 @@ class _ChatPageState extends State<ChatPage> {
           final data = doc.data() as Map<String, dynamic>;
           setState(() {
             _isWorker = data['role'] == 'worker';
+            _canCreateInvoices =
+                _isWorker &&
+                SubscriptionAccessService.hasActiveWorkerSubscriptionFromData(
+                  data,
+                );
             _currentUserName = data['name'] ?? user.displayName;
             _currentUserPhone = data['phone'];
             _currentUserEmail = data['email'] ?? user.email;
@@ -349,7 +358,25 @@ class _ChatPageState extends State<ChatPage> {
         Provider.of<LanguageProvider>(context).locale.languageCode == 'he' ||
         Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
 
-    return Scaffold(
+    return FutureBuilder<SubscriptionAccessState>(
+      future: _accessFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.data?.isUnsubscribedWorker == true) {
+          return SubscriptionAccessService.buildLockedScaffold(
+            title: isRtl ? 'צ׳אט' : 'Chat',
+            message: isRtl
+                ? 'צ׳אט זמין רק לבעלי מנוי Pro פעיל.'
+                : 'Chat is available only with an active Pro subscription.',
+          );
+        }
+
+        return Scaffold(
       appBar: AppBar(
         title: _buildChatHeaderTitle(isRtl),
         centerTitle: true,
@@ -361,7 +388,7 @@ class _ChatPageState extends State<ChatPage> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          if (_isWorker)
+          if (_canCreateInvoices)
             IconButton(
               tooltip: isRtl ? "הפק חשבונית" : "Create Invoice",
               icon: const Icon(Icons.receipt_long_rounded, size: 22),
@@ -455,6 +482,8 @@ class _ChatPageState extends State<ChatPage> {
             _buildInputArea(isRtl),
         ],
       ),
+        );
+      },
     );
   }
 

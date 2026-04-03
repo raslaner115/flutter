@@ -13,6 +13,7 @@ import 'package:untitled1/widgets/skeleton.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:untitled1/services/location_context_service.dart';
+import 'package:untitled1/services/subscription_access_service.dart';
 import 'dart:async';
 
 class HomePage extends StatefulWidget {
@@ -318,13 +319,16 @@ class _HomePageState extends State<HomePage> {
           .limit(30) // Fetch more to filter locally
           .get();
 
-      final workers = snapshot.docs.map((doc) {
-        var userData = doc.data();
-        userData['uid'] = doc.id;
-        userData['avgRating'] = (userData['avgRating'] ?? 0.0).toDouble();
-        userData['reviewCount'] = userData['reviewCount'] ?? 0;
-        return userData;
-      }).toList();
+      final workers = snapshot.docs
+          .map((doc) {
+            var userData = doc.data();
+            userData['uid'] = doc.id;
+            userData['avgRating'] = (userData['avgRating'] ?? 0.0).toDouble();
+            userData['reviewCount'] = userData['reviewCount'] ?? 0;
+            return userData;
+          })
+          .where(SubscriptionAccessService.hasActiveWorkerSubscriptionFromData)
+          .toList();
 
       final filtered = _filterByProximity(workers);
 
@@ -372,13 +376,16 @@ class _HomePageState extends State<HomePage> {
           .limit(7)
           .get();
 
-      final workers = snapshot.docs.map((doc) {
-        var userData = doc.data();
-        userData['uid'] = doc.id;
-        userData['avgRating'] = (userData['avgRating'] ?? 0.0).toDouble();
-        userData['reviewCount'] = userData['reviewCount'] ?? 0;
-        return userData;
-      }).toList();
+      final workers = snapshot.docs
+          .map((doc) {
+            var userData = doc.data();
+            userData['uid'] = doc.id;
+            userData['avgRating'] = (userData['avgRating'] ?? 0.0).toDouble();
+            userData['reviewCount'] = userData['reviewCount'] ?? 0;
+            return userData;
+          })
+          .where(SubscriptionAccessService.hasActiveWorkerSubscriptionFromData)
+          .toList();
 
       if (mounted) {
         setState(() {

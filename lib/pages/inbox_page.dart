@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/chat_page.dart';
 import 'package:untitled1/pages/support_bot_page.dart';
+import 'package:untitled1/services/subscription_access_service.dart';
 import 'package:intl/intl.dart' as intl;
 
 class InboxPage extends StatefulWidget {
@@ -17,6 +18,13 @@ class InboxPage extends StatefulWidget {
 class _InboxPageState extends State<InboxPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  late final Future<SubscriptionAccessState> _accessFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _accessFuture = SubscriptionAccessService.getCurrentUserState();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -62,9 +70,30 @@ class _InboxPageState extends State<InboxPage> {
       );
     }
 
-    return Directionality(
-      textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
-      child: Scaffold(
+    return FutureBuilder<SubscriptionAccessState>(
+      future: _accessFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.data?.isUnsubscribedWorker == true) {
+          return Directionality(
+            textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+            child: SubscriptionAccessService.buildLockedScaffold(
+              title: isRtl ? 'הודעות' : 'Messages',
+              message: isRtl
+                  ? 'הודעות, צ׳אט ובוט התמיכה זמינים רק לבעלי מנוי Pro פעיל.'
+                  : 'Messages, chat, and the support bot are available only with an active Pro subscription.',
+            ),
+          );
+        }
+
+        return Directionality(
+          textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+          child: Scaffold(
         backgroundColor: Colors.white,
         appBar: AppBar(
           title: Text(
@@ -178,7 +207,9 @@ class _InboxPageState extends State<InboxPage> {
             ),
           ],
         ),
-      ),
+          ),
+        );
+      },
     );
   }
 
