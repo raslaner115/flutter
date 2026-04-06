@@ -13,6 +13,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart' as firebase_storage;
 import 'package:untitled1/services/subscription_access_service.dart';
 import 'package:untitled1/widgets/tour_tip_dialog.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 class _SavedInvoiceResult {
   final String url;
@@ -66,6 +68,242 @@ class InvoiceBuilderPage extends StatefulWidget {
 }
 
 class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
+  List<Map<String, String>> _logTargetsForDocType(String docType) {
+    switch (docType) {
+      case 'receipt':
+        return [
+          {'bucket': 'receipts', 'type': 'D120'},
+        ];
+      case 'credit_note':
+        return [
+          {'bucket': 'credit_notes', 'type': 'C300'},
+        ];
+      case 'invoice_receipt':
+        return [
+          {'bucket': 'invoices', 'type': 'C100'},
+          {'bucket': 'receipts', 'type': 'D120'},
+        ];
+      case 'invoice':
+      default:
+        return [
+          {'bucket': 'invoices', 'type': 'C100'},
+        ];
+    }
+  }
+
+  /// Generate BKMVDATA.TXT from logs/ collection
+  Future<void> generateBkmvDataTxt({
+    required String userId,
+    required String fromDate, // format: YYYYMMDD
+    required String toDate, // format: YYYYMMDD
+  }) async {
+    final bucketNames = ['invoices', 'receipts', 'credit_notes'];
+    final snapshots = await Future.wait(
+      bucketNames.map(
+        (bucket) => FirebaseFirestore.instance
+            .collection('logs')
+            .doc(bucket)
+            .collection('files')
+            .where('userId', isEqualTo: userId)
+            .where('date', isGreaterThanOrEqualTo: fromDate)
+            .where('date', isLessThanOrEqualTo: toDate)
+            .orderBy('date')
+            .orderBy('timestamp')
+            .get(),
+      ),
+    );
+
+    final allDocs = snapshots.expand((snap) => snap.docs).toList()
+      ..sort((a, b) {
+        final aData = a.data();
+        final bData = b.data();
+        final dateCompare =
+            (aData['date'] ?? '').toString().compareTo((bData['date'] ?? '').toString());
+        if (dateCompare != 0) return dateCompare;
+        final aTs = aData['timestamp'] as Timestamp?;
+        final bTs = bData['timestamp'] as Timestamp?;
+        if (aTs == null && bTs == null) return 0;
+        if (aTs == null) return -1;
+        if (bTs == null) return 1;
+        return aTs.compareTo(bTs);
+      });
+
+    final lines = <String>[];
+    for (final doc in allDocs) {
+      final data = doc.data();
+      final type = data['type'] ?? '';
+      final documentNumber = data['documentNumber']?.toString() ?? '';
+      final date = data['date'] ?? '';
+      final amount = (data['amount'] ?? 0).toStringAsFixed(2);
+      final vatAmount = (data['vatAmount'] ?? 0).toStringAsFixed(2);
+      final customerId = data['customerId'] ?? '';
+      lines.add('$type|$documentNumber|$date|$amount|$vatAmount|$customerId');
+    }
+
+    // Write to BKMVDATA.TXT in app's documents directory
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/BKMVDATA.TXT');
+    await file.writeAsString(lines.join('\n'));
+    // Optionally, show a snackbar or share the file
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('BKMVDATA.TXT generated in documents folder.')),
+      );
+    }
+  }
+
+  /// Atomic Firestore transaction for invoice creation and logging
+  Future<void> _createInvoiceAndLog({required Uint8List pdfBytes}) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final userId = user.uid;
+    final now = DateTime.now();
+    final dateStr = intl.DateFormat('yyyyMMdd').format(now);
+    final timestamp = FieldValue.serverTimestamp();
+    final customerId = _clientNameController.text.isNotEmpty
+        ? _clientNameController.text
+        : null;
+    final docType = _selectedDocType;
+    final vatAmount = (_dealerType == 'licensed' && docType != 'receipt')
+        ? (_totalAmount - (_totalAmount / 1.17))
+        : 0.0;
+    final logTargets = _logTargetsForDocType(docType);
+
+    final userDoc = FirebaseFirestore.instance.collection('users').doc(userId);
+    final counterRef = userDoc.collection('counters').doc('invoice');
+    final invoicesRef = userDoc.collection('invoices');
+    final logEntries = logTargets.map((target) {
+      final logBucketRef = FirebaseFirestore.instance
+          .collection('logs')
+          .doc(target['bucket']!);
+      return {
+        'bucket': target['bucket']!,
+        'type': target['type']!,
+        'bucketRef': logBucketRef,
+        'fileRef': logBucketRef.collection('files').doc(),
+      };
+    }).toList();
+
+    late int nextNumber;
+
+    await FirebaseFirestore.instance.runTransaction((transaction) async {
+      // Get and increment counter
+      final counterSnap = await transaction.get(counterRef);
+      final logCounterSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final entry in logEntries) {
+        final logBucketRef =
+            entry['bucketRef']! as DocumentReference<Map<String, dynamic>>;
+        logCounterSnaps.add(await transaction.get(logBucketRef));
+      }
+
+      nextNumber = 1;
+      if (counterSnap.exists) {
+        final data = counterSnap.data() as Map<String, dynamic>;
+        nextNumber = (data['value'] as int? ?? 0) + 1;
+      }
+      transaction.set(counterRef, {'value': nextNumber});
+
+      // Prepare invoice data
+      final invoiceData = {
+        'type': docType,
+        'amount': _totalAmount,
+        'vatAmount': vatAmount,
+        'clientName': _clientNameController.text,
+        'clientAddress': _clientAddressController.text,
+        'clientPhone': _clientPhoneController.text,
+        'items': _items
+            .map(
+              (item) => {
+                'description': item.description,
+                'quantity': item.quantity,
+                'price': item.price,
+              },
+            )
+            .toList(),
+        'notes': _notesController.text,
+        'paymentMethod': _selectedPaymentMethod,
+        'invoiceNumber': nextNumber,
+        'date': dateStr,
+        'createdAt': timestamp,
+      };
+
+      // Save invoice (metadata only, PDF upload is outside transaction)
+      final invoiceDoc = invoicesRef.doc(nextNumber.toString());
+      transaction.set(invoiceDoc, invoiceData);
+
+      // Keep a per-type counter and write each file entry under logs/<type>/files.
+      for (var i = 0; i < logEntries.length; i++) {
+        final entry = logEntries[i];
+        final logBucketRef =
+            entry['bucketRef']! as DocumentReference<Map<String, dynamic>>;
+        final logFileRef =
+            entry['fileRef']! as DocumentReference<Map<String, dynamic>>;
+        final logCounterSnap = logCounterSnaps[i];
+        int logCounter = 1;
+        if (logCounterSnap.exists) {
+          final logCounterData = logCounterSnap.data() as Map<String, dynamic>;
+          logCounter = (logCounterData['value'] as int? ?? 0) + 1;
+        }
+        transaction.set(logBucketRef, {
+          'value': logCounter,
+          'updatedAt': timestamp,
+          'docType': entry['bucket'],
+        }, SetOptions(merge: true));
+
+        final logData = {
+          'userId': userId,
+          'bucket': entry['bucket'],
+          'docType': docType,
+          'type': entry['type'],
+          'counter': logCounter,
+          'documentNumber': nextNumber,
+          'date': dateStr,
+          'amount': _totalAmount,
+          'vatAmount': vatAmount,
+          'customerId': customerId,
+          'clientName': _clientNameController.text,
+          'fileName': '',
+          'storagePath': '',
+          'url': '',
+          'timestamp': timestamp,
+        };
+        transaction.set(logFileRef, logData);
+      }
+    });
+
+    // Upload PDF to Storage (after transaction)
+    final fileName =
+        'invoice_${userId}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+    final storagePath = 'invoices/$userId/$fileName';
+    final ref = firebase_storage.FirebaseStorage.instance.ref().child(
+      storagePath,
+    );
+    await ref.putData(pdfBytes);
+    final downloadUrl = await ref.getDownloadURL();
+
+    // Update invoice doc with PDF URL
+    final counterSnap = await userDoc
+        .collection('counters')
+        .doc('invoice')
+        .get();
+    final savedNumber = (counterSnap.data()?['value'] as int?) ?? 1;
+    await invoicesRef.doc(savedNumber.toString()).update({
+      'fileName': fileName,
+      'url': downloadUrl,
+    });
+    await Future.wait(
+      logEntries.map((entry) async {
+        final logFileRef =
+            entry['fileRef']! as DocumentReference<Map<String, dynamic>>;
+        await logFileRef.update({
+          'fileName': fileName,
+          'storagePath': storagePath,
+          'url': downloadUrl,
+        });
+      }),
+    );
+  }
+
   final _clientNameController = TextEditingController();
   final _clientAddressController = TextEditingController();
   final _clientPhoneController = TextEditingController();
@@ -74,6 +312,11 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
   final _itemQtyController = TextEditingController(text: "1");
   final _itemPriceController = TextEditingController();
   final _notesController = TextEditingController();
+
+  // Payment method state
+  String _selectedPaymentMethod = 'cash';
+  final _checkNumberController = TextEditingController();
+  final _transferDetailsController = TextEditingController();
 
   final List<InvoiceItem> _items = [];
   bool _isPreparing = false;
@@ -261,6 +504,8 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     _itemQtyController.dispose();
     _itemPriceController.dispose();
     _notesController.dispose();
+    _checkNumberController.dispose();
+    _transferDetailsController.dispose();
     super.dispose();
   }
 
@@ -330,6 +575,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           'receipt': 'קבלה',
           'invoice': 'חשבונית מס',
           'invoice_receipt': 'חשבונית מס / קבלה',
+          'credit_note': 'זיכוי',
           'licensed_only': 'זמין לעוסק מורשה מאומת בלבד',
           'vat_id': 'ח.פ / ע.מ:',
           'vat': 'מע"מ (17%):',
@@ -341,6 +587,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           'business_address': 'כתובת העסק:',
           'worker_id': 'מזהה עובד:',
           'authorized_dealer_label': 'עובד מורשה:',
+          'payment_method': 'אמצעי תשלום',
         };
         break;
       default:
@@ -375,6 +622,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           'receipt': 'Receipt',
           'invoice': 'Tax Invoice',
           'invoice_receipt': 'Tax Invoice / Receipt',
+          'credit_note': 'Credit Note',
           'licensed_only': 'Verified Licensed Dealers only',
           'vat_id': 'VAT ID / Tax ID:',
           'vat': 'VAT (17%):',
@@ -386,6 +634,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           'business_address': 'Business Address:',
           'worker_id': 'Worker ID:',
           'authorized_dealer_label': 'Authorized Dealer:',
+          'payment_method': 'Payment Method',
         };
     }
     return _cachedStrings!;
@@ -521,7 +770,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
             pdfBytes: pdfBytes,
             fileName: '$_invoiceNumber.pdf',
             onSave: () async {
-              await _saveInvoicePdf(pdfBytes);
+              await _createInvoiceAndLog(pdfBytes: pdfBytes);
             },
           ),
         ),
@@ -566,7 +815,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     final userInvoicesRef = FirebaseFirestore.instance
         .collection('users')
         .doc(currentUser.uid)
-        .collection('saved_invoices');
+        .collection('invoices');
 
     try {
       // Prevent duplicate save/increment for the same issued invoice number.
@@ -611,7 +860,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           ? baseName
           : '$baseName ($suffixIndex)';
       final safeName = _safeFileName(finalName);
-      final storagePath = 'saved_invoices/${currentUser.uid}/$safeName.pdf';
+      final storagePath = 'invoices/${currentUser.uid}/$safeName.pdf';
 
       final ref = firebase_storage.FirebaseStorage.instance.ref().child(
         storagePath,
@@ -853,7 +1102,6 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
 
     doc.addPage(
       pw.Page(
-        // Increase margins significantly to avoid content sticking to the border
         pageFormat: format.copyWith(
           marginTop: 1.5 * pdf.PdfPageFormat.cm,
           marginBottom: 1.5 * pdf.PdfPageFormat.cm,
@@ -862,6 +1110,12 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
         ),
         theme: pw.ThemeData.withFont(base: font, bold: fontBold),
         build: (pw.Context context) {
+          // Fix: determine isRtl for PDF context
+          final locale = Provider.of<LanguageProvider>(
+            this.context,
+            listen: false,
+          ).locale.languageCode;
+          final isRtl = locale == 'he' || locale == 'ar';
           final isInvoice =
               _selectedDocType == 'invoice' ||
               _selectedDocType == 'invoice_receipt';
@@ -869,328 +1123,451 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
               ? strings['receipt']!
               : _selectedDocType == 'invoice'
               ? strings['invoice']!
-              : strings['invoice_receipt']!;
+              : _selectedDocType == 'invoice_receipt'
+              ? strings['invoice_receipt']!
+              : _selectedDocType == 'credit_note'
+              ? strings['credit_note']!
+              : strings['doc_type']!;
 
-          return pw.Directionality(
-            textDirection: pw.TextDirection.rtl,
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                // Formal Header Section
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          return pw.Stack(
+            children: [
+              // Watermark
+              pw.Positioned(
+                left: 0,
+                right: 0,
+                top: 200,
+                child: pw.Opacity(
+                  opacity: 0.08,
+                  child: pw.Center(
+                    child: pw.Text(
+                      'hiro',
+                      style: pw.TextStyle(
+                        fontSize: 120,
+                        fontWeight: pw.FontWeight.bold,
+                        color: pdf.PdfColors.blue,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              pw.Directionality(
+                textDirection: pw.TextDirection.rtl,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
-                    // Logo (RTL: appears on the right)
-                    if (logo != null) pw.Image(logo, width: 85, height: 85),
-                    // Document Info (RTL: appears on the left)
-                    pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.end,
-                      children: [
-                        pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.end,
-                          children: [
-                            pw.Text(
-                              docTitle,
-                              style: pw.TextStyle(
-                                fontSize: 28,
-                                fontWeight: pw.FontWeight.bold,
-                                color: pdf.PdfColors.black,
-                              ),
+                    // Header
+                    pw.Container(
+                      padding: const pw.EdgeInsets.symmetric(
+                        vertical: 12,
+                        horizontal: 16,
+                      ),
+                      decoration: pw.BoxDecoration(
+                        color: pdf.PdfColors.blue50,
+                        borderRadius: pw.BorderRadius.circular(12),
+                      ),
+                      child: pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          if (logo != null)
+                            pw.Container(
+                              margin: const pw.EdgeInsets.only(left: 12),
+                              child: pw.Image(logo, width: 70, height: 70),
                             ),
-                            pw.Text(
-                              strings['original']!,
-                              style: pw.TextStyle(
-                                fontSize: 16,
-                                fontWeight: pw.FontWeight.bold,
+                          pw.Expanded(
+                            child: pw.Column(
+                              crossAxisAlignment: pw.CrossAxisAlignment.end,
+                              children: [
+                                pw.Text(
+                                  docTitle,
+                                  style: pw.TextStyle(
+                                    fontSize: 28,
+                                    fontWeight: pw.FontWeight.bold,
+                                    color: pdf.PdfColors.blue900,
+                                  ),
+                                ),
+                                pw.Text(
+                                  strings['original']!,
+                                  style: pw.TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: pw.FontWeight.bold,
+                                    color: pdf.PdfColors.blueGrey800,
+                                  ),
+                                ),
+                                pw.SizedBox(height: 8),
+                                pw.Text(
+                                  isInvoice
+                                      ? "${strings['tax_invoice_num']} $_invoiceNumber"
+                                      : "${strings['inv_no']} $_invoiceNumber",
+                                  style: pw.TextStyle(
+                                    fontWeight: pw.FontWeight.bold,
+                                    fontSize: 14,
+                                    color: pdf.PdfColors.blueGrey800,
+                                  ),
+                                ),
+                                pw.Text(
+                                  "${strings['date']} ${intl.DateFormat('dd/MM/yyyy').format(DateTime.now())}",
+                                  style: pw.TextStyle(
+                                    fontSize: 12,
+                                    color: pdf.PdfColors.blueGrey800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    pw.SizedBox(height: 18),
+                    // Business & Client Info
+                    pw.Row(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        // Business Details
+                        pw.Expanded(
+                          child: pw.Container(
+                            padding: const pw.EdgeInsets.all(10),
+                            decoration: pw.BoxDecoration(
+                              color: pdf.PdfColors.blue50,
+                              borderRadius: pw.BorderRadius.circular(8),
+                            ),
+                            child: pw.Column(
+                              crossAxisAlignment: pw.CrossAxisAlignment.start,
+                              children: [
+                                pw.Text(
+                                  strings['worker']!,
+                                  style: pw.TextStyle(
+                                    fontWeight: pw.FontWeight.bold,
+                                    fontSize: 13,
+                                    color: pdf.PdfColors.blue900,
+                                  ),
+                                ),
+                                pw.SizedBox(height: 6),
+                                pw.Text(
+                                  widget.workerName,
+                                  style: pw.TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: pw.FontWeight.bold,
+                                  ),
+                                ),
+                                if (_businessId != null &&
+                                    _businessId!.isNotEmpty) ...[
+                                  pw.Text(
+                                    "${strings['authorized_dealer_label']} $_businessId",
+                                    style: pw.TextStyle(
+                                      fontWeight: pw.FontWeight.bold,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                  pw.Text(
+                                    "${strings['vat_id']} $_businessId",
+                                    style: pw.TextStyle(fontSize: 11),
+                                  ),
+                                  pw.Text(
+                                    _dealerType == 'licensed'
+                                        ? strings['licensed_dealer']!
+                                        : strings['exempt_dealer']!,
+                                    style: pw.TextStyle(
+                                      fontSize: 10,
+                                      color: pdf.PdfColors.blueGrey800,
+                                    ),
+                                  ),
+                                ],
+                                if (_businessAddress != null &&
+                                    _businessAddress!.isNotEmpty)
+                                  pw.Text(
+                                    "${strings['business_address']} $_businessAddress",
+                                    style: pw.TextStyle(fontSize: 11),
+                                  ),
+                                if (widget.workerPhone != null)
+                                  pw.Text(
+                                    widget.workerPhone!,
+                                    style: pw.TextStyle(fontSize: 11),
+                                  ),
+                                if (widget.workerEmail != null)
+                                  pw.Text(
+                                    widget.workerEmail!,
+                                    style: pw.TextStyle(fontSize: 11),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        pw.SizedBox(width: 24),
+                        // Client Details
+                        pw.Expanded(
+                          child: pw.Container(
+                            padding: const pw.EdgeInsets.all(10),
+                            decoration: pw.BoxDecoration(
+                              color: pdf.PdfColors.grey100,
+                              borderRadius: pw.BorderRadius.circular(8),
+                            ),
+                            child: pw.Column(
+                              crossAxisAlignment: pw.CrossAxisAlignment.start,
+                              children: [
+                                pw.Text(
+                                  strings['client_info']!,
+                                  style: pw.TextStyle(
+                                    fontWeight: pw.FontWeight.bold,
+                                    fontSize: 13,
+                                    color: pdf.PdfColors.blue900,
+                                  ),
+                                ),
+                                pw.SizedBox(height: 6),
+                                pw.Text(
+                                  _clientNameController.text,
+                                  style: pw.TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: pw.FontWeight.bold,
+                                  ),
+                                ),
+                                if (_clientPhoneController.text.isNotEmpty)
+                                  pw.Text(
+                                    _clientPhoneController.text,
+                                    style: pw.TextStyle(fontSize: 11),
+                                  ),
+                                if (_clientAddressController.text.isNotEmpty)
+                                  pw.Text(
+                                    _clientAddressController.text,
+                                    style: pw.TextStyle(fontSize: 11),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    pw.SizedBox(height: 28),
+                    // Items Table
+                    pw.TableHelper.fromTextArray(
+                      headers: [
+                        strings['desc']!,
+                        strings['qty']!,
+                        strings['price']!,
+                        strings['total']!,
+                      ],
+                      data: _items
+                          .map(
+                            (item) => [
+                              item.description,
+                              item.quantity.toString(),
+                              "${item.price.toStringAsFixed(2)} ₪",
+                              "${item.total.toStringAsFixed(2)} ₪",
+                            ],
+                          )
+                          .toList(),
+                      headerStyle: pw.TextStyle(
+                        fontWeight: pw.FontWeight.bold,
+                        color: pdf.PdfColors.white,
+                        fontSize: 12,
+                      ),
+                      headerDecoration: const pw.BoxDecoration(
+                        color: pdf.PdfColors.blue,
+                      ),
+                      cellAlignment: pw.Alignment.centerRight,
+                      cellStyle: const pw.TextStyle(fontSize: 11),
+                      columnWidths: {
+                        0: const pw.FlexColumnWidth(4),
+                        1: const pw.FixedColumnWidth(60),
+                        2: const pw.FixedColumnWidth(100),
+                        3: const pw.FixedColumnWidth(100),
+                      },
+                      border: pw.TableBorder.all(
+                        color: pdf.PdfColors.grey400,
+                        width: 0.5,
+                      ),
+                    ),
+                    pw.SizedBox(height: 18),
+                    // Summary Box
+                    pw.Align(
+                      alignment: pw.Alignment.centerRight,
+                      child: pw.Container(
+                        padding: const pw.EdgeInsets.all(14),
+                        width: 260,
+                        decoration: pw.BoxDecoration(
+                          color: pdf.PdfColors.blue50,
+                          borderRadius: pw.BorderRadius.circular(10),
+                          border: pw.Border.all(color: pdf.PdfColors.blue100),
+                        ),
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            if (_selectedDocType != 'receipt' &&
+                                _dealerType == 'licensed') ...[
+                              pw.Row(
+                                mainAxisAlignment:
+                                    pw.MainAxisAlignment.spaceBetween,
+                                children: [
+                                  pw.Text(
+                                    strings['subtotal']!,
+                                    style: pw.TextStyle(fontSize: 11),
+                                  ),
+                                  pw.Text(
+                                    "${(_totalAmount / 1.17).toStringAsFixed(2)} ₪",
+                                    style: pw.TextStyle(fontSize: 11),
+                                  ),
+                                ],
                               ),
+                              pw.SizedBox(height: 4),
+                              pw.Row(
+                                mainAxisAlignment:
+                                    pw.MainAxisAlignment.spaceBetween,
+                                children: [
+                                  pw.Text(
+                                    strings['vat']!,
+                                    style: pw.TextStyle(fontSize: 11),
+                                  ),
+                                  pw.Text(
+                                    "${(_totalAmount - (_totalAmount / 1.17)).toStringAsFixed(2)} ₪",
+                                    style: pw.TextStyle(fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                              pw.Divider(
+                                thickness: 1,
+                                color: pdf.PdfColors.grey400,
+                              ),
+                            ],
+                            pw.Row(
+                              mainAxisAlignment:
+                                  pw.MainAxisAlignment.spaceBetween,
+                              children: [
+                                pw.Text(
+                                  strings['total']!,
+                                  style: pw.TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: pw.FontWeight.bold,
+                                    color: pdf.PdfColors.blue900,
+                                  ),
+                                ),
+                                pw.Text(
+                                  "${_totalAmount.toStringAsFixed(2)} ₪",
+                                  style: pw.TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: pw.FontWeight.bold,
+                                    color: pdf.PdfColors.blue900,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                        pw.SizedBox(height: 12),
-                        pw.Text(
-                          isInvoice
-                              ? "${strings['tax_invoice_num']} $_invoiceNumber"
-                              : "${strings['inv_no']} $_invoiceNumber",
-                          style: pw.TextStyle(
-                            fontWeight: pw.FontWeight.bold,
-                            fontSize: 14,
+                      ),
+                    ),
+                    pw.SizedBox(height: 24),
+                    // Payment Method (אמצעי תשלום)
+                    pw.Text(
+                      strings['payment_method'] ??
+                          (isRtl ? 'אמצעי תשלום' : 'Payment Method'),
+                      style: pw.TextStyle(
+                        fontWeight: pw.FontWeight.bold,
+                        fontSize: 11,
+                        color: pdf.PdfColors.blue900,
+                      ),
+                    ),
+                    pw.Container(
+                      width: double.infinity,
+                      padding: const pw.EdgeInsets.all(10),
+                      decoration: pw.BoxDecoration(
+                        border: pw.Border.all(color: pdf.PdfColors.grey300),
+                        borderRadius: const pw.BorderRadius.all(
+                          pw.Radius.circular(5),
+                        ),
+                      ),
+                      child: pw.Text(() {
+                        switch (_selectedPaymentMethod) {
+                          case 'cash':
+                            return isRtl ? 'מזומן' : 'Cash';
+                          case 'credit':
+                            return isRtl ? 'אשראי' : 'Credit Card';
+                          case 'transfer':
+                            return (isRtl ? 'העברה בנקאית' : 'Bank Transfer') +
+                                (_transferDetailsController.text.isNotEmpty
+                                    ? '\n' + _transferDetailsController.text
+                                    : '');
+                          case 'check':
+                            return (isRtl ? 'צ׳ק' : 'Check') +
+                                (_checkNumberController.text.isNotEmpty
+                                    ? '\n' +
+                                          (isRtl
+                                              ? 'מספר צ׳ק: '
+                                              : 'Check Number: ') +
+                                          _checkNumberController.text
+                                    : '');
+                          default:
+                            return _selectedPaymentMethod;
+                        }
+                      }(), style: const pw.TextStyle(fontSize: 11)),
+                    ),
+                    pw.SizedBox(height: 16),
+                    if (_notesController.text.isNotEmpty) ...[
+                      pw.Text(
+                        strings['notes']!,
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          fontSize: 11,
+                          color: pdf.PdfColors.blue900,
+                        ),
+                      ),
+                      pw.Container(
+                        width: double.infinity,
+                        padding: const pw.EdgeInsets.all(10),
+                        decoration: pw.BoxDecoration(
+                          border: pw.Border.all(color: pdf.PdfColors.grey300),
+                          borderRadius: const pw.BorderRadius.all(
+                            pw.Radius.circular(5),
                           ),
                         ),
+                        child: pw.Text(
+                          _notesController.text,
+                          style: const pw.TextStyle(fontSize: 11),
+                        ),
+                      ),
+                      pw.SizedBox(height: 16),
+                    ],
+                    pw.Spacer(),
+                    // Thank you & signature
+                    pw.Divider(thickness: 1, color: pdf.PdfColors.blueGrey800),
+                    pw.SizedBox(height: 8),
+                    pw.Center(
+                      child: pw.Text(
+                        strings['legal_disclaimer']!,
+                        style: pw.TextStyle(
+                          fontSize: 11,
+                          fontWeight: pw.FontWeight.bold,
+                          color: pdf.PdfColors.blueGrey800,
+                        ),
+                        textAlign: pw.TextAlign.center,
+                      ),
+                    ),
+                    pw.SizedBox(height: 8),
+                    pw.Center(
+                      child: pw.Text(
+                        'Thank you for your business!',
+                        style: pw.TextStyle(
+                          fontSize: 13,
+                          fontWeight: pw.FontWeight.bold,
+                          color: pdf.PdfColors.blue,
+                        ),
+                      ),
+                    ),
+                    pw.SizedBox(height: 18),
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.end,
+                      children: [
                         pw.Text(
-                          "${strings['date']} ${intl.DateFormat('dd/MM/yyyy').format(DateTime.now())}",
-                          style: const pw.TextStyle(fontSize: 12),
+                          'Signature: ______________________',
+                          style: pw.TextStyle(
+                            fontSize: 11,
+                            color: pdf.PdfColors.blueGrey800,
+                          ),
                         ),
                       ],
                     ),
                   ],
                 ),
-                pw.SizedBox(height: 20),
-                pw.Divider(thickness: 2, color: pdf.PdfColors.black),
-                pw.SizedBox(height: 25),
-
-                // Business & Client Information Block
-                pw.Row(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    // Business Details (RTL: Right side)
-                    pw.Expanded(
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          pw.Text(
-                            strings['worker']!,
-                            style: pw.TextStyle(
-                              fontWeight: pw.FontWeight.bold,
-                              fontSize: 13,
-                              color: pdf.PdfColors.blue900,
-                            ),
-                          ),
-                          pw.SizedBox(height: 8),
-                          pw.Text(
-                            widget.workerName,
-                            style: pw.TextStyle(
-                              fontSize: 16,
-                              fontWeight: pw.FontWeight.bold,
-                            ),
-                          ),
-
-                          // Consistently show all ID authorized_dealer_label Address fields
-                          if (_businessId != null &&
-                              _businessId!.isNotEmpty) ...[
-                            pw.Text(
-                              "${strings['authorized_dealer_label']} $_businessId",
-                              style: pw.TextStyle(
-                                fontWeight: pw.FontWeight.bold,
-                                fontSize: 11,
-                              ),
-                            ),
-                            pw.Text(
-                              "${strings['vat_id']} $_businessId",
-                              style: const pw.TextStyle(fontSize: 11),
-                            ),
-                            pw.Text(
-                              _dealerType == 'licensed'
-                                  ? strings['licensed_dealer']!
-                                  : strings['exempt_dealer']!,
-                              style: const pw.TextStyle(fontSize: 10),
-                            ),
-                          ],
-
-                          if (_businessAddress != null &&
-                              _businessAddress!.isNotEmpty) ...[
-                            pw.Text(
-                              "${strings['business_address']} $_businessAddress",
-                              style: const pw.TextStyle(fontSize: 11),
-                            ),
-                          ],
-
-                          if (widget.workerPhone != null)
-                            pw.Text(
-                              widget.workerPhone!,
-                              style: const pw.TextStyle(fontSize: 11),
-                            ),
-                          if (widget.workerEmail != null)
-                            pw.Text(
-                              widget.workerEmail!,
-                              style: const pw.TextStyle(fontSize: 11),
-                            ),
-                        ],
-                      ),
-                    ),
-                    pw.SizedBox(width: 50),
-                    // Client Details (RTL: Left side)
-                    pw.Expanded(
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          pw.Text(
-                            strings['client_info']!,
-                            style: pw.TextStyle(
-                              fontWeight: pw.FontWeight.bold,
-                              fontSize: 13,
-                              color: pdf.PdfColors.blue900,
-                            ),
-                          ),
-                          pw.SizedBox(height: 8),
-                          pw.Text(
-                            _clientNameController.text,
-                            style: pw.TextStyle(
-                              fontSize: 16,
-                              fontWeight: pw.FontWeight.bold,
-                            ),
-                          ),
-                          if (_clientPhoneController.text.isNotEmpty)
-                            pw.Text(
-                              _clientPhoneController.text,
-                              style: const pw.TextStyle(fontSize: 11),
-                            ),
-                          if (_clientAddressController.text.isNotEmpty)
-                            pw.Text(
-                              _clientAddressController.text,
-                              style: const pw.TextStyle(fontSize: 11),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                pw.SizedBox(height: 40),
-
-                // Professional Table for Items
-                pw.TableHelper.fromTextArray(
-                  headers: [
-                    strings['desc']!,
-                    strings['qty']!,
-                    strings['price']!,
-                    strings['total']!,
-                  ],
-                  data: _items
-                      .map(
-                        (item) => [
-                          item.description,
-                          item.quantity.toString(),
-                          "${item.price.toStringAsFixed(2)} ₪",
-                          "${item.total.toStringAsFixed(2)} ₪",
-                        ],
-                      )
-                      .toList(),
-                  headerStyle: pw.TextStyle(
-                    fontWeight: pw.FontWeight.bold,
-                    color: pdf.PdfColors.white,
-                    fontSize: 11,
-                  ),
-                  headerDecoration: const pw.BoxDecoration(
-                    color: pdf.PdfColors.black,
-                  ),
-                  cellAlignment: pw.Alignment.centerRight,
-                  cellStyle: const pw.TextStyle(fontSize: 11),
-                  columnWidths: {
-                    0: const pw.FlexColumnWidth(4),
-                    1: const pw.FixedColumnWidth(60),
-                    2: const pw.FixedColumnWidth(100),
-                    3: const pw.FixedColumnWidth(100),
-                  },
-                  border: pw.TableBorder.all(
-                    color: pdf.PdfColors.grey400,
-                    width: 0.5,
-                  ),
-                ),
-                pw.SizedBox(height: 20),
-
-                // Calculation Summary Section
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.start,
-                  children: [
-                    pw.Spacer(flex: 2),
-                    pw.Expanded(
-                      flex: 1,
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          if (_selectedDocType != 'receipt' &&
-                              _dealerType == 'licensed') ...[
-                            pw.Row(
-                              mainAxisAlignment:
-                                  pw.MainAxisAlignment.spaceBetween,
-                              children: [
-                                pw.Text(
-                                  strings['subtotal']!,
-                                  style: const pw.TextStyle(fontSize: 10),
-                                ),
-                                pw.Text(
-                                  "${(_totalAmount / 1.17).toStringAsFixed(2)} ₪",
-                                  style: const pw.TextStyle(fontSize: 10),
-                                ),
-                              ],
-                            ),
-                            pw.SizedBox(height: 4),
-                            pw.Row(
-                              mainAxisAlignment:
-                                  pw.MainAxisAlignment.spaceBetween,
-                              children: [
-                                pw.Text(
-                                  strings['vat']!,
-                                  style: const pw.TextStyle(fontSize: 10),
-                                ),
-                                pw.Text(
-                                  "${(_totalAmount - (_totalAmount / 1.17)).toStringAsFixed(2)} ₪",
-                                  style: const pw.TextStyle(fontSize: 10),
-                                ),
-                              ],
-                            ),
-                            pw.Divider(
-                              thickness: 1,
-                              color: pdf.PdfColors.grey400,
-                            ),
-                          ],
-                          pw.Row(
-                            mainAxisAlignment:
-                                pw.MainAxisAlignment.spaceBetween,
-                            children: [
-                              pw.Text(
-                                strings['total']!,
-                                style: pw.TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: pw.FontWeight.bold,
-                                ),
-                              ),
-                              pw.Text(
-                                "${_totalAmount.toStringAsFixed(2)} ₪",
-                                style: pw.TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: pw.FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-
-                if (_notesController.text.isNotEmpty) ...[
-                  pw.SizedBox(height: 30),
-                  pw.Text(
-                    strings['notes']!,
-                    style: pw.TextStyle(
-                      fontWeight: pw.FontWeight.bold,
-                      fontSize: 11,
-                    ),
-                  ),
-                  pw.Container(
-                    width: double.infinity,
-                    padding: const pw.EdgeInsets.all(10),
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border.all(color: pdf.PdfColors.grey300),
-                      borderRadius: const pw.BorderRadius.all(
-                        pw.Radius.circular(5),
-                      ),
-                    ),
-                    child: pw.Text(
-                      _notesController.text,
-                      style: const pw.TextStyle(fontSize: 11),
-                    ),
-                  ),
-                ],
-
-                pw.Spacer(),
-                pw.Divider(thickness: 1, color: pdf.PdfColors.black),
-                pw.SizedBox(height: 8),
-                pw.Center(
-                  child: pw.Text(
-                    strings['legal_disclaimer']!,
-                    style: pw.TextStyle(
-                      fontSize: 11,
-                      fontWeight: pw.FontWeight.bold,
-                      color: pdf.PdfColors.black,
-                    ),
-                    textAlign: pw.TextAlign.center,
-                  ),
-                ),
-                pw.SizedBox(height: 8),
-              ],
-            ),
+              ),
+            ],
           );
         },
       ),
@@ -1319,6 +1696,10 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                                     ),
                                   ),
                                 ),
+                                DropdownMenuItem(
+                                  value: 'credit_note',
+                                  child: Text(strings['credit_note']!),
+                                ),
                               ],
                               onChanged: (val) {
                                 if (val != null)
@@ -1370,6 +1751,65 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                                 ),
                               ),
                             ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        // Payment Method Section
+                        _buildSectionCard(
+                          title: isRtl ? 'אמצעי תשלום' : 'Payment Method',
+                          icon: Icons.payment,
+                          children: [
+                            DropdownButtonFormField<String>(
+                              isExpanded: true,
+                              value: _selectedPaymentMethod,
+                              decoration: _inputStyle(
+                                isRtl
+                                    ? 'בחר אמצעי תשלום'
+                                    : 'Select Payment Method',
+                                Icons.payment,
+                              ),
+                              items: [
+                                DropdownMenuItem(
+                                  value: 'cash',
+                                  child: Text(isRtl ? 'מזומן' : 'Cash'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'credit',
+                                  child: Text(isRtl ? 'אשראי' : 'Credit Card'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'transfer',
+                                  child: Text(
+                                    isRtl ? 'העברה בנקאית' : 'Bank Transfer',
+                                  ),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'check',
+                                  child: Text(isRtl ? 'צ׳ק' : 'Check'),
+                                ),
+                              ],
+                              onChanged: (val) {
+                                if (val != null)
+                                  setState(() => _selectedPaymentMethod = val);
+                              },
+                            ),
+                            if (_selectedPaymentMethod == 'check') ...[
+                              const SizedBox(height: 12),
+                              _buildTextField(
+                                _checkNumberController,
+                                isRtl ? 'מספר צ׳ק' : 'Check Number',
+                                Icons.confirmation_number,
+                                keyboardType: TextInputType.number,
+                              ),
+                            ],
+                            if (_selectedPaymentMethod == 'transfer') ...[
+                              const SizedBox(height: 12),
+                              _buildTextField(
+                                _transferDetailsController,
+                                isRtl ? 'פרטי העברה' : 'Transfer Details',
+                                Icons.account_balance,
+                              ),
+                            ],
                           ],
                         ),
                         const SizedBox(height: 20),

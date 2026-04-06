@@ -4,8 +4,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:untitled1/ptofile.dart';
+import 'package:path_provider/path_provider.dart';
 
 class AdminPanel extends StatefulWidget {
   final bool showAppBar;
@@ -17,6 +19,50 @@ class AdminPanel extends StatefulWidget {
 
 class _AdminPanelState extends State<AdminPanel> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  String _formatCompactDate(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}$month$day';
+  }
+
+  String _formatDashedDate(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}-$month-$day';
+  }
+
+  Future<DateTimeRange?> _pickExportDateRange() async {
+    final now = DateTime.now();
+    return showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(now.year + 5),
+      initialDateRange: DateTimeRange(
+        start: DateTime(now.year, now.month, 1),
+        end: now,
+      ),
+    );
+  }
+
+  Future<Directory> _getBkmvExportDirectory() async {
+    if (Platform.isAndroid) {
+      final status = await Permission.manageExternalStorage.request();
+      if (!status.isGranted) {
+        throw Exception('Storage permission is required to save in Downloads.');
+      }
+
+      final directory = Directory('/storage/emulated/0/Download/BKMVDATA');
+      await directory.create(recursive: true);
+      return directory;
+    }
+
+    final downloadsDir =
+        await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
+    final directory = Directory('${downloadsDir.path}${Platform.pathSeparator}BKMVDATA');
+    await directory.create(recursive: true);
+    return directory;
+  }
 
   final Map<String, IconData> _availableIcons = {
     'plumbing': Icons.plumbing,
@@ -124,6 +170,13 @@ class _AdminPanelState extends State<AdminPanel> {
               title: 'Professional Verifications',
               subtitle: 'Approve or reject business documents',
               onTap: () => _showVerifications(context),
+            ),
+            _buildAdminTile(
+              context,
+              icon: Icons.description,
+              title: 'Generate BKMVDATA.txt',
+              subtitle: 'Export BKMVDATA.txt and INI.txt',
+              onTap: _generateBkmvDataFile,
             ),
             const SizedBox(height: 20),
             _buildSectionTitle('Content Moderation'),
@@ -455,13 +508,23 @@ class _AdminPanelState extends State<AdminPanel> {
     final msgController = TextEditingController();
     final linkController = TextEditingController();
     final btnTextController = TextEditingController(text: 'Learn More');
-    File? imageFile;
+    final badgeController = TextEditingController(text: 'Featured');
+    final imageFiles = <File>[];
     bool isUploading = false;
+    bool showPopup = true;
+    bool showBanner = true;
+    final now = DateTime.now();
+    DateTimeRange selectedDateRange = DateTimeRange(
+      start: DateTime(now.year, now.month, now.day),
+      end: DateTime(now.year, now.month, now.day + 7),
+    );
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
           title: const Row(
             children: [
               Icon(Icons.campaign, color: Colors.red),
@@ -469,25 +532,39 @@ class _AdminPanelState extends State<AdminPanel> {
               Text('Marketing Ads / Popup'),
             ],
           ),
-          content: SingleChildScrollView(
-            child: Column(
+          content: SizedBox(
+            width: MediaQuery.of(context).size.width * 0.9,
+            height: MediaQuery.of(context).size.height * 0.72,
+            child: SingleChildScrollView(
+              child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 TextField(
                   controller: titleController,
                   decoration: const InputDecoration(
                     labelText: 'Ad Title',
-                    hintText: 'Special Announcement',
+                    hintText: 'Summer campaign',
                   ),
                 ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: msgController,
                   decoration: const InputDecoration(
                     labelText: 'Ad Message',
-                    hintText: 'Write your message here...',
+                    hintText: 'Describe the offer or update you want users to see.',
                   ),
-                  maxLines: 3,
+                  maxLines: 4,
                 ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: badgeController,
+                  decoration: const InputDecoration(
+                    labelText: 'Badge',
+                    hintText: 'Featured / Update / Limited Time',
+                  ),
+                ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: linkController,
                   decoration: const InputDecoration(
@@ -495,6 +572,7 @@ class _AdminPanelState extends State<AdminPanel> {
                     hintText: 'https://...',
                   ),
                 ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: btnTextController,
                   decoration: const InputDecoration(
@@ -503,43 +581,231 @@ class _AdminPanelState extends State<AdminPanel> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                if (imageFile != null)
-                  Stack(
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Show as popup'),
+                  subtitle: const Text('Display immediately in a dialog'),
+                  value: showPopup,
+                  onChanged: (value) => setState(() => showPopup = value),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Show as banner'),
+                  subtitle: const Text('Keep the ad visible in the home feed'),
+                  value: showBanner,
+                  onChanged: (value) => setState(() => showBanner = value),
+                ),
+                const SizedBox(height: 8),
+                InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () async {
+                    final picked = await showDateRangePicker(
+                      context: context,
+                      firstDate: DateTime(now.year - 1),
+                      lastDate: DateTime(now.year + 5),
+                      initialDateRange: selectedDateRange,
+                    );
+                    if (picked != null && context.mounted) {
+                      setState(() => selectedDateRange = picked);
+                    }
+                  },
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: 'Ad start and end date',
+                      border: OutlineInputBorder(),
+                      suffixIcon: Icon(Icons.date_range_rounded),
+                    ),
+                    child: Text(
+                      '${selectedDateRange.start.year}-${selectedDateRange.start.month.toString().padLeft(2, '0')}-${selectedDateRange.start.day.toString().padLeft(2, '0')}  ->  ${selectedDateRange.end.year}-${selectedDateRange.end.month.toString().padLeft(2, '0')}-${selectedDateRange.end.day.toString().padLeft(2, '0')}',
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.add_photo_alternate_outlined),
+                        label: Text(
+                          imageFiles.isEmpty
+                              ? 'Choose Photos'
+                              : 'Add More Photos',
+                        ),
+                        onPressed: () async {
+                          final picked = await ImagePicker().pickMultiImage(
+                            maxWidth: 1600,
+                            maxHeight: 1600,
+                            imageQuality: 85,
+                          );
+                          if (picked.isNotEmpty && context.mounted) {
+                            setState(() {
+                              imageFiles.addAll(
+                                picked.map((file) => File(file.path)),
+                              );
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                    if (imageFiles.isNotEmpty) ...[
+                      const SizedBox(width: 12),
+                      TextButton.icon(
+                        onPressed: () => setState(() => imageFiles.clear()),
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Clear'),
+                      ),
+                    ],
+                  ],
+                ),
+                if (imageFiles.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 148,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: imageFiles.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 10),
+                      itemBuilder: (context, index) {
+                        final file = imageFiles[index];
+                        return Stack(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(14),
+                              child: Image.file(
+                                file,
+                                width: 196,
+                                height: 148,
+                                fit: BoxFit.cover,
+                                cacheWidth: 900,
+                                filterQuality: FilterQuality.low,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    width: 196,
+                                    height: 148,
+                                    color: const Color(0xFFF1F5F9),
+                                    alignment: Alignment.center,
+                                    child: const Icon(Icons.broken_image_outlined),
+                                  );
+                                },
+                              ),
+                            ),
+                            Positioned(
+                              top: 4,
+                              right: 4,
+                              child: CircleAvatar(
+                                radius: 14,
+                                backgroundColor:
+                                    Colors.black.withValues(alpha: 0.55),
+                                child: IconButton(
+                                  padding: EdgeInsets.zero,
+                                  iconSize: 16,
+                                  icon: const Icon(
+                                    Icons.close,
+                                    color: Colors.white,
+                                  ),
+                                  onPressed: () => setState(
+                                    () => imageFiles.removeAt(index),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 20),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF0F172A), Color(0xFF1D4ED8)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.file(
-                          imageFile!,
-                          height: 150,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
+                      const Text(
+                        'Preview',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      Positioned(
-                        right: 0,
-                        child: IconButton(
-                          icon: const Icon(
-                            Icons.remove_circle,
-                            color: Colors.red,
+                      const SizedBox(height: 12),
+                      if (badgeController.text.trim().isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
                           ),
-                          onPressed: () => setState(() => imageFile = null),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            badgeController.text.trim(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      if (badgeController.text.trim().isNotEmpty)
+                        const SizedBox(height: 12),
+                      if (imageFiles.isNotEmpty)
+                        SizedBox(
+                          height: 260,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: imageFiles.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(width: 10),
+                            itemBuilder: (context, index) => ClipRRect(
+                              borderRadius: BorderRadius.circular(18),
+                              child: AspectRatio(
+                                aspectRatio: 16 / 9,
+                                child: Image.file(
+                                  imageFiles[index],
+                                  fit: BoxFit.cover,
+                                  cacheWidth: 1000,
+                                  filterQuality: FilterQuality.low,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (imageFiles.isNotEmpty) const SizedBox(height: 16),
+                      Text(
+                        titleController.text.trim().isEmpty
+                            ? 'Your ad title'
+                            : titleController.text.trim(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        msgController.text.trim().isEmpty
+                            ? 'Your message preview will appear here.'
+                            : msgController.text.trim(),
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.86),
+                          height: 1.35,
                         ),
                       ),
                     ],
-                  )
-                else
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.add_a_photo),
-                    label: const Text('Pick Ad Image'),
-                    onPressed: () async {
-                      final picked = await ImagePicker().pickImage(
-                        source: ImageSource.gallery,
-                      );
-                      if (picked != null)
-                        setState(() => imageFile = File(picked.path));
-                    },
                   ),
+                ),
               ],
+            ),
             ),
           ),
           actions: [
@@ -551,31 +817,113 @@ class _AdminPanelState extends State<AdminPanel> {
               onPressed: isUploading
                   ? null
                   : () async {
-                      if (titleController.text.isEmpty ||
-                          msgController.text.isEmpty)
-                        return;
-                      setState(() => isUploading = true);
+                      final messenger = ScaffoldMessenger.of(context);
+                      final title = titleController.text.trim();
+                      final message = msgController.text.trim();
+                      final link = linkController.text.trim();
+                      final buttonText = btnTextController.text.trim();
+                      final badge = badgeController.text.trim();
 
-                      String? imageUrl;
-                      if (imageFile != null) {
-                        final ref = FirebaseStorage.instance.ref().child(
-                          'ads/${DateTime.now().millisecondsSinceEpoch}.jpg',
+                      if (title.isEmpty || message.isEmpty) {
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('Title and message are required.'),
+                          ),
                         );
-                        await ref.putFile(imageFile!);
-                        imageUrl = await ref.getDownloadURL();
+                        return;
+                      }
+                      if (!showPopup && !showBanner) {
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Choose at least popup or banner before publishing.',
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+                      if (link.isNotEmpty) {
+                        final parsed = Uri.tryParse(link);
+                        final isValidHttp =
+                            parsed != null &&
+                            (parsed.scheme == 'http' || parsed.scheme == 'https');
+                        if (!isValidHttp) {
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Link must start with http:// or https://',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
                       }
 
-                      await _firestore.collection('system_announcements').add({
-                        'title': titleController.text,
-                        'message': msgController.text,
-                        'imageUrl': imageUrl,
-                        'link': linkController.text,
-                        'buttonText': btnTextController.text,
-                        'timestamp': FieldValue.serverTimestamp(),
-                        'isPopup': true, // To show as an urgent popup
-                      });
+                      setState(() => isUploading = true);
 
-                      if (context.mounted) Navigator.pop(context);
+                      try {
+                        final startsAt = Timestamp.fromDate(
+                          DateTime(
+                            selectedDateRange.start.year,
+                            selectedDateRange.start.month,
+                            selectedDateRange.start.day,
+                          ),
+                        );
+                        final expiresAt = Timestamp.fromDate(
+                          DateTime(
+                            selectedDateRange.end.year,
+                            selectedDateRange.end.month,
+                            selectedDateRange.end.day,
+                            23,
+                            59,
+                            59,
+                          ),
+                        );
+                        final imageUrls = <String>[];
+                        for (var i = 0; i < imageFiles.length; i++) {
+                          final ref = FirebaseStorage.instance.ref().child(
+                            'ads/${DateTime.now().millisecondsSinceEpoch}_$i.jpg',
+                          );
+                          await ref.putFile(imageFiles[i]);
+                          imageUrls.add(await ref.getDownloadURL());
+                        }
+
+                        await _firestore.collection('system_announcements').add({
+                          'title': title,
+                          'message': message,
+                          'badge': badge,
+                          'imageUrl': imageUrls.isEmpty ? null : imageUrls.first,
+                          'imageUrls': imageUrls,
+                          'link': link,
+                          'buttonText': buttonText.isEmpty
+                              ? 'Learn More'
+                              : buttonText,
+                          'timestamp': FieldValue.serverTimestamp(),
+                          'startsAt': startsAt,
+                          'expiresAt': expiresAt,
+                          'isPopup': showPopup,
+                          'showBanner': showBanner,
+                        });
+
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('Broadcast published successfully.'),
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text('Failed to publish broadcast: $e'),
+                          ),
+                        );
+                      } finally {
+                        if (context.mounted) {
+                          setState(() => isUploading = false);
+                        }
+                      }
                     },
               child: isUploading
                   ? const SizedBox(
@@ -1036,6 +1384,105 @@ class _AdminPanelState extends State<AdminPanel> {
         Text(label, style: const TextStyle(fontSize: 10)),
       ],
     );
+  }
+
+  //BkmvData.txt + INI.txt generation functions
+  Future<void> _generateBkmvDataFile() async {
+    try {
+      final selectedRange = await _pickExportDateRange();
+      if (selectedRange == null) return;
+
+      final fromDate = _formatCompactDate(selectedRange.start);
+      final toDate = _formatCompactDate(selectedRange.end);
+      final systemSettings =
+          await _firestore.collection('metadata').doc('system').get();
+      final settingsData = systemSettings.data() ?? <String, dynamic>{};
+      final businessNumber = (settingsData['businessNumber'] ?? '').toString();
+      final businessName = (settingsData['businessName'] ?? '').toString();
+      final softwareName = (settingsData['appName'] ?? 'hiro').toString();
+      final appVersion =
+          (settingsData['minRequiredVersion'] ?? '1.0.0').toString();
+      final bucketNames = ['invoices', 'receipts', 'credit_notes'];
+      final snapshots = await Future.wait(
+        bucketNames.map(
+          (bucket) => _firestore
+              .collection('logs')
+              .doc(bucket)
+              .collection('files')
+              .where('date', isGreaterThanOrEqualTo: fromDate)
+              .where('date', isLessThanOrEqualTo: toDate)
+              .orderBy('date')
+              .orderBy('timestamp')
+              .get(),
+        ),
+      );
+
+      final allDocs = snapshots.expand((snap) => snap.docs).toList()
+        ..sort((a, b) {
+          final aData = a.data();
+          final bData = b.data();
+          final dateCompare = (aData['date'] ?? '')
+              .toString()
+              .compareTo((bData['date'] ?? '').toString());
+          if (dateCompare != 0) return dateCompare;
+
+          final aTs = aData['timestamp'] as Timestamp?;
+          final bTs = bData['timestamp'] as Timestamp?;
+          if (aTs == null && bTs == null) return 0;
+          if (aTs == null) return -1;
+          if (bTs == null) return 1;
+          return aTs.compareTo(bTs);
+        });
+
+      final lines = <String>[
+        'Z900|$businessNumber|$businessName|$fromDate|$toDate|',
+      ];
+      for (final doc in allDocs) {
+        final data = doc.data();
+        final type = (data['type'] ?? '').toString();
+        final documentNumber = (data['documentNumber'] ?? '').toString();
+        final date = (data['date'] ?? '').toString();
+        final amount = ((data['amount'] as num?) ?? 0).toStringAsFixed(2);
+        final vatAmount = ((data['vatAmount'] as num?) ?? 0).toStringAsFixed(2);
+        final customerId = (data['customerId'] ?? '').toString();
+        lines.add(
+          '$type|$documentNumber|$date|$amount|$vatAmount|$customerId',
+        );
+      }
+      lines.add('FOOTER|END');
+
+      final bkmvContent = lines.join('\n');
+      final iniContent = '''
+[General]
+COMPANY=$businessName
+ID=$businessNumber
+FROMDATE=$fromDate
+TODATE=$toDate
+SOFTWARE=$softwareName
+VERSION=$appVersion
+''';
+
+      final directory = await _getBkmvExportDirectory();
+      final bkmvFile = File('${directory.path}${Platform.pathSeparator}BKMVDATA.txt');
+      final iniFile = File('${directory.path}${Platform.pathSeparator}INI.txt');
+      await bkmvFile.writeAsString(bkmvContent);
+      await iniFile.writeAsString(iniContent);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'BKMVDATA exports saved in: ${directory.path}',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 }
 

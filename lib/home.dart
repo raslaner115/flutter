@@ -27,6 +27,8 @@ class _HomePageState extends State<HomePage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   StreamSubscription? _popupSubscription;
   String? _lastPopupId;
+  String? _lastPopupSignature;
+  String? _dismissedBannerId;
 
   List<Map<String, dynamic>> _topRatedWorkers = [];
   List<Map<String, dynamic>> _newWorkers = [];
@@ -38,6 +40,91 @@ class _HomePageState extends State<HomePage> {
   String? _profileImageUrl;
   String _userRole = "customer";
   AppLocation? _currentPosition;
+
+  List<String> _announcementImages(Map<String, dynamic> data) {
+    final raw = data['imageUrls'];
+    if (raw is List) {
+      final urls = raw
+          .whereType<String>()
+          .where((url) => url.trim().isNotEmpty)
+          .toList();
+      if (urls.isNotEmpty) return urls;
+    }
+
+    final single = (data['imageUrl'] ?? '').toString();
+    return single.isEmpty ? [] : [single];
+  }
+
+  Widget _buildAnnouncementGallery(
+    List<String> imageUrls, {
+    double height = 220,
+    double? thumbnailWidth,
+    BorderRadius? borderRadius,
+  }) {
+    if (imageUrls.isEmpty) {
+      return Container(
+        height: height,
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF0F172A), Color(0xFF1D4ED8)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+      );
+    }
+
+    if (imageUrls.length == 1) {
+      return ClipRRect(
+        borderRadius: borderRadius ?? BorderRadius.zero,
+        child: CachedNetworkImage(
+          imageUrl: imageUrls.first,
+          height: height,
+          width: thumbnailWidth ?? double.infinity,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: height,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: imageUrls.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, index) => ClipRRect(
+          borderRadius: borderRadius ?? BorderRadius.circular(18),
+          child: CachedNetworkImage(
+            imageUrl: imageUrls[index],
+            width: thumbnailWidth ?? (height * 1.45),
+            height: height,
+            fit: BoxFit.cover,
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool _isAnnouncementActive(
+    Map<String, dynamic> data, {
+    required int fallbackHours,
+  }) {
+    final startsAt = data['startsAt'] as Timestamp?;
+    final expiresAt = data['expiresAt'] as Timestamp?;
+    final now = DateTime.now();
+    if (startsAt != null && now.isBefore(startsAt.toDate())) {
+      return false;
+    }
+    if (expiresAt != null) {
+      return now.isBefore(expiresAt.toDate());
+    }
+
+    final timestamp = data['timestamp'] as Timestamp?;
+    if (timestamp == null) return false;
+    final diff = DateTime.now().difference(timestamp.toDate());
+    return diff.inHours < fallbackHours;
+  }
 
   void _onLocationPermissionGranted() {
     if (!mounted) return;
@@ -108,103 +195,340 @@ class _HomePageState extends State<HomePage> {
         .collection('system_announcements')
         .where('isPopup', isEqualTo: true)
         .orderBy('timestamp', descending: true)
-        .limit(1)
+        .limit(10)
         .snapshots()
         .listen((snapshot) {
-          if (snapshot.docs.isNotEmpty) {
-            final doc = snapshot.docs.first;
+          final activeDocs = snapshot.docs.where((doc) {
             final data = doc.data();
-            final id = doc.id;
+            return _isAnnouncementActive(data, fallbackHours: 24);
+          }).toList();
 
-            // Only show if it's a new popup and from the last 24 hours
-            final timestamp = data['timestamp'] as Timestamp?;
-            if (timestamp != null) {
-              final diff = DateTime.now().difference(timestamp.toDate());
-              if (diff.inHours < 24 && _lastPopupId != id) {
-                _lastPopupId = id;
-                _showAdPopup(data);
-              }
+          if (activeDocs.isNotEmpty) {
+            final signature = activeDocs.map((doc) => doc.id).join('|');
+            if (_lastPopupSignature != signature) {
+              _lastPopupSignature = signature;
+              _lastPopupId = activeDocs.first.id;
+              _showAdPopup(activeDocs);
             }
           }
         });
   }
 
-  void _showAdPopup(Map<String, dynamic> data) {
+  void _showAdPopup(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> popupDocs,
+  ) {
     showDialog(
       context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (data['imageUrl'] != null)
-              ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(20),
+      barrierDismissible: true,
+      builder: (context) {
+        final adPageController = PageController();
+        var currentAdIndex = 0;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) => Dialog(
+            insetPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(32),
+              child: Container(
+                color: Colors.white,
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.96,
+                  maxHeight: MediaQuery.of(context).size.height * 0.9,
                 ),
-                child: CachedNetworkImage(
-                  imageUrl: data['imageUrl'],
-                  height: 200,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  Text(
-                    data['title'] ?? 'Announcement',
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    data['message'] ?? '',
-                    style: TextStyle(fontSize: 16, color: Colors.grey[700]),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('Close'),
-                        ),
-                      ),
-                      if (data['link'] != null &&
-                          data['link'].toString().isNotEmpty)
+                child: SingleChildScrollView(
+                  child: SizedBox(
+                    height: MediaQuery.of(context).size.height * 0.82,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
                         Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF1976D2),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                            ),
-                            onPressed: () async {
-                              final url = Uri.parse(data['link']);
-                              if (await canLaunchUrl(url)) {
-                                await launchUrl(url);
-                              }
-                              if (context.mounted) Navigator.pop(context);
+                          child: PageView.builder(
+                            controller: adPageController,
+                            itemCount: popupDocs.length,
+                            onPageChanged: (index) {
+                              setDialogState(() => currentAdIndex = index);
                             },
-                            child: Text(data['buttonText'] ?? 'Learn More'),
+                            itemBuilder: (context, adIndex) {
+                              final doc = popupDocs[adIndex];
+                              final data = doc.data();
+                              final imageUrls = _announcementImages(data);
+                              final adId = doc.id;
+
+                              return SingleChildScrollView(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Stack(
+                                      children: [
+                                        _buildAnnouncementGallery(
+                                          imageUrls,
+                                          height: imageUrls.isEmpty ? 260 : 400,
+                                        ),
+                                        Positioned(
+                                          top: 16,
+                                          left: 16,
+                                          right: 16,
+                                          child: Row(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              if ((data['badge'] ?? '')
+                                                  .toString()
+                                                  .trim()
+                                                  .isNotEmpty)
+                                                Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 12,
+                                                        vertical: 8,
+                                                      ),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.white,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          999,
+                                                        ),
+                                                  ),
+                                                  child: Text(
+                                                    data['badge'].toString(),
+                                                    style: const TextStyle(
+                                                      color: Color(0xFF1D4ED8),
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                ),
+                                              const Spacer(),
+                                              CircleAvatar(
+                                                backgroundColor: Colors.black
+                                                    .withValues(alpha: 0.45),
+                                                child: IconButton(
+                                                  icon: const Icon(
+                                                    Icons.close,
+                                                    color: Colors.white,
+                                                  ),
+                                                  onPressed: () =>
+                                                      Navigator.pop(context),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        24,
+                                        22,
+                                        24,
+                                        20,
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 6,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(
+                                                    0xFFEFF6FF,
+                                                  ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(999),
+                                                ),
+                                                child: const Text(
+                                                  'System Promotion',
+                                                  style: TextStyle(
+                                                    color: Color(0xFF1D4ED8),
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ),
+                                              const Spacer(),
+                                              if (popupDocs.length > 1)
+                                                Text(
+                                                  '${adIndex + 1}/${popupDocs.length}',
+                                                  style: const TextStyle(
+                                                    color: Color(0xFF64748B),
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 14),
+                                          Text(
+                                            data['title'] ?? 'Announcement',
+                                            style: const TextStyle(
+                                              fontSize: 30,
+                                              fontWeight: FontWeight.bold,
+                                              height: 1.06,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 12),
+                                          Text(
+                                            data['message'] ?? '',
+                                            style: const TextStyle(
+                                              fontSize: 17,
+                                              color: Color(0xFF475569),
+                                              height: 1.45,
+                                            ),
+                                          ),
+                                          if (popupDocs.length > 1) ...[
+                                            const SizedBox(height: 14),
+                                            const Text(
+                                              'Swipe left or right to see more ads',
+                                              style: TextStyle(
+                                                color: Color(0xFF64748B),
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                          if (imageUrls.length > 1) ...[
+                                            const SizedBox(height: 12),
+                                            SizedBox(
+                                              height: 86,
+                                              child: ListView.separated(
+                                                scrollDirection:
+                                                    Axis.horizontal,
+                                                itemCount: imageUrls.length,
+                                                separatorBuilder: (_, __) =>
+                                                    const SizedBox(width: 8),
+                                                itemBuilder: (context, index) =>
+                                                    ClipRRect(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            14,
+                                                          ),
+                                                      child: CachedNetworkImage(
+                                                        imageUrl:
+                                                            imageUrls[index],
+                                                        width: 110,
+                                                        height: 86,
+                                                        fit: BoxFit.cover,
+                                                      ),
+                                                    ),
+                                              ),
+                                            ),
+                                          ],
+                                          const SizedBox(height: 24),
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: OutlinedButton(
+                                                  style:
+                                                      OutlinedButton.styleFrom(
+                                                        padding:
+                                                            const EdgeInsets.symmetric(
+                                                              vertical: 14,
+                                                            ),
+                                                      ),
+                                                  onPressed: () {
+                                                    setState(
+                                                      () =>
+                                                          _dismissedBannerId =
+                                                              adId,
+                                                    );
+                                                    Navigator.pop(context);
+                                                  },
+                                                  child: const Text('Not Now'),
+                                                ),
+                                              ),
+                                              if (data['link'] != null &&
+                                                  data['link']
+                                                      .toString()
+                                                      .isNotEmpty) ...[
+                                                const SizedBox(width: 12),
+                                                Expanded(
+                                                  child: ElevatedButton.icon(
+                                                    style:
+                                                        ElevatedButton.styleFrom(
+                                                          backgroundColor:
+                                                              const Color(
+                                                                0xFF1D4ED8,
+                                                              ),
+                                                          foregroundColor:
+                                                              Colors.white,
+                                                          padding:
+                                                              const EdgeInsets.symmetric(
+                                                                vertical: 14,
+                                                              ),
+                                                        ),
+                                                    onPressed: () async {
+                                                      final url = Uri.parse(
+                                                        data['link'],
+                                                      );
+                                                      if (await canLaunchUrl(
+                                                        url,
+                                                      )) {
+                                                        await launchUrl(url);
+                                                      }
+                                                      if (context.mounted) {
+                                                        Navigator.pop(context);
+                                                      }
+                                                    },
+                                                    icon: const Icon(
+                                                      Icons.arrow_outward_rounded,
+                                                    ),
+                                                    label: Text(
+                                                      data['buttonText'] ??
+                                                          'Learn More',
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
                           ),
                         ),
-                    ],
+                        if (popupDocs.length > 1)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(24, 0, 24, 18),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: List.generate(
+                                popupDocs.length,
+                                (index) => AnimatedContainer(
+                                  duration: const Duration(milliseconds: 180),
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                  ),
+                                  width: currentAdIndex == index ? 22 : 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: currentAdIndex == index
+                                        ? const Color(0xFF1D4ED8)
+                                        : const Color(0xFFCBD5E1),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ],
+                ),
               ),
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -517,78 +841,147 @@ class _HomePageState extends State<HomePage> {
           return const SliverToBoxAdapter(child: SizedBox.shrink());
         }
 
-        final data = snapshot.data!.docs.first.data() as Map<String, dynamic>;
+        final doc = snapshot.data!.docs.first;
+        final data = doc.data() as Map<String, dynamic>;
+        final docId = doc.id;
+        final imageUrls = _announcementImages(data);
 
-        final timestamp = data['timestamp'] as Timestamp?;
+        final showBanner = data['showBanner'] != false;
 
-        // Only show if the message is from the last 48 hours
-        if (timestamp != null) {
-          final diff = DateTime.now().difference(timestamp.toDate());
-          if (diff.inHours > 48)
-            return const SliverToBoxAdapter(child: SizedBox.shrink());
+        if (!_isAnnouncementActive(data, fallbackHours: 48)) {
+          return const SliverToBoxAdapter(child: SizedBox.shrink());
+        }
+        if (!showBanner || _dismissedBannerId == docId) {
+          return const SliverToBoxAdapter(child: SizedBox.shrink());
         }
 
         return SliverToBoxAdapter(
           child: Container(
             margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF1E3A8A), Color(0xFF1976D2)],
+                colors: [Color(0xFF0F172A), Color(0xFF1D4ED8)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(24),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.blue.withOpacity(0.3),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
+                  color: const Color(0xFF1D4ED8).withValues(alpha: 0.28),
+                  blurRadius: 22,
+                  offset: const Offset(0, 10),
                 ),
               ],
             ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.campaign_rounded,
-                  color: Colors.white,
-                  size: 32,
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        data['title'] ?? strings['broadcast_title'],
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if ((data['badge'] ?? '').toString().trim().isNotEmpty)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.14),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    data['badge'].toString(),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              if ((data['badge'] ?? '').toString().trim().isNotEmpty)
+                                const SizedBox(height: 12),
+                              Text(
+                                data['title'] ?? strings['broadcast_title'],
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 20,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                data['message'] ?? '',
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.88),
+                                  fontSize: 14,
+                                  height: 1.35,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        data['message'] ?? '',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.9),
-                          fontSize: 14,
+                        const SizedBox(width: 12),
+                        if (imageUrls.isNotEmpty)
+                          SizedBox(
+                            width: imageUrls.length > 1 ? 110 : 92,
+                            height: 92,
+                            child: _buildAnnouncementGallery(
+                              imageUrls,
+                              height: 92,
+                              thumbnailWidth: 92,
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                          ),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.close,
+                            color: Colors.white70,
+                            size: 20,
+                          ),
+                          onPressed: () {
+                            setState(() => _dismissedBannerId = docId);
+                          },
+                        ),
+                      ],
+                    ),
+                    if (data['link'] != null &&
+                        data['link'].toString().isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: const Color(0xFF0F172A),
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                          ),
+                          onPressed: () async {
+                            final url = Uri.parse(data['link']);
+                            if (await canLaunchUrl(url)) {
+                              await launchUrl(url);
+                            }
+                          },
+                          icon: const Icon(Icons.arrow_outward_rounded),
+                          label: Text(data['buttonText'] ?? 'Learn More'),
                         ),
                       ),
                     ],
-                  ),
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(
-                    Icons.close,
-                    color: Colors.white70,
-                    size: 20,
-                  ),
-                  onPressed: () {
-                    // In a real app, you'd save this locally to hide for the session
-                  },
-                ),
-              ],
+              ),
             ),
           ),
         );

@@ -1616,6 +1616,7 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
         mainAxisSpacing: 16,
         childAspectRatio: 0.85,
       ),
+      physics: const AlwaysScrollableScrollPhysics(),
       itemCount: _projects.length + (canAdd ? 1 : 0),
       itemBuilder: (context, index) {
         if (canAdd && index == 0) {
@@ -2086,6 +2087,7 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
     return SingleChildScrollView(
       controller: _aboutScrollController,
       padding: const EdgeInsets.all(24),
+      physics: const AlwaysScrollableScrollPhysics(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

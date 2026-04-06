@@ -25,6 +25,8 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
   bool _isLoading = true;
   bool _isMaintenanceMode = false;
   String _appVersion = "1.0.0";
+  String _businessName = "";
+  String _businessNumber = "";
 
   @override
   void initState() {
@@ -41,6 +43,14 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
         setState(() {
           _isMaintenanceMode = doc.data()?['maintenanceMode'] ?? false;
           _appVersion = doc.data()?['minRequiredVersion'] ?? "1.0.0";
+          _businessName = (doc.data()?['businessName'] ?? '').toString();
+          _businessNumber =
+              (doc.data()?['businessNumber'] ?? '').toString();
+        });
+      } else if (mounted) {
+        setState(() {
+          _businessName = '';
+          _businessNumber = '';
         });
       }
     } catch (e) {
@@ -290,6 +300,7 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                   )));
                 }
               }),
+              _buildQuickActionCard(Icons.business_rounded, "Business Info", Colors.teal, _showBusinessInfoDialog),
               _buildQuickActionCard(Icons.settings_suggest_rounded, "System Config", Colors.purple, _showSystemConfig),
             ],
           ),
@@ -471,7 +482,7 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                 subtitle: const Text("Restrict access to all non-admin users"),
                 value: _isMaintenanceMode,
                 onChanged: (val) async {
-                  await _firestore.collection('settings').doc('system').set({'maintenanceMode': val}, SetOptions(merge: true));
+                  await _firestore.collection('metadata').doc('system').set({'maintenanceMode': val}, SetOptions(merge: true));
                   await _logActivity("${val ? 'Enabled' : 'Disabled'} Maintenance Mode");
                   setState(() => _isMaintenanceMode = val);
                   setModalState(() {});
@@ -522,7 +533,7 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
     if (confirmed == true && mounted) {
       final messenger = ScaffoldMessenger.of(context);
       Navigator.pop(context); // Close the security sheet
-      await _firestore.collection('settings').doc('system').set({
+      await _firestore.collection('metadata').doc('system').set({
         'forceLogoutAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
       await _logActivity("Forced Global Logout");
@@ -562,7 +573,7 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.red[900], foregroundColor: Colors.white),
                   onPressed: () async {
-                    await _firestore.collection('settings').doc('system').set({'minRequiredVersion': versionController.text}, SetOptions(merge: true));
+                    await _firestore.collection('metadata').doc('system').set({'minRequiredVersion': versionController.text}, SetOptions(merge: true));
                     await _logActivity("Set Min App Version to ${versionController.text}");
                     setState(() => _appVersion = versionController.text);
                     if (context.mounted) Navigator.pop(context);
@@ -570,6 +581,76 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                   child: const Text("Save Configuration"),
                 ),
               )
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showBusinessInfoDialog() {
+    final businessNameController = TextEditingController(text: _businessName);
+    final businessNumberController = TextEditingController(text: _businessNumber);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Business Export Info",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: businessNameController,
+                decoration: const InputDecoration(
+                  labelText: 'Business Name',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: businessNumberController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Business Number',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red[900],
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () async {
+                    await _firestore.collection('metadata').doc('system').set({
+                      'businessName': businessNameController.text.trim(),
+                      'businessNumber': businessNumberController.text.trim(),
+                    }, SetOptions(merge: true));
+                    await _logActivity(
+                      "Updated Business Export Info: ${businessNameController.text.trim()}",
+                    );
+                    setState(() {
+                      _businessName = businessNameController.text.trim();
+                      _businessNumber = businessNumberController.text.trim();
+                    });
+                    if (context.mounted) Navigator.pop(context);
+                  },
+                  child: const Text("Save Business Info"),
+                ),
+              ),
             ],
           ),
         ),

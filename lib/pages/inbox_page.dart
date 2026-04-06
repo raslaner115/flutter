@@ -20,10 +20,22 @@ class _InboxPageState extends State<InboxPage> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   late final Future<SubscriptionAccessState> _accessFuture;
 
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
     _accessFuture = SubscriptionAccessService.getCurrentUserState();
+    _searchController.addListener(() {
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
@@ -96,21 +108,48 @@ class _InboxPageState extends State<InboxPage> {
           child: Scaffold(
             backgroundColor: Colors.white,
             appBar: AppBar(
-              title: Text(
-                isRtl ? 'הודעות' : 'Messages',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 22,
-                ),
-              ),
+              title: _isSearching
+                  ? TextField(
+                      controller: _searchController,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        hintText: isRtl ? 'חפש משתמש...' : 'Search user...',
+                        border: InputBorder.none,
+                        hintStyle: const TextStyle(
+                          fontSize: 18,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      style: const TextStyle(fontSize: 18),
+                      textDirection: isRtl
+                          ? TextDirection.rtl
+                          : TextDirection.ltr,
+                    )
+                  : Text(
+                      isRtl ? 'הודעות' : 'Messages',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 22,
+                      ),
+                    ),
               backgroundColor: Colors.white,
               foregroundColor: const Color(0xFF1976D2),
               elevation: 0,
               actions: [
                 IconButton(
-                  icon: const Icon(Icons.search, color: Colors.grey),
+                  icon: Icon(
+                    _isSearching ? Icons.close : Icons.search,
+                    color: Colors.grey,
+                  ),
                   onPressed: () {
-                    // Implement search functionality here
+                    setState(() {
+                      if (_isSearching) {
+                        _isSearching = false;
+                        _searchController.clear();
+                      } else {
+                        _isSearching = true;
+                      }
+                    });
                   },
                 ),
               ],
@@ -146,7 +185,7 @@ class _InboxPageState extends State<InboxPage> {
                         .snapshots(),
                     builder: (context, snapshot) {
                       if (snapshot.hasError) {
-                        debugPrint("Stream error: ${snapshot.error}");
+                        debugPrint("Stream error: \\${snapshot.error}");
                         return _buildErrorState(isRtl);
                       }
 
@@ -158,11 +197,32 @@ class _InboxPageState extends State<InboxPage> {
                         );
                       }
 
-                      final docs = (snapshot.data?.docs ?? []).where((doc) {
+                      var docs = (snapshot.data?.docs ?? []).where((doc) {
                         final data = doc.data() as Map<String, dynamic>;
                         final users = data['users'] as List<dynamic>? ?? [];
                         return !users.contains('hiro_manager');
                       }).toList();
+
+                      // Filter by search
+                      if (_isSearching &&
+                          _searchController.text.trim().isNotEmpty) {
+                        final query = _searchController.text
+                            .trim()
+                            .toLowerCase();
+                        docs = docs.where((doc) {
+                          final data = doc.data() as Map<String, dynamic>;
+                          final userNames =
+                              data['userNames'] as Map<String, dynamic>? ?? {};
+                          final users = data['users'] as List<dynamic>? ?? [];
+                          final String otherUserId = users.firstWhere(
+                            (id) => id != user.uid,
+                            orElse: () => "",
+                          );
+                          final String otherUserName =
+                              userNames[otherUserId]?.toString() ?? "";
+                          return otherUserName.toLowerCase().contains(query);
+                        }).toList();
+                      }
 
                       if (docs.isEmpty) {
                         return _buildEmptyState(isRtl);
