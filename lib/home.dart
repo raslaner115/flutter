@@ -23,12 +23,22 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
+class _HomeSessionState {
+  static final Set<String> hiddenPopupIds = <String>{};
+  static final Set<String> hiddenBannerIds = <String>{};
+}
+
 class _HomePageState extends State<HomePage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   StreamSubscription? _popupSubscription;
   String? _lastPopupId;
   String? _lastPopupSignature;
-  String? _dismissedBannerId;
+  final Set<String> _hiddenPopupIds = _HomeSessionState.hiddenPopupIds;
+  final Set<String> _hiddenBannerIds = _HomeSessionState.hiddenBannerIds;
+  late final PageController _bannerPageController;
+  Timer? _bannerAutoScrollTimer;
+  int _bannerPageIndex = 0;
+  int _bannerCount = 0;
 
   List<Map<String, dynamic>> _topRatedWorkers = [];
   List<Map<String, dynamic>> _newWorkers = [];
@@ -141,11 +151,13 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _bannerPageController = PageController(initialPage: 1000);
     LocationContextService.locationPermissionGrantedTick.addListener(
       _onLocationPermissionGranted,
     );
     _initData();
     _listenForPopups();
+    _startBannerAutoScroll();
   }
 
   Future<void> _initData() async {
@@ -187,7 +199,25 @@ class _HomePageState extends State<HomePage> {
       _onLocationPermissionGranted,
     );
     _popupSubscription?.cancel();
+    _bannerAutoScrollTimer?.cancel();
+    _bannerPageController.dispose();
     super.dispose();
+  }
+
+  void _startBannerAutoScroll() {
+    _bannerAutoScrollTimer?.cancel();
+    _bannerAutoScrollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted || _bannerCount <= 1 || !_bannerPageController.hasClients) {
+        return;
+      }
+      final currentPage =
+          _bannerPageController.page?.round() ?? _bannerPageController.initialPage;
+      _bannerPageController.animateToPage(
+        currentPage + 1,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeInOut,
+      );
+    });
   }
 
   void _listenForPopups() {
@@ -199,6 +229,7 @@ class _HomePageState extends State<HomePage> {
         .snapshots()
         .listen((snapshot) {
           final activeDocs = snapshot.docs.where((doc) {
+            if (_hiddenPopupIds.contains(doc.id)) return false;
             final data = doc.data();
             return _isAnnouncementActive(data, fallbackHours: 24);
           }).toList();
@@ -309,8 +340,12 @@ class _HomePageState extends State<HomePage> {
                                                     Icons.close,
                                                     color: Colors.white,
                                                   ),
-                                                  onPressed: () =>
-                                                      Navigator.pop(context),
+                                                  onPressed: () {
+                                                    setState(() {
+                                                      _hiddenPopupIds.add(adId);
+                                                    });
+                                                    Navigator.pop(context);
+                                                  },
                                                 ),
                                               ),
                                             ],
@@ -434,8 +469,9 @@ class _HomePageState extends State<HomePage> {
                                                   onPressed: () {
                                                     setState(
                                                       () =>
-                                                          _dismissedBannerId =
-                                                              adId,
+                                                          _hiddenPopupIds.add(
+                                                            adId,
+                                                          ),
                                                     );
                                                     Navigator.pop(context);
                                                   },
@@ -834,155 +870,250 @@ class _HomePageState extends State<HomePage> {
       stream: _firestore
           .collection('system_announcements')
           .orderBy('timestamp', descending: true)
-          .limit(1)
+          .limit(10)
           .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
           return const SliverToBoxAdapter(child: SizedBox.shrink());
         }
 
-        final doc = snapshot.data!.docs.first;
-        final data = doc.data() as Map<String, dynamic>;
-        final docId = doc.id;
-        final imageUrls = _announcementImages(data);
+        final docs = snapshot.data!.docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final showBanner = data['showBanner'] != false;
+          if (!showBanner || _hiddenBannerIds.contains(doc.id)) return false;
+          return _isAnnouncementActive(data, fallbackHours: 48);
+        }).toList();
 
-        final showBanner = data['showBanner'] != false;
-
-        if (!_isAnnouncementActive(data, fallbackHours: 48)) {
+        if (docs.isEmpty) {
           return const SliverToBoxAdapter(child: SizedBox.shrink());
         }
-        if (!showBanner || _dismissedBannerId == docId) {
-          return const SliverToBoxAdapter(child: SizedBox.shrink());
-        }
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _bannerCount == docs.length) return;
+          setState(() {
+            _bannerCount = docs.length;
+            _bannerPageIndex = _bannerPageIndex % docs.length;
+          });
+        });
 
         return SliverToBoxAdapter(
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF0F172A), Color(0xFF1D4ED8)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF1D4ED8).withValues(alpha: 0.28),
-                  blurRadius: 22,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(24),
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
+          child: Column(
+            children: [
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                height: 210,
+                child: PageView.builder(
+                  controller: _bannerPageController,
+                  onPageChanged: (index) {
+                    if (!mounted) return;
+                    setState(() => _bannerPageIndex = index % docs.length);
+                  },
+                  itemBuilder: (context, index) {
+                    final doc = docs[index % docs.length];
+                    final data = doc.data() as Map<String, dynamic>;
+                    final docId = doc.id;
+                    final imageUrls = _announcementImages(data);
+
+                    return Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF0F172A), Color(0xFF1D4ED8)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF1D4ED8).withValues(alpha: 0.28),
+                            blurRadius: 22,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: Padding(
+                          padding: const EdgeInsets.all(18),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if ((data['badge'] ?? '').toString().trim().isNotEmpty)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.14),
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Text(
-                                    data['badge'].toString(),
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w700,
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            if ((data['badge'] ?? '')
+                                                .toString()
+                                                .trim()
+                                                .isNotEmpty)
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 6,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white.withValues(
+                                                    alpha: 0.14,
+                                                  ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(999),
+                                                ),
+                                                child: Text(
+                                                  data['badge'].toString(),
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ),
+                                            const Spacer(),
+                                            if (docs.length > 1)
+                                              Text(
+                                                '${(index % docs.length) + 1}/${docs.length}',
+                                                style: TextStyle(
+                                                  color: Colors.white.withValues(
+                                                    alpha: 0.78,
+                                                  ),
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                        if ((data['badge'] ?? '')
+                                            .toString()
+                                            .trim()
+                                            .isNotEmpty)
+                                          const SizedBox(height: 12),
+                                        Text(
+                                          data['title'] ??
+                                              strings['broadcast_title'],
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 20,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          data['message'] ?? '',
+                                          maxLines: 4,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.88,
+                                            ),
+                                            fontSize: 14,
+                                            height: 1.35,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                ),
-                              if ((data['badge'] ?? '').toString().trim().isNotEmpty)
-                                const SizedBox(height: 12),
-                              Text(
-                                data['title'] ?? strings['broadcast_title'],
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 20,
-                                ),
+                                  const SizedBox(width: 12),
+                                  if (imageUrls.isNotEmpty)
+                                    SizedBox(
+                                      width: 140,
+                                      height: 140,
+                                      child: _buildAnnouncementGallery(
+                                        imageUrls,
+                                        height: 140,
+                                        thumbnailWidth: 140,
+                                        borderRadius: BorderRadius.circular(18),
+                                      ),
+                                    ),
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.close,
+                                      color: Colors.white70,
+                                      size: 20,
+                                    ),
+                                    onPressed: () {
+                                      setState(
+                                        () => _hiddenBannerIds.add(docId),
+                                      );
+                                    },
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 8),
-                              Text(
-                                data['message'] ?? '',
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.88),
-                                  fontSize: 14,
-                                  height: 1.35,
-                                ),
+                              const Spacer(),
+                              Row(
+                                children: [
+                                  if (docs.length > 1)
+                                    Text(
+                                      'Swipe for more',
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.74,
+                                        ),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  const Spacer(),
+                                  if (data['link'] != null &&
+                                      data['link'].toString().isNotEmpty)
+                                    ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.white,
+                                        foregroundColor:
+                                            const Color(0xFF0F172A),
+                                        elevation: 0,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                          vertical: 12,
+                                        ),
+                                      ),
+                                      onPressed: () async {
+                                        final url = Uri.parse(data['link']);
+                                        if (await canLaunchUrl(url)) {
+                                          await launchUrl(url);
+                                        }
+                                      },
+                                      icon: const Icon(
+                                        Icons.arrow_outward_rounded,
+                                      ),
+                                      label: Text(
+                                        data['buttonText'] ?? 'Learn More',
+                                      ),
+                                    ),
+                                ],
                               ),
                             ],
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        if (imageUrls.isNotEmpty)
-                          SizedBox(
-                            width: imageUrls.length > 1 ? 110 : 92,
-                            height: 92,
-                            child: _buildAnnouncementGallery(
-                              imageUrls,
-                              height: 92,
-                              thumbnailWidth: 92,
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                          ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.close,
-                            color: Colors.white70,
-                            size: 20,
-                          ),
-                          onPressed: () {
-                            setState(() => _dismissedBannerId = docId);
-                          },
-                        ),
-                      ],
-                    ),
-                    if (data['link'] != null &&
-                        data['link'].toString().isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: const Color(0xFF0F172A),
-                            elevation: 0,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
-                            ),
-                          ),
-                          onPressed: () async {
-                            final url = Uri.parse(data['link']);
-                            if (await canLaunchUrl(url)) {
-                              await launchUrl(url);
-                            }
-                          },
-                          icon: const Icon(Icons.arrow_outward_rounded),
-                          label: Text(data['buttonText'] ?? 'Learn More'),
-                        ),
                       ),
-                    ],
-                  ],
+                    );
+                  },
                 ),
               ),
-            ),
+              if (docs.length > 1) ...[
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(
+                    docs.length,
+                    (index) => AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      width: _bannerPageIndex == index ? 22 : 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: _bannerPageIndex == index
+                            ? const Color(0xFF1D4ED8)
+                            : const Color(0xFFCBD5E1),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         );
       },

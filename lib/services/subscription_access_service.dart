@@ -6,21 +6,25 @@ import 'package:flutter/services.dart';
 
 class SubscriptionAccessState {
   final String role;
-  final bool isSubscribed;
   final String subscriptionStatus;
 
   const SubscriptionAccessState({
     required this.role,
-    required this.isSubscribed,
     required this.subscriptionStatus,
   });
 
   bool get isWorker => role == 'worker';
 
+  bool get isSubscribed =>
+      SubscriptionAccessService.isEntitledSubscriptionStatus(
+        subscriptionStatus,
+      );
+
   bool get hasActiveWorkerSubscription {
     if (!isWorker) return true;
-    // Keep access when a user is marked subscribed even if status is stale.
-    return isSubscribed;
+    return SubscriptionAccessService.isEntitledSubscriptionStatus(
+      subscriptionStatus,
+    );
   }
 
   bool get isUnsubscribedWorker => isWorker && !hasActiveWorkerSubscription;
@@ -29,6 +33,23 @@ class SubscriptionAccessState {
     if (!isWorker) return true;
     return subscriptionStatus == 'active';
   }
+}
+
+class GooglePlaySubscriptionSnapshot {
+  final String status;
+  final String? productId;
+  final String? purchaseToken;
+  final String? orderId;
+
+  const GooglePlaySubscriptionSnapshot({
+    required this.status,
+    this.productId,
+    this.purchaseToken,
+    this.orderId,
+  });
+
+  bool get isActive =>
+      status == 'active_renewing' || status == 'active_canceled';
 }
 
 class SubscriptionAccessService {
@@ -45,8 +66,36 @@ class SubscriptionAccessService {
     final role = (data?['role'] ?? 'customer').toString().toLowerCase();
     if (role != 'worker') return true;
 
-    final isSubscribed = data?['isSubscribed'] == true;
-    return isSubscribed;
+    final status = (data?['subscriptionStatus'] ?? '').toString().toLowerCase();
+    return isEntitledSubscriptionStatus(status);
+  }
+
+  static bool isEntitledSubscriptionStatus(String? status) {
+    final normalized = (status ?? '').toLowerCase();
+    return normalized == 'active' || normalized == 'active_canceled';
+  }
+
+  static Future<bool> isCurrentGooglePlaySubscriptionLinkedToAnotherAccount() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return false;
+
+    final playSnapshot = await _queryGooglePlayState();
+    if (playSnapshot == null || !playSnapshot.isActive) {
+      return false;
+    }
+
+    final purchaseToken = playSnapshot.purchaseToken?.trim();
+    if (purchaseToken == null || purchaseToken.isEmpty) {
+      return false;
+    }
+
+    final ownerQuery = await FirebaseFirestore.instance
+        .collection('users')
+        .where('subscriptionPurchaseToken', isEqualTo: purchaseToken)
+        .limit(1)
+        .get();
+
+    return ownerQuery.docs.isNotEmpty && ownerQuery.docs.first.id != user.uid;
   }
 
   static Future<SubscriptionAccessState> getCurrentUserState() async {
@@ -54,7 +103,6 @@ class SubscriptionAccessService {
     if (user == null) {
       return const SubscriptionAccessState(
         role: 'guest',
-        isSubscribed: false,
         subscriptionStatus: 'inactive',
       );
     }
@@ -65,36 +113,120 @@ class SubscriptionAccessService {
     final role = (data['role'] ?? 'customer').toString().toLowerCase();
 
     if (role == 'worker') {
-      final playState = await _queryGooglePlayState();
-      if (playState != null) {
-        final mapped = _mapGooglePlayToAccessState(
-          role: role,
-          playState: playState,
-        );
-
-        await firestore.collection('users').doc(user.uid).set({
-          'isSubscribed': mapped.isSubscribed,
-          'subscriptionStatus': mapped.subscriptionStatus,
-          'subscriptionCanceled': mapped.subscriptionStatus == 'inactive',
-          'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-
-        return mapped;
+      final syncedState = await syncCurrentUserWithGooglePlay(
+        existingData: data,
+      );
+      if (syncedState != null) {
+        return syncedState;
       }
     }
 
-    final isSubscribed = data['isSubscribed'] == true;
+    final subscriptionStatus =
+        data['subscriptionStatus']?.toString().toLowerCase() ?? 'inactive';
 
     return SubscriptionAccessState(
       role: role,
-      isSubscribed: isSubscribed,
-      subscriptionStatus:
-          data['subscriptionStatus']?.toString().toLowerCase() ??
-          (isSubscribed ? 'active' : 'inactive'),
+      subscriptionStatus: subscriptionStatus,
     );
   }
 
-  static Future<String?> _queryGooglePlayState() async {
+  static Future<SubscriptionAccessState?> syncCurrentUserWithGooglePlay({
+    Map<String, dynamic>? existingData,
+    bool allowClaimUnownedPurchase = false,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return null;
+
+    final firestore = FirebaseFirestore.instance;
+    final userRef = firestore.collection('users').doc(user.uid);
+    final data = existingData ?? (await userRef.get()).data();
+    final role = (data?['role'] ?? 'customer').toString().toLowerCase();
+    if (role != 'worker') return null;
+
+    final playSnapshot = await _queryGooglePlayState();
+    if (playSnapshot == null) return null;
+
+    final mapped = _mapGooglePlayToAccessState(
+      role: role,
+      playState: playSnapshot.status,
+    );
+
+    if (!playSnapshot.isActive) {
+      await userRef.set({
+        'isSubscribed': false,
+        'subscriptionStatus': mapped.subscriptionStatus,
+        'subscriptionCanceled': true,
+        'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      return mapped;
+    }
+
+    final purchaseToken = playSnapshot.purchaseToken?.trim();
+    if (purchaseToken == null || purchaseToken.isEmpty) {
+      return null;
+    }
+
+    final storedToken =
+        data?['subscriptionPurchaseToken']?.toString().trim() ?? '';
+
+    final ownerQuery = await firestore
+        .collection('users')
+        .where('subscriptionPurchaseToken', isEqualTo: purchaseToken)
+        .limit(1)
+        .get();
+
+    if (ownerQuery.docs.isNotEmpty && ownerQuery.docs.first.id != user.uid) {
+      debugPrint(
+        'Ignoring Google Play subscription for ${user.uid} because token belongs to ${ownerQuery.docs.first.id}.',
+      );
+      await userRef.set({
+        'isSubscribed': false,
+        'subscriptionStatus': 'inactive',
+        'subscriptionCanceled': true,
+        'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      return SubscriptionAccessState(
+        role: role,
+        subscriptionStatus: 'inactive',
+      );
+    }
+
+    final ownsStoredToken = storedToken.isNotEmpty && storedToken == purchaseToken;
+    final canClaimUnownedToken =
+        allowClaimUnownedPurchase && ownerQuery.docs.isEmpty;
+
+    if (!ownsStoredToken && !canClaimUnownedToken) {
+      debugPrint(
+        'Ignoring unclaimed Google Play subscription for ${user.uid}; token is not bound to this account.',
+      );
+      await userRef.set({
+        'isSubscribed': false,
+        'subscriptionStatus': 'inactive',
+        'subscriptionCanceled': true,
+        'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      return SubscriptionAccessState(
+        role: role,
+        subscriptionStatus: 'inactive',
+      );
+    }
+
+    await userRef.set({
+      'isSubscribed': mapped.isSubscribed,
+      'subscriptionStatus': mapped.subscriptionStatus,
+      'subscriptionCanceled': playSnapshot.status == 'active_canceled',
+      'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
+      'subscriptionPurchaseToken': purchaseToken,
+      'subscriptionProductId':
+          playSnapshot.productId ?? data?['subscriptionProductId'],
+      'subscriptionPurchaseOrderId':
+          playSnapshot.orderId ?? data?['subscriptionPurchaseOrderId'],
+    }, SetOptions(merge: true));
+
+    return mapped;
+  }
+
+  static Future<GooglePlaySubscriptionSnapshot?> _queryGooglePlayState() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
       return null;
     }
@@ -109,7 +241,12 @@ class SubscriptionAccessService {
       final result = Map<String, dynamic>.from(response);
       final status = (result['status'] ?? '').toString().toLowerCase();
       if (status.isEmpty) return null;
-      return status;
+      return GooglePlaySubscriptionSnapshot(
+        status: status,
+        productId: result['productId']?.toString(),
+        purchaseToken: result['purchaseToken']?.toString(),
+        orderId: result['orderId']?.toString(),
+      );
     } on PlatformException catch (e) {
       debugPrint('Google Play state read failed: ${e.message}');
       return null;
@@ -127,19 +264,16 @@ class SubscriptionAccessService {
       case 'active_renewing':
         return SubscriptionAccessState(
           role: role,
-          isSubscribed: true,
           subscriptionStatus: 'active',
         );
       case 'active_canceled':
         return SubscriptionAccessState(
           role: role,
-          isSubscribed: true,
-          subscriptionStatus: 'inactive',
+          subscriptionStatus: 'active_canceled',
         );
       default:
         return SubscriptionAccessState(
           role: role,
-          isSubscribed: false,
           subscriptionStatus: 'inactive',
         );
     }

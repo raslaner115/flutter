@@ -24,9 +24,10 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
   final _addressController = TextEditingController();
   final _taxBranchController = TextEditingController();
 
-  File? _idCardImage;
+  final List<File> _idCardImages = [];
   File? _businessCertImage;
   File? _insuranceImage;
+  final List<File> _latestInvoiceImages = [];
 
   String _dealerType = 'exempt'; // 'exempt' (פטור) or 'licensed' (מורשה)
   bool _isUploading = false;
@@ -36,6 +37,7 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
   bool _acceptedTerms = false;
   bool _acceptedDataPrivacy = false;
   bool _isLegalDeclarationSigned = false;
+  bool _acceptedResponsibility = false;
 
   final ImagePicker _picker = ImagePicker();
 
@@ -106,13 +108,42 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
       );
       if (picked != null) {
         setState(() {
-          if (type == 'id') _idCardImage = File(picked.path);
           if (type == 'cert') _businessCertImage = File(picked.path);
           if (type == 'insurance') _insuranceImage = File(picked.path);
         });
       }
     } catch (e) {
       debugPrint("Pick error: $e");
+    }
+  }
+
+  Future<void> _pickIdCardImages() async {
+    try {
+      final picked = await _picker.pickMultiImage(imageQuality: 70);
+      if (picked.isNotEmpty) {
+        setState(() {
+          _idCardImages
+            ..clear()
+            ..addAll(picked.take(2).map((file) => File(file.path)));
+        });
+      }
+    } catch (e) {
+      debugPrint("Pick ID images error: $e");
+    }
+  }
+
+  Future<void> _pickLatestInvoices() async {
+    try {
+      final picked = await _picker.pickMultiImage(imageQuality: 70);
+      if (picked.isNotEmpty) {
+        setState(() {
+          _latestInvoiceImages
+            ..clear()
+            ..addAll(picked.take(5).map((file) => File(file.path)));
+        });
+      }
+    } catch (e) {
+      debugPrint("Pick invoices error: $e");
     }
   }
 
@@ -134,13 +165,27 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
 
     if (!_formKey.currentState!.validate()) return;
 
-    if (_idCardImage == null || _businessCertImage == null) {
+    if (_idCardImages.length != 2 || _businessCertImage == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             isHe
-                ? 'אנא העלה תעודת זהות ואישור עוסק'
-                : 'Please upload ID and Business Certificate',
+                ? 'אנא העלה 2 תמונות תעודת זהות ואישור עוסק'
+                : 'Please upload 2 ID photos and Business Certificate',
+          ),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    if (_latestInvoiceImages.length < 2 || _latestInvoiceImages.length > 5) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isHe
+                ? 'יש להעלות בין 2 ל-5 חשבוניות אחרונות'
+                : 'Please upload between 2 and 5 latest invoices',
           ),
           backgroundColor: Colors.redAccent,
         ),
@@ -150,7 +195,8 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
 
     if (!_acceptedTerms ||
         !_acceptedDataPrivacy ||
-        !_isLegalDeclarationSigned) {
+        !_isLegalDeclarationSigned ||
+        !_acceptedResponsibility) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -169,10 +215,15 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
       final user = FirebaseAuth.instance.currentUser!;
 
       // Sequential uploads to avoid storage task state warnings
-      final idUrl = await _uploadToStorage(
-        _idCardImage!,
-        'verifications/${user.uid}/id_card.jpg',
-      );
+      final idCardUrls = <String>[];
+      for (var i = 0; i < _idCardImages.length; i++) {
+        idCardUrls.add(
+          await _uploadToStorage(
+            _idCardImages[i],
+            'verifications/${user.uid}/id_card_$i.jpg',
+          ),
+        );
+      }
       final certUrl = await _uploadToStorage(
         _businessCertImage!,
         'verifications/${user.uid}/business_cert.jpg',
@@ -186,6 +237,16 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
         );
       }
 
+      final latestInvoiceUrls = <String>[];
+      for (var i = 0; i < _latestInvoiceImages.length; i++) {
+        latestInvoiceUrls.add(
+          await _uploadToStorage(
+            _latestInvoiceImages[i],
+            'verifications/${user.uid}/latest_invoice_$i.jpg',
+          ),
+        );
+      }
+
       final businessId = _idController.text.trim();
       final verificationData = {
         'userId': user.uid,
@@ -194,12 +255,17 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
         'address': _addressController.text.trim(),
         'taxBranch': _taxBranchController.text.trim(),
         'dealerType': _dealerType,
-        'idCardUrl': idUrl,
+        'idCardUrl': idCardUrls.first,
+        'idCardUrls': idCardUrls,
+        'idCardCount': idCardUrls.length,
         'businessCertUrl': certUrl,
         'insuranceUrl': insuranceUrl,
+        'latestInvoiceUrls': latestInvoiceUrls,
+        'latestInvoiceCount': latestInvoiceUrls.length,
         'hasInsurance': _insuranceImage != null,
         'status': 'pending',
         'legalAccepted': true,
+        'responsibilityAccepted': true,
         'timestamp': FieldValue.serverTimestamp(),
       };
 
@@ -406,12 +472,97 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
                         isHe ? 'העלאת מסמכים רשמיים' : 'Upload Legal Documents',
                       ),
                       const SizedBox(height: 16),
-                      _buildUploadTile(
-                        title: isHe
-                            ? 'צילום תעודת זהות (צד פנים)'
-                            : 'ID Card Photo',
-                        image: _idCardImage,
-                        onTap: () => _pickImage('id'),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              isHe
+                                  ? 'צילום תעודת זהות - חובה 2 תמונות'
+                                  : 'ID Card Photos - exactly 2 required',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              isHe
+                                  ? 'העלה בדיוק 2 תמונות ברורות של תעודת הזהות. מומלץ חזית + מסמך נוסף ברור, ללא חיתוך וללא טשטוש.'
+                                  : 'Upload exactly 2 clear ID photos. Prefer front side plus another clear supporting ID image, with no crop or blur.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            OutlinedButton.icon(
+                              onPressed: _pickIdCardImages,
+                              icon: const Icon(Icons.badge_outlined),
+                              label: Text(
+                                isHe ? 'בחר 2 תמונות' : 'Choose 2 Photos',
+                              ),
+                            ),
+                            if (_idCardImages.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                height: 110,
+                                child: ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: _idCardImages.length,
+                                  separatorBuilder: (_, __) =>
+                                      const SizedBox(width: 10),
+                                  itemBuilder: (context, index) {
+                                    final file = _idCardImages[index];
+                                    return Stack(
+                                      children: [
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                          child: Image.file(
+                                            file,
+                                            width: 120,
+                                            height: 110,
+                                            fit: BoxFit.cover,
+                                          ),
+                                        ),
+                                        Positioned(
+                                          top: 4,
+                                          right: 4,
+                                          child: CircleAvatar(
+                                            radius: 14,
+                                            backgroundColor:
+                                                Colors.black.withValues(
+                                                  alpha: 0.55,
+                                                ),
+                                            child: IconButton(
+                                              padding: EdgeInsets.zero,
+                                              iconSize: 16,
+                                              icon: const Icon(
+                                                Icons.close,
+                                                color: Colors.white,
+                                              ),
+                                              onPressed: () {
+                                                setState(
+                                                  () => _idCardImages.removeAt(
+                                                    index,
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
                       _buildUploadTile(
                         title: isHe
@@ -431,6 +582,129 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
                       const SizedBox(height: 24),
                       _buildStepHeader(
                         4,
+                        isHe
+                            ? '2-5 חשבוניות אחרונות'
+                            : '2-5 Latest Invoices',
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF5F8FC),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFD7E3F4)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              isHe
+                                  ? 'יש להעלות לפחות 2 חשבוניות אחרונות ולא יותר מ-5.'
+                                  : 'Upload at least 2 and no more than 5 recent invoices.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[700],
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              isHe
+                                  ? 'החשבוניות חייבות להיות במספרים עוקבים ולייצג את החשבוניות האחרונות שהפקת.'
+                                  : 'The invoices must be consecutive numbers and must represent the most recent invoices you issued.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              isHe
+                                  ? 'דוגמה: אם החשבונית האחרונה שלך היא 105, אפשר להעלות 104-105 או 101,102,103,104,105. לא ניתן להעלות 98, 101, 105.'
+                                  : 'Example: if your latest invoice is 105, you can upload 104-105 or 101,102,103,104,105. Do not upload 98, 101, 105.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              isHe
+                                  ? 'ודא שהמספר, התאריך, שם העסק והסכום נראים בבירור. העלאה של מסמכים חסרים, חתוכים, כפולים או לא קריאים עלולה לעכב או לדחות את האימות.'
+                                  : 'Make sure the invoice number, date, business name, and amount are clearly visible. Missing, cropped, duplicate, or unreadable files may delay or reject verification.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: _pickLatestInvoices,
+                        icon: const Icon(Icons.receipt_long_outlined),
+                        label: Text(
+                          isHe ? 'בחר חשבוניות' : 'Choose Invoices',
+                        ),
+                      ),
+                      if (_latestInvoiceImages.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: 110,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _latestInvoiceImages.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(width: 10),
+                            itemBuilder: (context, index) {
+                              final file = _latestInvoiceImages[index];
+                              return Stack(
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: Image.file(
+                                      file,
+                                      width: 120,
+                                      height: 110,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 4,
+                                    right: 4,
+                                    child: CircleAvatar(
+                                      radius: 14,
+                                      backgroundColor: Colors.black.withValues(
+                                        alpha: 0.55,
+                                      ),
+                                      child: IconButton(
+                                        padding: EdgeInsets.zero,
+                                        iconSize: 16,
+                                        icon: const Icon(
+                                          Icons.close,
+                                          color: Colors.white,
+                                        ),
+                                        onPressed: () {
+                                          setState(
+                                            () => _latestInvoiceImages.removeAt(
+                                              index,
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+
+                      const SizedBox(height: 24),
+                      _buildStepHeader(
+                        5,
                         isHe
                             ? 'אישורים והצהרות משפטיות'
                             : 'Legal Confirmations',
@@ -458,6 +732,14 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
                         label: isHe
                             ? 'אני מצהיר כי כל המידע והמסמכים שמסרתי נכונים, תקפים ומקוריים.'
                             : 'I declare that all information and documents provided are correct, valid, and original.',
+                      ),
+                      _buildLegalCheckbox(
+                        value: _acceptedResponsibility,
+                        onChanged: (v) =>
+                            setState(() => _acceptedResponsibility = v!),
+                        label: isHe
+                            ? 'אני אחראי לכל מידע שגוי או מטעה שאמסור לכם.'
+                            : 'I am responsible for any wrong or misleading information I provide.',
                       ),
 
                       const SizedBox(height: 40),

@@ -6,7 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/admin_panel.dart';
 import 'package:untitled1/pages/settings.dart';
-import 'package:untitled1/pages/analytics_page.dart';
+import 'package:untitled1/pages/admin_analytics_page.dart';
 
 class AdminProfile extends StatefulWidget {
   const AdminProfile({super.key});
@@ -292,13 +292,12 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
               _buildQuickActionCard(Icons.add_alert_rounded, "Broadcast", Colors.blue, _showBroadcastDialog),
               _buildQuickActionCard(Icons.security_rounded, "Security", Colors.orange, _showSecurityOptions),
               _buildQuickActionCard(Icons.analytics_rounded, "Analytics", Colors.green, () {
-                final user = FirebaseAuth.instance.currentUser;
-                if (user != null) {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => AnalyticsPage(
-                    userId: user.uid,
-                    strings: _getLocalizedStrings(context),
-                  )));
-                }
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const AdminAnalyticsPage(),
+                  ),
+                );
               }),
               _buildQuickActionCard(Icons.business_rounded, "Business Info", Colors.teal, _showBusinessInfoDialog),
               _buildQuickActionCard(Icons.settings_suggest_rounded, "System Config", Colors.purple, _showSystemConfig),

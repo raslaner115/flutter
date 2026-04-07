@@ -1,13 +1,20 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:untitled1/services/language_provider.dart';
-import 'package:untitled1/pages/request_details.dart';
 import 'package:rxdart/rxdart.dart';
+import 'package:untitled1/pages/request_details.dart';
+import 'package:untitled1/services/language_provider.dart';
 
-class NotificationsPage extends StatelessWidget {
+class NotificationsPage extends StatefulWidget {
   const NotificationsPage({super.key});
+
+  @override
+  State<NotificationsPage> createState() => _NotificationsPageState();
+}
+
+class _NotificationsPageState extends State<NotificationsPage> {
+  String _selectedFilter = 'all';
 
   Map<String, String> _getLocalizedStrings(BuildContext context) {
     final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
@@ -24,6 +31,18 @@ class NotificationsPage extends StatelessWidget {
           'call': 'התקשר',
           'details': 'פרטים',
           'broadcast': 'הודעת מערכת',
+          'all': 'הכל',
+          'requests': 'בקשות',
+          'updates': 'עדכונים',
+          'broadcasts': 'מערכת',
+          'signed_out': 'יש להתחבר כדי לצפות בהתראות.',
+          'personal_count': 'אישיות',
+          'system_count': 'מערכת',
+          'pending_count': 'ממתינות',
+          'swipe_delete': 'החלק למחיקה',
+          'deleted': 'ההתראה נמחקה',
+          'open_request': 'פתח בקשה',
+          'view_details': 'צפה בפרטים',
         };
       default:
         return {
@@ -37,6 +56,18 @@ class NotificationsPage extends StatelessWidget {
           'call': 'Call',
           'details': 'Details',
           'broadcast': 'System Broadcast',
+          'all': 'All',
+          'requests': 'Requests',
+          'updates': 'Updates',
+          'broadcasts': 'System',
+          'signed_out': 'Please sign in to view notifications.',
+          'personal_count': 'Personal',
+          'system_count': 'System',
+          'pending_count': 'Pending',
+          'swipe_delete': 'Swipe to delete',
+          'deleted': 'Notification deleted',
+          'open_request': 'Open request',
+          'view_details': 'View details',
         };
     }
   }
@@ -49,19 +80,6 @@ class NotificationsPage extends StatelessWidget {
         Provider.of<LanguageProvider>(context).locale.languageCode == 'he' ||
         Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
 
-    if (user == null || user.isAnonymous) {
-      return _buildScaffold(context, strings, isRtl, user);
-    }
-
-    return _buildScaffold(context, strings, isRtl, user);
-  }
-
-  Widget _buildScaffold(
-    BuildContext context,
-    Map<String, String> strings,
-    bool isRtl,
-    User? user,
-  ) {
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
@@ -69,119 +87,400 @@ class NotificationsPage extends StatelessWidget {
         appBar: AppBar(
           title: Text(
             strings['title']!,
-            style: const TextStyle(fontWeight: FontWeight.bold),
+            style: const TextStyle(fontWeight: FontWeight.w800),
           ),
-          backgroundColor: const Color(0xFF1976D2),
-          foregroundColor: Colors.white,
+          backgroundColor: Colors.white,
+          foregroundColor: const Color(0xFF1976D2),
+          elevation: 0,
           actions: [
             if (user != null && !user.isAnonymous)
               TextButton(
-                onPressed: () async {
-                  final snapshots = await FirebaseFirestore.instance
-                      .collection('users')
-                      .doc(user.uid)
-                      .collection('notifications')
-                      .get();
-
-                  if (snapshots.docs.isEmpty) return;
-
-                  final batch = FirebaseFirestore.instance.batch();
-                  for (var doc in snapshots.docs) {
-                    batch.delete(doc.reference);
-                  }
-                  await batch.commit();
-                },
+                onPressed: () => _clearAllNotifications(user.uid),
                 child: Text(
                   strings['clear']!,
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(
+                    color: Color(0xFF1976D2),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
           ],
         ),
         body: (user == null || user.isAnonymous)
-            ? _buildEmptyState(strings)
-            : StreamBuilder<List<Map<String, dynamic>>>(
-                stream: CombineLatestStream.combine2(
-                  FirebaseFirestore.instance
-                      .collection('users')
-                      .doc(user.uid)
-                      .collection('notifications')
-                      .snapshots(),
-                  FirebaseFirestore.instance
-                      .collection('system_announcements')
-                      .snapshots(),
-                  (QuerySnapshot personal, QuerySnapshot system) {
-                    List<Map<String, dynamic>> all = [];
-                    for (var doc in personal.docs) {
-                      final data = doc.data() as Map<String, dynamic>;
-                      data['id'] = doc.id;
-                      data['isBroadcast'] = false;
-                      all.add(data);
-                    }
-                    for (var doc in system.docs) {
-                      final data = doc.data() as Map<String, dynamic>;
-                      data['id'] = doc.id;
-                      data['isBroadcast'] = true;
-                      data['type'] = 'broadcast';
-                      data['body'] =
-                          data['message']; // Map 'message' to 'body' for consistency
-                      all.add(data);
-                    }
-                    all.sort((a, b) {
-                      final Timestamp? tA = a['timestamp'] as Timestamp?;
-                      final Timestamp? tB = b['timestamp'] as Timestamp?;
-                      if (tA == null) return 1;
-                      if (tB == null) return -1;
-                      return tB.compareTo(tA);
-                    });
-                    return all;
-                  },
-                ),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                    return _buildEmptyState(strings);
-                  }
+            ? _buildSignedOutState(strings)
+            : _buildNotificationsBody(context, user.uid, strings, isRtl),
+      ),
+    );
+  }
 
-                  final notifications = snapshot.data!;
+  Widget _buildNotificationsBody(
+    BuildContext context,
+    String userId,
+    Map<String, String> strings,
+    bool isRtl,
+  ) {
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: CombineLatestStream.combine2(
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(userId)
+            .collection('notifications')
+            .snapshots(),
+        FirebaseFirestore.instance.collection('system_announcements').snapshots(),
+        (QuerySnapshot personal, QuerySnapshot system) {
+          final all = <Map<String, dynamic>>[];
 
-                  return ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: notifications.length,
-                    itemBuilder: (context, index) {
-                      final data = notifications[index];
-                      return _buildNotificationCard(
-                        context,
-                        data['id'],
-                        data,
-                        strings,
-                      );
-                    },
-                  );
-                },
+          for (final doc in personal.docs) {
+            final data = Map<String, dynamic>.from(
+              doc.data() as Map<String, dynamic>,
+            );
+            data['id'] = doc.id;
+            data['isBroadcast'] = false;
+            all.add(data);
+          }
+
+          for (final doc in system.docs) {
+            final data = Map<String, dynamic>.from(
+              doc.data() as Map<String, dynamic>,
+            );
+            data['id'] = doc.id;
+            data['isBroadcast'] = true;
+            data['type'] = 'broadcast';
+            data['body'] = data['message'];
+            all.add(data);
+          }
+
+          all.sort((a, b) {
+            final tA = a['timestamp'] as Timestamp?;
+            final tB = b['timestamp'] as Timestamp?;
+            if (tA == null && tB == null) return 0;
+            if (tA == null) return 1;
+            if (tB == null) return -1;
+            return tB.compareTo(tA);
+          });
+          return all;
+        },
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final notifications = snapshot.data ?? const [];
+        if (notifications.isEmpty) {
+          return _buildEmptyState(strings);
+        }
+
+        final filtered = notifications.where(_matchesSelectedFilter).toList();
+        final personalCount = notifications
+            .where((n) => n['isBroadcast'] != true)
+            .length;
+        final systemCount = notifications
+            .where((n) => n['isBroadcast'] == true)
+            .length;
+        final pendingCount = notifications
+            .where((n) =>
+                (n['type'] == 'work_request' || n['type'] == 'quote_request') &&
+                (n['status'] ?? 'pending') == 'pending')
+            .length;
+
+        return Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Color(0x0A0F172A),
+                    blurRadius: 14,
+                    offset: Offset(0, 4),
+                  ),
+                ],
               ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(22),
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF1976D2), Color(0xFF4FC3F7)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isRtl ? 'מרכז ההתראות שלך' : 'Your notification hub',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${notifications.length} ${strings['title']!.toLowerCase()}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            _buildStatChip(
+                              strings['personal_count']!,
+                              personalCount.toString(),
+                            ),
+                            _buildStatChip(
+                              strings['system_count']!,
+                              systemCount.toString(),
+                            ),
+                            _buildStatChip(
+                              strings['pending_count']!,
+                              pendingCount.toString(),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 38,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        _buildFilterChip('all', strings['all']!),
+                        _buildFilterChip('requests', strings['requests']!),
+                        _buildFilterChip('updates', strings['updates']!),
+                        _buildFilterChip('broadcasts', strings['broadcasts']!),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: filtered.isEmpty
+                  ? Center(
+                      child: Text(
+                        strings['empty']!,
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: filtered.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final data = filtered[index];
+                        final canDismiss = data['isBroadcast'] != true;
+                        final card = _buildNotificationCard(
+                          context,
+                          data['id'].toString(),
+                          data,
+                          strings,
+                        );
+
+                        if (!canDismiss) return card;
+
+                        return Dismissible(
+                          key: ValueKey('notif_${data['id']}'),
+                          direction: DismissDirection.endToStart,
+                          background: Container(
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDC2626),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: const Icon(
+                              Icons.delete_outline_rounded,
+                              color: Colors.white,
+                            ),
+                          ),
+                          onDismissed: (_) async {
+                            await FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(userId)
+                                .collection('notifications')
+                                .doc(data['id'].toString())
+                                .delete();
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(strings['deleted']!)),
+                            );
+                          },
+                          child: card,
+                        );
+                      },
+                    ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _clearAllNotifications(String userId) async {
+    final snapshots = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .collection('notifications')
+        .get();
+
+    if (snapshots.docs.isEmpty) return;
+
+    final batch = FirebaseFirestore.instance.batch();
+    for (final doc in snapshots.docs) {
+      batch.delete(doc.reference);
+    }
+    await batch.commit();
+  }
+
+  bool _matchesSelectedFilter(Map<String, dynamic> data) {
+    final isBroadcast = data['isBroadcast'] == true;
+    final type = (data['type'] ?? '').toString();
+    switch (_selectedFilter) {
+      case 'requests':
+        return type == 'work_request' || type == 'quote_request';
+      case 'updates':
+        return !isBroadcast &&
+            type != 'work_request' &&
+            type != 'quote_request';
+      case 'broadcasts':
+        return isBroadcast;
+      case 'all':
+      default:
+        return true;
+    }
+  }
+
+  Widget _buildFilterChip(String value, String label) {
+    final isSelected = _selectedFilter == value;
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(end: 8),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: isSelected,
+        onSelected: (_) => setState(() => _selectedFilter = value),
+        selectedColor: const Color(0xFF1976D2),
+        backgroundColor: const Color(0xFFF1F5F9),
+        side: BorderSide.none,
+        labelStyle: TextStyle(
+          color: isSelected ? Colors.white : const Color(0xFF475569),
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatChip(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSignedOutState(Map<String, String> strings) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 88,
+              height: 88,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F1FB),
+                borderRadius: BorderRadius.circular(28),
+              ),
+              child: const Icon(
+                Icons.notifications_none_rounded,
+                size: 42,
+                color: Color(0xFF1976D2),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              strings['signed_out']!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 16,
+                color: Color(0xFF64748B),
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildEmptyState(Map<String, String> strings) {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.notifications_off_outlined,
-            size: 80,
-            color: Colors.grey[300],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            strings['empty']!,
-            style: const TextStyle(color: Colors.grey, fontSize: 16),
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 88,
+              height: 88,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F1FB),
+                borderRadius: BorderRadius.circular(28),
+              ),
+              child: const Icon(
+                Icons.notifications_off_outlined,
+                size: 42,
+                color: Color(0xFF1976D2),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              strings['empty']!,
+              style: const TextStyle(
+                color: Color(0xFF475569),
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -192,113 +491,206 @@ class NotificationsPage extends StatelessWidget {
     Map<String, dynamic> data,
     Map<String, String> strings,
   ) {
-    final bool isActionableRequest =
+    final isActionableRequest =
         data['type'] == 'work_request' || data['type'] == 'quote_request';
-    final bool isBroadcast = data['isBroadcast'] == true;
-    final String status = data['status'] ?? 'none';
+    final isBroadcast = data['isBroadcast'] == true;
+    final status = (data['status'] ?? 'none').toString();
+    final title =
+        (data['title'] ??
+                (isBroadcast ? strings['broadcast']! : 'Notification'))
+            .toString();
+    final body = (data['body'] ?? data['message'] ?? '').toString();
+    final accent = isBroadcast
+        ? const Color(0xFF1D4ED8)
+        : isActionableRequest
+            ? const Color(0xFF0F766E)
+            : const Color(0xFF1976D2);
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      elevation: 0,
-      color: isBroadcast ? Colors.blue.shade50 : Colors.white,
+    return Material(
+      color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         onTap: isActionableRequest && status == 'pending'
             ? () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) =>
-                      RequestDetailsPage(notificationId: docId, data: data),
-                ),
-              )
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        RequestDetailsPage(notificationId: docId, data: data),
+                  ),
+                )
             : null,
-        child: Column(
-          children: [
-            ListTile(
-              contentPadding: const EdgeInsets.all(16),
-              leading: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: isBroadcast ? Colors.blue : const Color(0xFF1976D2),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  isBroadcast
-                      ? Icons.campaign
-                      : (isActionableRequest
-                            ? Icons.calendar_today
-                            : Icons.notifications_active),
-                  color: Colors.white,
-                  size: 20,
-                ),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isBroadcast
+                  ? const Color(0xFFD6E4FF)
+                  : const Color(0xFFE2E8F0),
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x0C0F172A),
+                blurRadius: 16,
+                offset: Offset(0, 6),
               ),
-              title: Text(
-                data['title'] ??
-                    (isBroadcast ? strings['broadcast']! : 'Notification'),
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              subtitle: Column(
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const SizedBox(height: 4),
-                  Text(data['body'] ?? data['message'] ?? ''),
-                  if (data['timestamp'] != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      _formatTimestamp(data['timestamp']),
-                      style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                  ],
-                ],
-              ),
-              trailing: isActionableRequest && status == 'pending'
-                  ? const Icon(Icons.chevron_right, color: Colors.grey)
-                  : null,
-            ),
-            if (isActionableRequest && status != 'pending')
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        decoration: BoxDecoration(
-                          color: status == 'accepted'
-                              ? Colors.green.withOpacity(0.1)
-                              : Colors.red.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Center(
-                          child: Text(
-                            status == 'accepted'
-                                ? strings['accepted']!
-                                : strings['declined']!,
-                            style: TextStyle(
-                              color: status == 'accepted'
-                                  ? Colors.green
-                                  : Colors.red,
-                              fontWeight: FontWeight.bold,
+                    child: Icon(
+                      isBroadcast
+                          ? Icons.campaign_rounded
+                          : (isActionableRequest
+                              ? Icons.assignment_turned_in_outlined
+                              : Icons.notifications_active_outlined),
+                      color: accent,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: accent.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                isBroadcast
+                                    ? strings['broadcast']!
+                                    : isActionableRequest
+                                        ? strings['requests']!
+                                        : strings['updates']!,
+                                style: TextStyle(
+                                  color: accent,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ),
+                            if (isActionableRequest && status != 'pending')
+                              _buildStatusBadge(status, strings),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF0F172A),
                           ),
                         ),
+                        const SizedBox(height: 6),
+                        Text(
+                          body,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: Color(0xFF475569),
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _formatTimestamp(data['timestamp']),
+                      style: const TextStyle(
+                        color: Color(0xFF94A3B8),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  if (isActionableRequest && status == 'pending')
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFECFDF5),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        strings['open_request']!,
+                        style: const TextStyle(
+                          color: Color(0xFF047857),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    )
+                  else if (!isActionableRequest)
+                    Text(
+                      strings['view_details']!,
+                      style: const TextStyle(
+                        color: Color(0xFF64748B),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                ],
               ),
-          ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusBadge(String status, Map<String, String> strings) {
+    final isAccepted = status == 'accepted';
+    final bg = isAccepted ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2);
+    final fg = isAccepted ? const Color(0xFF15803D) : const Color(0xFFB91C1C);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        isAccepted ? strings['accepted']! : strings['declined']!,
+        style: TextStyle(
+          color: fg,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
   }
 
   String _formatTimestamp(dynamic timestamp) {
-    if (timestamp is Timestamp) {
-      final date = timestamp.toDate();
-      return "${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}";
-    }
-    return '';
+    if (timestamp is! Timestamp) return '';
+    final date = timestamp.toDate();
+    return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
   }
 }

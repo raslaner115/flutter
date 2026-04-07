@@ -102,6 +102,8 @@ class MainActivity : FlutterActivity() {
 									"status" to state,
 									"productId" to matchedPurchase.products.firstOrNull(),
 									"isAutoRenewing" to matchedPurchase.isAutoRenewing,
+									"purchaseToken" to matchedPurchase.purchaseToken,
+									"orderId" to matchedPurchase.orderId,
 								),
 							)
 						} finally {

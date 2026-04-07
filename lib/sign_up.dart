@@ -17,6 +17,7 @@ import 'package:untitled1/map/map_radius_picker.dart';
 import 'package:untitled1/map/location_picker.dart';
 import 'package:untitled1/pages/privacy_policy_page.dart';
 import 'package:untitled1/pages/terms_of_service_page.dart';
+import 'package:untitled1/services/subscription_access_service.dart';
 import 'package:untitled1/utils/profession_localization.dart';
 import 'main.dart';
 
@@ -115,7 +116,11 @@ class _SignUpPageState extends State<SignUpPage> {
   Future<void> _tryFinalizePaidWorkerRegistrationAfterSubscription() async {
     if (_autoCompletingFromPaidWorker) return;
     if (widget.pendingWorkerData == null) return;
-    if (widget.pendingWorkerData?['isSubscribed'] != true) return;
+    if (!SubscriptionAccessService.isEntitledSubscriptionStatus(
+      widget.pendingWorkerData?['subscriptionStatus']?.toString(),
+    )) {
+      return;
+    }
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.phoneNumber == null || user.phoneNumber!.isEmpty) {
@@ -388,7 +393,9 @@ class _SignUpPageState extends State<SignUpPage> {
 
   Future<void> _onPhoneVerifiedAndSignedIn() async {
     if (_userType == UserType.worker &&
-        widget.pendingWorkerData?['isSubscribed'] != true) {
+        !SubscriptionAccessService.isEntitledSubscriptionStatus(
+          widget.pendingWorkerData?['subscriptionStatus']?.toString(),
+        )) {
       // Persist all entered data immediately after phone verification,
       // then continue the Pro subscription step.
       await _commitUserDataToDatabase(navigateToHome: false);
@@ -520,7 +527,9 @@ class _SignUpPageState extends State<SignUpPage> {
 
       if (_userType == UserType.worker) {
         final bool hasActiveSubscriptionFromPending =
-            widget.pendingWorkerData?['isSubscribed'] == true;
+            SubscriptionAccessService.isEntitledSubscriptionStatus(
+              widget.pendingWorkerData?['subscriptionStatus']?.toString(),
+            );
         final DateTime now = DateTime.now();
         final DateTime defaultExpiry = now.add(const Duration(days: 30));
         final DateTime? pendingDate = DateTime.tryParse(
@@ -545,6 +554,8 @@ class _SignUpPageState extends State<SignUpPage> {
               widget.pendingWorkerData?['subscriptionPlatform'],
           'subscriptionPurchaseId':
               widget.pendingWorkerData?['subscriptionPurchaseId'],
+          'subscriptionPurchaseToken':
+              widget.pendingWorkerData?['subscriptionPurchaseToken'],
           'subscriptionTransactionDate':
               widget.pendingWorkerData?['subscriptionTransactionDate'],
           'workRadius': _workRadius,

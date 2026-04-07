@@ -20,6 +20,7 @@ import 'package:untitled1/pages/inbox_page.dart';
 import 'package:untitled1/pages/chat_page.dart';
 import 'package:untitled1/services/analytics_service.dart';
 import 'package:untitled1/services/notification_service.dart';
+import 'package:untitled1/services/subscription_access_service.dart';
 import 'package:untitled1/sign_in.dart';
 import 'services/firebase_options.dart';
 
@@ -324,8 +325,9 @@ class _MyHomePageState extends State<MyHomePage> {
       if (!doc.exists) return;
 
       final data = doc.data() ?? <String, dynamic>{};
-      final isSubscribed = data['isSubscribed'] == true;
-      if (!isSubscribed) return;
+      if (!SubscriptionAccessService.hasActiveWorkerSubscriptionFromData(data)) {
+        return;
+      }
 
       final prefs = await SharedPreferences.getInstance();
       final key = 'worker_tools_tour_done_v3_${user.uid}';

@@ -8,6 +8,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/services.dart';
 import 'package:untitled1/sign_up.dart';
+import 'package:untitled1/services/subscription_access_service.dart';
 
 class SubscriptionPage extends StatefulWidget {
   final String email;
@@ -29,9 +30,6 @@ class SubscriptionPage extends StatefulWidget {
 
 class _SubscriptionPageState extends State<SubscriptionPage> {
   final InAppPurchase _inAppPurchase = InAppPurchase.instance;
-  static const MethodChannel _billingStatusChannel = MethodChannel(
-    'com.hirehub.app/subscription_status',
-  );
   late StreamSubscription<List<PurchaseDetails>> _subscription;
   List<ProductDetails> _products = [];
   bool _isLoading = true;
@@ -167,11 +165,15 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     for (var purchaseDetails in purchaseDetailsList) {
       if (purchaseDetails.status == PurchaseStatus.error) {
         if (mounted) setState(() => _isPurchasing = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("הרכישה נכשלה: ${purchaseDetails.error?.message}"),
-          ),
-        );
+        if (_isAlreadyOwnedError(purchaseDetails.error)) {
+          _handleSubscriptionOwnedByAnotherAccount();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("הרכישה נכשלה: ${purchaseDetails.error?.message}"),
+            ),
+          );
+        }
       } else if (purchaseDetails.status == PurchaseStatus.purchased ||
           purchaseDetails.status == PurchaseStatus.restored) {
         if (mounted) setState(() => _isPurchasing = false);
@@ -200,50 +202,71 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   }
 
   Future<void> _syncSubscriptionStateFromGooglePlay() async {
+    await _syncSubscriptionStateFromGooglePlayWithClaim(
+      allowClaimUnownedPurchase: false,
+    );
+  }
+
+  Future<void> _syncSubscriptionStateFromGooglePlayWithClaim({
+    required bool allowClaimUnownedPurchase,
+  }) async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     try {
-      final dynamic response = await _billingStatusChannel.invokeMethod(
-        'getSubscriptionState',
-        {'productIds': _allowedSubscriptionIds.toList()},
+      await SubscriptionAccessService.syncCurrentUserWithGooglePlay(
+        allowClaimUnownedPurchase: allowClaimUnownedPurchase,
       );
-
-      if (response is! Map) return;
-
-      final Map<String, dynamic> result = Map<String, dynamic>.from(response);
-      final status = (result['status'] ?? '').toString().toLowerCase();
-
-      final firestore = FirebaseFirestore.instance;
-      if (status == 'active_renewing') {
-        await firestore.collection('users').doc(user.uid).set({
-          'isSubscribed': true,
-          'subscriptionStatus': 'active',
-          'subscriptionCanceled': false,
-          'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      } else if (status == 'active_canceled') {
-        await firestore.collection('users').doc(user.uid).set({
-          'isSubscribed': true,
-          'subscriptionStatus': 'inactive',
-          'subscriptionCanceled': true,
-          'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      } else if (status == 'inactive') {
-        await firestore.collection('users').doc(user.uid).set({
-          'isSubscribed': false,
-          'subscriptionStatus': 'inactive',
-          'subscriptionCanceled': true,
-          'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      }
+      await _refreshLinkedAccountNotice();
     } on PlatformException catch (e) {
       debugPrint('Google Play subscription status sync failed: ${e.message}');
     } catch (e) {
       debugPrint('Google Play subscription status sync failed: $e');
     }
+  }
+
+  Future<void> _refreshLinkedAccountNotice() async {
+    final linkedElsewhere =
+        await SubscriptionAccessService
+            .isCurrentGooglePlaySubscriptionLinkedToAnotherAccount();
+    if (!mounted) return;
+
+    setState(() {
+      if (linkedElsewhere) {
+        _storeNotice =
+            'חשבון Google Play הזה כבר מחזיק מנוי Hiro שמקושר למספר טלפון אחר. המנוי זמין רק בחשבון המקורי.';
+      } else if (_storeNotice != null &&
+          _storeNotice!.contains('Google Play') &&
+          _storeNotice!.contains('Hiro')) {
+        _storeNotice = null;
+      }
+    });
+  }
+
+  bool _isAlreadyOwnedError(IAPError? error) {
+    if (error == null) return false;
+    final code = error.code.toLowerCase();
+    final message = (error.message ?? '').toLowerCase();
+    final details = (error.details ?? '').toString().toLowerCase();
+    final combined = '$code $message $details';
+    return combined.contains('already owned') ||
+        combined.contains('item already owned') ||
+        combined.contains('alreadyown') ||
+        combined.contains('duplicate');
+  }
+
+  Future<void> _handleSubscriptionOwnedByAnotherAccount() async {
+    await _refreshLinkedAccountNotice();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'חשבון Google Play הזה כבר מחזיק מנוי Hiro שמקושר לחשבון אחר.',
+        ),
+      ),
+    );
   }
 
   bool _isPurchaseDataInvalid(PurchaseDetails details) {
@@ -267,6 +290,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         'subscriptionProductId': purchaseDetails.productID,
         'subscriptionPlatform': purchaseDetails.verificationData.source,
         'subscriptionPurchaseId': purchaseDetails.purchaseID,
+        'subscriptionPurchaseToken':
+            purchaseDetails.verificationData.serverVerificationData,
         'subscriptionTransactionDate': purchaseDetails.transactionDate,
       };
       await _savePurchaseMetadata(purchaseDetails);
@@ -309,6 +334,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         'subscriptionProductId': purchaseDetails.productID,
         'subscriptionPlatform': purchaseDetails.verificationData.source,
         'subscriptionPurchaseId': purchaseDetails.purchaseID,
+        'subscriptionPurchaseToken':
+            purchaseDetails.verificationData.serverVerificationData,
         'subscriptionTransactionDate': purchaseDetails.transactionDate,
         'subscriptionDate': Timestamp.fromDate(now),
         'subscriptionExpiresAt': Timestamp.fromDate(
@@ -380,9 +407,16 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     } catch (e) {
       if (mounted) {
         setState(() => _isPurchasing = false);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('שגיאה בהתחלת רכישה: $e')));
+        final errorText = e.toString().toLowerCase();
+        if (errorText.contains('already owned') ||
+            errorText.contains('item already owned') ||
+            errorText.contains('duplicate')) {
+          await _handleSubscriptionOwnedByAnotherAccount();
+        } else {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('שגיאה בהתחלת רכישה: $e')));
+        }
       }
     }
   }
@@ -391,7 +425,9 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     try {
       setState(() => _isPurchasing = true);
       await _inAppPurchase.restorePurchases();
-      await _syncSubscriptionStateFromGooglePlay();
+      await _syncSubscriptionStateFromGooglePlayWithClaim(
+        allowClaimUnownedPurchase: true,
+      );
       if (mounted) {
         setState(() => _isPurchasing = false);
         ScaffoldMessenger.of(context).showSnackBar(

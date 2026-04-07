@@ -172,6 +172,10 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     final userDoc = FirebaseFirestore.instance.collection('users').doc(userId);
     final counterRef = userDoc.collection('counters').doc('invoice');
     final invoicesRef = userDoc.collection('invoices');
+    final savedInvoicesRef = userDoc.collection('saved_invoices');
+    final invoiceTotalsRef = FirebaseFirestore.instance
+        .collection('metadata')
+        .doc('invoice_counts');
     final logEntries = logTargets.map((target) {
       final logBucketRef = FirebaseFirestore.instance
           .collection('logs')
@@ -230,6 +234,10 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
       // Save invoice (metadata only, PDF upload is outside transaction)
       final invoiceDoc = invoicesRef.doc(nextNumber.toString());
       transaction.set(invoiceDoc, invoiceData);
+      transaction.set(invoiceTotalsRef, {
+        docType: FieldValue.increment(1),
+        'updatedAt': timestamp,
+      }, SetOptions(merge: true));
 
       // Keep a per-type counter and write each file entry under logs/<type>/files.
       for (var i = 0; i < logEntries.length; i++) {
@@ -291,6 +299,22 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
       'fileName': fileName,
       'url': downloadUrl,
     });
+    final clientName = _clientNameController.text.trim();
+    final savedInvoiceName = clientName.isNotEmpty
+        ? '${_labelForDocType(docType)} #$savedNumber - $clientName'
+        : '${_labelForDocType(docType)} #$savedNumber';
+    await savedInvoicesRef.add({
+      'name': savedInvoiceName,
+      'fileName': fileName,
+      'url': downloadUrl,
+      'storagePath': storagePath,
+      'amount': _totalAmount,
+      'invoiceNumber': savedNumber,
+      'docType': docType,
+      'clientName': clientName,
+      'date': dateStr,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
     await Future.wait(
       logEntries.map((entry) async {
         final logFileRef =
@@ -302,6 +326,20 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
         });
       }),
     );
+  }
+
+  String _labelForDocType(String docType) {
+    switch (docType) {
+      case 'invoice':
+        return 'Invoice';
+      case 'invoice_receipt':
+        return 'Invoice Receipt';
+      case 'credit_note':
+        return 'Credit Note';
+      case 'receipt':
+      default:
+        return 'Receipt';
+    }
   }
 
   final _clientNameController = TextEditingController();

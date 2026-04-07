@@ -87,11 +87,9 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
 
   bool _isOwnProfile = false;
   bool _isLoading = true;
-  bool _isSubscribed = false;
   String _subscriptionStatus = 'inactive';
   DateTime? _subscriptionDate;
   DateTime? _subscriptionExpiresAt;
-  bool _subscriptionSyncInProgress = false;
 
   bool _isIdVerified = false;
   bool _isBusinessVerified = false;
@@ -107,7 +105,6 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
   bool get _hasActiveWorkerSubscription {
     return SubscriptionAccessService.hasActiveWorkerSubscriptionFromData({
       'role': _userRole,
-      'isSubscribed': _isSubscribed,
       'subscriptionStatus': _subscriptionStatus,
     });
   }
@@ -340,7 +337,7 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
     return widget.showWorkerToolsGuide &&
         _isOwnProfile &&
         _userRole == 'worker' &&
-        _isSubscribed;
+        _hasActiveWorkerSubscription;
   }
 
   void _maybeScrollAboutToTools() {
@@ -523,43 +520,6 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
     return years < 0 ? null : years;
   }
 
-  Future<void> _enforceSubscriptionLifecycle(String uid) async {
-    if (_subscriptionSyncInProgress || _userRole != 'worker') return;
-
-    final now = DateTime.now();
-    final DateTime? effectiveExpiry =
-        _subscriptionExpiresAt ??
-        _subscriptionDate?.add(const Duration(days: 30));
-
-    if (!_isSubscribed ||
-        effectiveExpiry == null ||
-        now.isBefore(effectiveExpiry)) {
-      return;
-    }
-
-    _subscriptionSyncInProgress = true;
-    try {
-      await _firestore.collection('users').doc(uid).update({
-        'isSubscribed': false,
-        'subscriptionStatus': 'inactive',
-        'subscriptionCanceled': true,
-        'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
-      });
-
-      if (mounted) {
-        setState(() {
-          _isSubscribed = false;
-          _subscriptionStatus = 'inactive';
-          _subscriptionExpiresAt = effectiveExpiry;
-        });
-      }
-    } catch (e) {
-      debugPrint('Subscription lifecycle sync failed: $e');
-    } finally {
-      _subscriptionSyncInProgress = false;
-    }
-  }
-
   Future<void> _fetchUserData() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     final targetUid = widget.userId ?? currentUser?.uid;
@@ -596,10 +556,9 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
           _profileImageUrl = data['profileImageUrl']?.toString() ?? "";
           _viewsCount = 0;
           _userRole = data['role'] ?? 'customer';
-          _isSubscribed = data['isSubscribed'] == true;
           _subscriptionStatus =
               data['subscriptionStatus']?.toString().toLowerCase() ??
-              (_isSubscribed ? 'active' : 'inactive');
+              'inactive';
           _subscriptionDate = _toDate(data['subscriptionDate']);
           _subscriptionExpiresAt = _toDate(data['subscriptionExpiresAt']);
 
@@ -628,7 +587,6 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
               await SubscriptionAccessService.getCurrentUserState();
           if (mounted) {
             setState(() {
-              _isSubscribed = accessState.isSubscribed;
               _subscriptionStatus = accessState.subscriptionStatus;
             });
           }
@@ -685,9 +643,6 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
             }
           }
         }
-
-        await _enforceSubscriptionLifecycle(targetUid);
-
         if (mounted) setState(() => _isLoading = false);
       } else {
         if (mounted) setState(() => _isLoading = false);
@@ -2205,8 +2160,7 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
                   ],
                 ),
               ),
-            if (_userRole == 'worker' &&
-                (_subscriptionStatus == 'inactive' || !_isSubscribed)) ...[
+            if (_userRole == 'worker' && !_hasActiveWorkerSubscription) ...[
               _buildRenewSubscriptionCard(strings),
               const SizedBox(height: 16),
             ],
