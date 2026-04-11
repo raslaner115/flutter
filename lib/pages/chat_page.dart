@@ -21,6 +21,7 @@ import 'package:untitled1/ptofile.dart';
 import 'package:untitled1/services/subscription_access_service.dart';
 
 import '../widgets/cached_video_player.dart';
+import '../widgets/zoomable_image_viewer.dart';
 
 class ChatPage extends StatefulWidget {
   final String receiverId;
@@ -45,14 +46,22 @@ class _ChatPageState extends State<ChatPage> {
 
   final AudioRecorder _audioRecorder = AudioRecorder();
   final ap.AudioPlayer _audioPlayer = ap.AudioPlayer();
+  StreamSubscription<Duration>? _audioPositionSubscription;
+  StreamSubscription<Duration>? _audioDurationSubscription;
+  StreamSubscription<ap.PlayerState>? _audioStateSubscription;
   bool _isRecording = false;
   Timer? _recordingTimer;
   int _recordingSeconds = 0;
+  String? _activeAudioUrl;
+  Duration _activeAudioPosition = Duration.zero;
+  Duration _activeAudioDuration = Duration.zero;
+  ap.PlayerState _audioPlayerState = ap.PlayerState.stopped;
   final Map<String, String> _localMediaPaths = {};
   final Map<String, double> _downloadProgress = {};
   final Set<String> _downloadingUrls = {};
   final Set<String> _failedDownloads = {};
   final Map<String, Future<String?>> _localResolveFutures = {};
+  final List<_PendingMediaUpload> _pendingMediaUploads = [];
   late Stream<QuerySnapshot> _messageStream;
 
   // Selection Mode State
@@ -68,6 +77,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
+    _wireAudioPlayer();
     WidgetsBinding.instance.addObserver(_lifecycleObserver);
     _checkUserType();
     final currentUserId = _auth.currentUser!.uid;
@@ -145,8 +155,56 @@ class _ChatPageState extends State<ChatPage> {
     _scrollController.dispose();
     _recordingTimer?.cancel();
     _audioRecorder.dispose();
+    _audioPositionSubscription?.cancel();
+    _audioDurationSubscription?.cancel();
+    _audioStateSubscription?.cancel();
     _audioPlayer.dispose();
     super.dispose();
+  }
+
+  void _wireAudioPlayer() {
+    _audioPositionSubscription = _audioPlayer.onPositionChanged.listen((position) {
+      if (!mounted) return;
+      if (_activeAudioDuration > Duration.zero &&
+          position >= _activeAudioDuration - const Duration(milliseconds: 250)) {
+        _resetActiveAudioToStart();
+        return;
+      }
+      setState(() => _activeAudioPosition = position);
+    });
+
+    _audioDurationSubscription = _audioPlayer.onDurationChanged.listen((duration) {
+      if (!mounted) return;
+      setState(() => _activeAudioDuration = duration);
+    });
+
+    _audioStateSubscription = _audioPlayer.onPlayerStateChanged.listen((state) {
+      if (!mounted) return;
+      if (state == ap.PlayerState.completed) {
+        _resetActiveAudioToStart();
+        return;
+      }
+      setState(() {
+        _audioPlayerState = state;
+        if (state == ap.PlayerState.stopped) {
+          _activeAudioPosition = Duration.zero;
+        }
+      });
+    });
+  }
+
+  Future<void> _resetActiveAudioToStart() async {
+    try {
+      await _audioPlayer.stop();
+    } catch (e) {
+      debugPrint("Audio reset error: $e");
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _activeAudioPosition = Duration.zero;
+      _audioPlayerState = ap.PlayerState.stopped;
+    });
   }
 
   Future<void> _setActiveChat(String userId) async {
@@ -227,6 +285,7 @@ class _ChatPageState extends State<ChatPage> {
     String type = 'text',
     String? url,
     String? fileName,
+    int? durationSeconds,
   }) async {
     if (type == 'text' && (text == null || text.trim().isEmpty)) return;
 
@@ -240,6 +299,7 @@ class _ChatPageState extends State<ChatPage> {
       'type': type,
       'url': url,
       'fileName': fileName,
+      if (durationSeconds != null) 'durationSeconds': durationSeconds,
       'timestamp': FieldValue.serverTimestamp(),
     };
 
@@ -446,20 +506,27 @@ class _ChatPageState extends State<ChatPage> {
                     }
 
                     final messages = snapshot.data!.docs;
+                    final pendingUploads = _pendingMediaUploads
+                        .where((upload) => upload.receiverId == widget.receiverId)
+                        .toList();
                     return ListView.builder(
                       controller: _scrollController,
                       reverse: true,
                       padding: const EdgeInsets.all(16),
-                      itemCount: messages.length,
+                      itemCount: pendingUploads.length + messages.length,
                       itemBuilder: (context, index) {
+                        if (index < pendingUploads.length) {
+                          return _buildPendingUploadBubble(pendingUploads[index]);
+                        }
                         final message =
-                            messages[index].data() as Map<String, dynamic>;
+                            messages[index - pendingUploads.length].data()
+                                as Map<String, dynamic>;
                         final isMe =
                             message['senderId'] == _auth.currentUser!.uid;
                         return _buildMessageBubble(
                           message,
                           isMe,
-                          messages[index].id,
+                          messages[index - pendingUploads.length].id,
                         );
                       },
                     );
@@ -561,7 +628,12 @@ class _ChatPageState extends State<ChatPage> {
               else if (type == 'file')
                 _buildFileAttachment(url, fileName, isMe)
               else if (type == 'audio')
-                _buildAudioPlayer(url, isMe: isMe, fileName: fileName),
+                _buildAudioPlayer(
+                  url,
+                  isMe: isMe,
+                  fileName: fileName,
+                  durationSeconds: (message['durationSeconds'] as num?)?.toInt(),
+                ),
               const SizedBox(height: 4),
               Text(
                 timeStr,
@@ -572,6 +644,199 @@ class _ChatPageState extends State<ChatPage> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPendingUploadBubble(_PendingMediaUpload upload) {
+    final bool isImage = upload.type == 'image';
+    final bool isVideo = upload.type == 'video';
+    final bool isFailed = upload.isFailed;
+    final progress = upload.progress.clamp(0.0, 1.0);
+    final statusText = isFailed
+        ? 'Upload failed'
+        : progress >= 1
+        ? 'Finishing...'
+        : 'Uploading ${(progress * 100).round()}%';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      alignment: Alignment.centerRight,
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
+        padding: const EdgeInsets.all(12),
+        decoration: const BoxDecoration(
+          color: Color(0xFF1976D2),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(16),
+            topRight: Radius.circular(16),
+            bottomLeft: Radius.circular(16),
+            bottomRight: Radius.zero,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (isImage)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Image.file(
+                      File(upload.localPath),
+                      height: 190,
+                      width: 220,
+                      fit: BoxFit.cover,
+                    ),
+                    _buildUploadOverlay(
+                      progress: progress,
+                      isFailed: isFailed,
+                      onRetry: () => _retryPendingUpload(upload),
+                    ),
+                  ],
+                ),
+              )
+            else if (isVideo)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Container(
+                      height: 190,
+                      width: 220,
+                      color: Colors.black,
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.videocam_rounded,
+                            color: Colors.white70,
+                            size: 48,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            upload.fileName,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    _buildUploadOverlay(
+                      progress: progress,
+                      isFailed: isFailed,
+                      onRetry: () => _retryPendingUpload(upload),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isFailed ? Icons.error_outline_rounded : Icons.schedule_rounded,
+                  size: 14,
+                  color: Colors.white70,
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    statusText,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUploadOverlay({
+    required double progress,
+    required bool isFailed,
+    required VoidCallback onRetry,
+  }) {
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black45,
+        child: Center(
+          child: isFailed
+              ? Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(28),
+                    onTap: onRetry,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(28),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.refresh_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'Retry',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                )
+              : SizedBox(
+                  width: 56,
+                  height: 56,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      CircularProgressIndicator(
+                        value: progress > 0 ? progress : null,
+                        strokeWidth: 3,
+                        color: Colors.white,
+                        backgroundColor: Colors.white24,
+                      ),
+                      Text(
+                        '${(progress * 100).round()}%',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
         ),
       ),
     );
@@ -713,56 +978,177 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  Widget _buildAudioPlayer(String url, {required bool isMe, String? fileName}) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.mic, color: isMe ? Colors.white : Colors.black54, size: 20),
-        const SizedBox(width: 8),
-        Text(
-          "Voice Message",
-          style: TextStyle(color: isMe ? Colors.white : Colors.black87),
-        ),
-        FutureBuilder<String?>(
-          future: _resolveLocalAttachmentCached(
-            url: url,
-            type: 'audio',
-            fileName: fileName,
-            autoDownload: true,
+  Widget _buildAudioPlayer(
+    String url, {
+    required bool isMe,
+    String? fileName,
+    int? durationSeconds,
+  }) {
+    return FutureBuilder<String?>(
+      future: _resolveLocalAttachmentCached(
+        url: url,
+        type: 'audio',
+        fileName: fileName,
+        autoDownload: true,
+      ),
+      builder: (context, snapshot) {
+        final localPath = snapshot.data;
+        final isDownloading = _downloadingUrls.contains(url);
+        final isActive = _activeAudioUrl == url;
+        final isPlaying = isActive && _audioPlayerState == ap.PlayerState.playing;
+        final position = isActive && _audioPlayerState != ap.PlayerState.stopped
+            ? _activeAudioPosition
+            : Duration.zero;
+        final duration = isActive && _activeAudioDuration > Duration.zero
+            ? _activeAudioDuration
+            : Duration(seconds: durationSeconds ?? 0);
+        final durationText = _formatAudioSeconds(duration);
+        final positionText = _formatAudioSeconds(position);
+        final progress = duration.inMilliseconds > 0
+            ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
+            : 0.0;
+
+        return Container(
+          constraints: const BoxConstraints(minWidth: 220, maxWidth: 280),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: isMe ? Colors.white12 : const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isMe ? Colors.white24 : const Color(0xFFE2E8F0),
+            ),
           ),
-          builder: (context, snapshot) {
-            final localPath = snapshot.data;
-            final isDownloading = _downloadingUrls.contains(url);
-            return IconButton(
-              icon: isDownloading
-                  ? SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        value: _downloadProgress[url],
-                        color: isMe ? Colors.white : const Color(0xFF1976D2),
-                      ),
-                    )
-                  : Icon(
-                      Icons.play_arrow,
-                      color: isMe ? Colors.white : const Color(0xFF1976D2),
+          child: Row(
+            children: [
+              Material(
+                color: isMe ? Colors.white : const Color(0xFF1976D2),
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: isDownloading
+                      ? null
+                      : () => _toggleAudioPlayback(
+                            url: url,
+                            localPath: localPath,
+                          ),
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Center(
+                      child: isDownloading
+                          ? SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                value: _downloadProgress[url],
+                                color: isMe
+                                    ? const Color(0xFF1976D2)
+                                    : Colors.white,
+                              ),
+                            )
+                          : Icon(
+                              isPlaying
+                                  ? Icons.pause_rounded
+                                  : Icons.play_arrow_rounded,
+                              size: 24,
+                              color: isMe
+                                  ? const Color(0xFF1976D2)
+                                  : Colors.white,
+                            ),
                     ),
-              onPressed: isDownloading
-                  ? null
-                  : () async {
-                      if (localPath != null) {
-                        await _audioPlayer.play(ap.DeviceFileSource(localPath));
-                        return;
-                      }
-                      if (url.isNotEmpty) {
-                        await _audioPlayer.play(ap.UrlSource(url));
-                      }
-                    },
-            );
-          },
-        ),
-      ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isMe ? Colors.white12 : const Color(0xFFE2E8F0),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            durationText,
+                            style: TextStyle(
+                              color: isMe ? Colors.white : const Color(0xFF0F172A),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          isDownloading
+                              ? "Downloading..."
+                              : isPlaying
+                              ? "Pause"
+                              : "Play",
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isMe ? Colors.white70 : Colors.black54,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.mic_rounded,
+                          size: 16,
+                          color: isMe ? Colors.white70 : Colors.black54,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          "Voice Message",
+                          style: TextStyle(
+                            color: isMe ? Colors.white : Colors.black87,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        value: isDownloading ? _downloadProgress[url] : progress,
+                        minHeight: 4,
+                        color: isMe ? Colors.white : const Color(0xFF1976D2),
+                        backgroundColor: isMe
+                            ? Colors.white24
+                            : const Color(0xFFE2E8F0),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      isDownloading
+                          ? "Downloading..."
+                          : "$positionText/$durationText",
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isMe ? Colors.white70 : Colors.black54,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -1031,16 +1417,22 @@ class _ChatPageState extends State<ChatPage> {
                 () => _pickMedia(ImageSource.gallery, 'video'),
               ),
               _buildAttachmentOption(
+                Icons.photo_camera_back_rounded,
+                "Camera Photo",
+                Colors.green,
+                () => _pickMedia(ImageSource.camera, 'image'),
+              ),
+              _buildAttachmentOption(
+                Icons.video_camera_back_rounded,
+                "Camera Video",
+                Colors.redAccent,
+                () => _pickMedia(ImageSource.camera, 'video'),
+              ),
+              _buildAttachmentOption(
                 Icons.insert_drive_file_rounded,
                 "File",
                 Colors.blue,
                 _pickFile,
-              ),
-              _buildAttachmentOption(
-                Icons.camera_alt_rounded,
-                "Camera",
-                Colors.green,
-                () => _pickMedia(ImageSource.camera, 'image'),
               ),
             ],
           ),
@@ -1090,13 +1482,56 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  Future<void> _uploadAndSend(File file, String type, String fileName) async {
+  Future<void> _uploadAndSend(
+    File file,
+    String type,
+    String fileName, {
+    int? durationSeconds,
+  }) async {
+    final shouldTrackInChat = type == 'image' || type == 'video';
+    final pendingId = DateTime.now().microsecondsSinceEpoch.toString();
+
+    if (shouldTrackInChat && mounted) {
+      setState(() {
+        _pendingMediaUploads.insert(
+          0,
+          _PendingMediaUpload(
+            id: pendingId,
+            receiverId: widget.receiverId,
+            type: type,
+            fileName: fileName,
+            localPath: file.path,
+            progress: 0,
+          ),
+        );
+      });
+    }
+
     try {
       final ref = _storage
           .ref()
           .child('chats')
           .child(DateTime.now().millisecondsSinceEpoch.toString());
       final uploadTask = ref.putFile(file);
+
+      if (shouldTrackInChat) {
+        uploadTask.snapshotEvents.listen((snapshot) {
+          final total = snapshot.totalBytes;
+          final progress = total > 0 ? snapshot.bytesTransferred / total : 0.0;
+          if (!mounted) return;
+          setState(() {
+            final index = _pendingMediaUploads.indexWhere(
+              (upload) => upload.id == pendingId,
+            );
+            if (index == -1) return;
+            _pendingMediaUploads[index] = _pendingMediaUploads[index].copyWith(
+              progress: progress,
+              isFailed: false,
+            );
+          });
+        });
+      }
+
       final snapshot = await uploadTask;
       final url = await snapshot.ref.getDownloadURL();
 
@@ -1108,10 +1543,54 @@ class _ChatPageState extends State<ChatPage> {
         fileName: fileName,
       );
 
-      _sendMessage(type: type, url: url, fileName: fileName);
+      _sendMessage(
+        type: type,
+        url: url,
+        fileName: fileName,
+        durationSeconds: durationSeconds,
+      );
+      if (shouldTrackInChat && mounted) {
+        setState(() {
+          _pendingMediaUploads.removeWhere((upload) => upload.id == pendingId);
+        });
+      }
     } catch (e) {
+      if (shouldTrackInChat && mounted) {
+        setState(() {
+          final index = _pendingMediaUploads.indexWhere(
+            (upload) => upload.id == pendingId,
+          );
+          if (index != -1) {
+            _pendingMediaUploads[index] = _pendingMediaUploads[index].copyWith(
+              isFailed: true,
+            );
+          }
+        });
+      }
       debugPrint("Upload error: $e");
     }
+  }
+
+  Future<void> _retryPendingUpload(_PendingMediaUpload upload) async {
+    final file = File(upload.localPath);
+    if (!await file.exists()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Original file is no longer available.')),
+      );
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        final index = _pendingMediaUploads.indexWhere((item) => item.id == upload.id);
+        if (index != -1) {
+          _pendingMediaUploads.removeAt(index);
+        }
+      });
+    }
+
+    await _uploadAndSend(file, upload.type, upload.fileName);
   }
 
   Future<void> _cacheSentFileLocally({
@@ -1308,6 +1787,72 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  Future<void> _toggleAudioPlayback({
+    required String url,
+    required String? localPath,
+  }) async {
+    try {
+      final reachedEnd =
+          _activeAudioDuration > Duration.zero &&
+          _activeAudioPosition >=
+              _activeAudioDuration - const Duration(milliseconds: 250);
+
+      if (_activeAudioUrl == url &&
+          _audioPlayerState == ap.PlayerState.playing) {
+        if (mounted) {
+          setState(() => _audioPlayerState = ap.PlayerState.paused);
+        }
+        await _audioPlayer.pause();
+        return;
+      }
+
+      if (_activeAudioUrl == url &&
+          _audioPlayerState == ap.PlayerState.paused &&
+          !reachedEnd) {
+        if (mounted) {
+          setState(() => _audioPlayerState = ap.PlayerState.playing);
+        }
+        await _audioPlayer.resume();
+        return;
+      }
+
+      await _audioPlayer.stop();
+      _activeAudioUrl = url;
+      _activeAudioPosition = Duration.zero;
+      if (mounted) {
+        setState(() => _audioPlayerState = ap.PlayerState.playing);
+      }
+
+      if (localPath != null) {
+        await _audioPlayer.play(ap.DeviceFileSource(localPath));
+        return;
+      }
+
+      if (url.isNotEmpty) {
+        await _audioPlayer.play(ap.UrlSource(url));
+      }
+    } catch (e) {
+      debugPrint("Audio playback error: $e");
+    }
+  }
+
+  String _formatAudioDuration(Duration duration) {
+    if (duration <= Duration.zero) {
+      return '00:00';
+    }
+
+    final totalSeconds = duration.inSeconds;
+    final minutes = (totalSeconds ~/ 60).toString().padLeft(2, '0');
+    final seconds = (totalSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  String _formatAudioSeconds(Duration duration) {
+    final seconds = duration.inSeconds;
+    if (seconds <= 0) return '0s';
+    return '${seconds}s';
+  }
+
   Future<void> _startRecording() async {
     if (_isRecording) return;
 
@@ -1360,6 +1905,7 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _stopRecording({required bool send}) async {
     if (!_isRecording) return;
 
+    final recordedSeconds = _recordingSeconds;
     final path = await _audioRecorder.stop();
     _recordingTimer?.cancel();
 
@@ -1382,7 +1928,12 @@ class _ChatPageState extends State<ChatPage> {
 
     final file = File(path);
     if (await file.exists()) {
-      _uploadAndSend(file, 'audio', 'Voice Message');
+      _uploadAndSend(
+        file,
+        'audio',
+        'Voice Message',
+        durationSeconds: recordedSeconds,
+      );
     }
   }
 
@@ -1457,38 +2008,69 @@ class _ChatPageLifecycleObserver extends WidgetsBindingObserver {
   }
 }
 
-class _ImageFullscreenViewer extends StatelessWidget {
+class _ImageFullscreenViewer extends StatefulWidget {
   final String imageUrl;
   final String? localPath;
 
   const _ImageFullscreenViewer({required this.imageUrl, this.localPath});
 
   @override
+  State<_ImageFullscreenViewer> createState() => _ImageFullscreenViewerState();
+}
+
+class _ImageFullscreenViewerState extends State<_ImageFullscreenViewer> {
+  bool _showChrome = true;
+
+  @override
   Widget build(BuildContext context) {
-    final hasLocal = localPath != null && localPath!.isNotEmpty;
+    final hasLocal = widget.localPath != null && widget.localPath!.isNotEmpty;
 
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(backgroundColor: Colors.black, elevation: 0),
-      body: Center(
-        child: InteractiveViewer(
-          minScale: 0.8,
-          maxScale: 4,
-          child: hasLocal
-              ? Image.file(File(localPath!), fit: BoxFit.contain)
-              : CachedNetworkImage(
-                  imageUrl: imageUrl,
-                  fit: BoxFit.contain,
-                  placeholder: (context, _) => const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  ),
-                  errorWidget: (context, _, __) => const Icon(
-                    Icons.broken_image_rounded,
-                    color: Colors.white70,
-                    size: 60,
+      body: Stack(
+        children: [
+          Center(
+            child: ZoomableImageViewer(
+              imageUrl: widget.imageUrl,
+              localPath: hasLocal ? widget.localPath : null,
+              enableSwipeDismiss: true,
+              onTap: () => setState(() => _showChrome = !_showChrome),
+            ),
+          ),
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            top: _showChrome ? 0 : -100,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: Material(
+                    color: Colors.black45,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: () => Navigator.of(context).maybePop(),
+                      child: const SizedBox(
+                        width: 42,
+                        height: 42,
+                        child: Icon(
+                          Icons.arrow_back_ios_new_rounded,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-        ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1509,7 +2091,48 @@ class _VideoFullscreenViewer extends StatelessWidget {
         elevation: 0,
         title: Text(fileName ?? 'Video'),
       ),
-      body: Center(child: CachedVideoPlayer(url: videoUrl, play: true)),
+      body: Center(
+        child: CachedVideoPlayer(
+          url: videoUrl,
+          play: true,
+          fit: BoxFit.contain,
+        ),
+      ),
+    );
+  }
+}
+
+class _PendingMediaUpload {
+  final String id;
+  final String receiverId;
+  final String type;
+  final String fileName;
+  final String localPath;
+  final double progress;
+  final bool isFailed;
+
+  const _PendingMediaUpload({
+    required this.id,
+    required this.receiverId,
+    required this.type,
+    required this.fileName,
+    required this.localPath,
+    required this.progress,
+    this.isFailed = false,
+  });
+
+  _PendingMediaUpload copyWith({
+    double? progress,
+    bool? isFailed,
+  }) {
+    return _PendingMediaUpload(
+      id: id,
+      receiverId: receiverId,
+      type: type,
+      fileName: fileName,
+      localPath: localPath,
+      progress: progress ?? this.progress,
+      isFailed: isFailed ?? this.isFailed,
     );
   }
 }

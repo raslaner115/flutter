@@ -79,11 +79,24 @@ class _AddProjectPageState extends State<AddProjectPage> {
     );
   }
 
-  Future<void> _pickImages() async {
+  Future<void> _pickImages(ImageSource source) async {
     if (_mediaFiles.length >= 5) {
       _showLimitReached();
       return;
     }
+    if (source == ImageSource.camera) {
+      final pickedFile = await _picker.pickImage(
+        source: source,
+        imageQuality: 70,
+      );
+      if (pickedFile != null) {
+        setState(() {
+          _mediaFiles.add(File(pickedFile.path));
+        });
+      }
+      return;
+    }
+
     final remaining = 5 - _mediaFiles.length;
     final pickedFiles = await _picker.pickMultiImage(imageQuality: 70);
     if (pickedFiles.isNotEmpty) {
@@ -98,14 +111,14 @@ class _AddProjectPageState extends State<AddProjectPage> {
     }
   }
 
-  Future<void> _pickVideo() async {
+  Future<void> _pickVideo(ImageSource source) async {
     if (_mediaFiles.length >= 5) {
       _showLimitReached();
       return;
     }
     final strings = _getLocalizedStrings();
     final XFile? video = await _picker.pickVideo(
-      source: ImageSource.gallery,
+      source: source,
       maxDuration: const Duration(minutes: 1),
     );
 
@@ -132,6 +145,49 @@ class _AddProjectPageState extends State<AddProjectPage> {
         _mediaFiles.add(File(video.path));
       });
     }
+  }
+
+  void _showSourcePicker({
+    required String title,
+    required Future<void> Function(ImageSource source) onSelect,
+  }) {
+    final strings = _getLocalizedStrings();
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: Text(strings['gallery']!),
+              onTap: () {
+                Navigator.pop(context);
+                onSelect(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: Text(strings['camera']!),
+              onTap: () {
+                Navigator.pop(context);
+                onSelect(ImageSource.camera);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showPickerOptions() {
@@ -179,7 +235,10 @@ class _AddProjectPageState extends State<AddProjectPage> {
                 title: Text(strings['image']!),
                 onTap: () {
                   Navigator.pop(context);
-                  _pickImages();
+                  _showSourcePicker(
+                    title: strings['image']!,
+                    onSelect: _pickImages,
+                  );
                 },
               ),
               ListTile(
@@ -194,7 +253,10 @@ class _AddProjectPageState extends State<AddProjectPage> {
                 title: Text(strings['video']!),
                 onTap: () {
                   Navigator.pop(context);
-                  _pickVideo();
+                  _showSourcePicker(
+                    title: strings['video']!,
+                    onSelect: _pickVideo,
+                  );
                 },
               ),
               const SizedBox(height: 12),
@@ -328,6 +390,8 @@ class _AddProjectPageState extends State<AddProjectPage> {
         'limit_reached': 'ניתן להעלות עד 5 קבצים',
         'image': 'תמונות מהגלריה',
         'video': 'סרטון מהגלריה',
+        'gallery': 'גלריה',
+        'camera': 'מצלמה',
         'hint': 'ספר ללקוחות שלך על הפרויקט הזה...',
         'video_too_long': 'הסרטון ארוך מדי. המקסימום הוא דקה אחת.',
       };
@@ -341,6 +405,8 @@ class _AddProjectPageState extends State<AddProjectPage> {
       'limit_reached': 'Limit: 5 files max',
       'image': 'Images from Gallery',
       'video': 'Video from Gallery',
+      'gallery': 'Gallery',
+      'camera': 'Camera',
       'hint': 'Tell your customers about this project...',
       'video_too_long': 'Video is too long. Maximum is 1 minute.',
     };

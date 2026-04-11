@@ -22,6 +22,7 @@ const APPLE_BUNDLE_ID = "com.hirehub.app";
 const GOOGLE_PLAY_RTDN_TOPIC = "play-subscription-notifications";
 const PLAY_ANDROID_PUBLISHER_SCOPE =
   "https://www.googleapis.com/auth/androidpublisher";
+const SUBSCRIPTION_NOTIFICATION_RETENTION_DAYS = 30;
 
 exports.sendChatPushOnNotificationCreate = onDocumentCreated(
     {
@@ -307,6 +308,44 @@ exports.syncWorkerSubscriptionLifecycle = onSchedule(
         deactivated,
         playVerified,
         failures,
+      });
+    },
+);
+
+exports.cleanupSubscriptionNotificationEvents = onSchedule(
+    {
+      schedule: "every day 02:00",
+      region: "us-central1",
+      timeZone: "UTC",
+    },
+    async () => {
+      const db = admin.firestore();
+      const now = admin.firestore.Timestamp.now();
+      const pageSize = 300;
+      let deleted = 0;
+
+      while (true) {
+        const snap = await db
+            .collection("subscriptionNotificationEvents")
+            .where("expiresAt", "<=", now)
+            .limit(pageSize)
+            .get();
+
+        if (snap.empty) break;
+
+        const batch = db.batch();
+        for (const doc of snap.docs) {
+          batch.delete(doc.ref);
+        }
+
+        await batch.commit();
+        deleted += snap.size;
+
+        if (snap.size < pageSize) break;
+      }
+
+      logger.info("Cleaned up expired subscription notification events", {
+        deleted,
       });
     },
 );
@@ -640,6 +679,10 @@ async function findUserByPurchaseToken(purchaseToken) {
 async function storeNotificationAudit(provider, eventId, payload) {
   if (!eventId) return;
 
+  const now = new Date();
+  const expiresAt = new Date(now);
+  expiresAt.setUTCDate(expiresAt.getUTCDate() + SUBSCRIPTION_NOTIFICATION_RETENTION_DAYS);
+
   await admin.firestore()
       .collection("subscriptionNotificationEvents")
       .doc(`${provider}_${eventId}`)
@@ -647,6 +690,7 @@ async function storeNotificationAudit(provider, eventId, payload) {
         provider,
         payload,
         receivedAt: admin.firestore.FieldValue.serverTimestamp(),
+        expiresAt: admin.firestore.Timestamp.fromDate(expiresAt),
       }, {merge: true});
 }
 

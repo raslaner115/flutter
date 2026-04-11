@@ -41,6 +41,7 @@ class _HomePageState extends State<HomePage> {
   int _bannerCount = 0;
 
   List<Map<String, dynamic>> _topRatedWorkers = [];
+  List<Map<String, dynamic>> _topRatedWorkersSource = [];
   List<Map<String, dynamic>> _newWorkers = [];
   List<Map<String, dynamic>> _popularCategories = [];
   List<Map<String, dynamic>> _professionItems = [];
@@ -144,7 +145,12 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _reloadAfterPermissionGranted() async {
     await _getCurrentLocation();
-    await _fetchTopRatedWorkers();
+    if (!mounted) return;
+    setState(() {
+      _topRatedWorkers = _filterByProximity(_topRatedWorkersSource)
+          .take(10)
+          .toList();
+    });
     if (!mounted) return;
     setState(() {});
   }
@@ -162,11 +168,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _initData() async {
-    await _getCurrentLocation();
-    await _loadProfessionMetadata();
+    _getCurrentLocation();
+    final professionLoad = _loadProfessionMetadata();
     _fetchTopRatedWorkers();
     _fetchNewWorkers();
     _fetchCurrentUserName();
+    await professionLoad;
     _fetchPopularCategories();
   }
 
@@ -659,17 +666,10 @@ class _HomePageState extends State<HomePage> {
     setState(() => _isPopularLoading = true);
 
     try {
-      final professionsDoc = await _firestore
-          .collection('metadata')
-          .doc('professions')
-          .get();
-      final List<Map<String, dynamic>> allProfs =
-          ((professionsDoc.data()?['items'] as List?) ?? const [])
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList();
-      if (mounted && _professionItems.isEmpty) {
-        _professionItems = allProfs;
+      var allProfs = _professionItems;
+      if (allProfs.isEmpty) {
+        await _loadProfessionMetadata();
+        allProfs = _professionItems;
       }
 
       List<Map<String, dynamic>> popular = [];
@@ -766,6 +766,7 @@ class _HomePageState extends State<HomePage> {
 
       if (mounted) {
         setState(() {
+          _topRatedWorkersSource = workers;
           _topRatedWorkers = filtered.take(10).toList();
           _isTopRatedLoading = false;
         });

@@ -82,7 +82,7 @@ class _SignInPageState extends State<SignInPage> {
     }
     return '+972$digits';
   }
-
+   
   Future<bool> _isPhoneRegistered(String normalizedPhone) async {
     final snapshot = await FirebaseFirestore.instance
         .collection('users')
@@ -367,7 +367,7 @@ class _SignInPageState extends State<SignInPage> {
     return Container(
       height: 320,
       width: double.infinity,
-      decoration: const BoxDecoration(
+      decoration: const BoxDecoration( 
         gradient: LinearGradient(
           begin: Alignment.topRight,
           end: Alignment.bottomLeft,

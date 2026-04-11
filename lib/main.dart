@@ -58,8 +58,10 @@ void main() async {
     if (!kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android &&
         kDebugMode) {
-      // Keep Android verification on default flow (Play Integrity first).
-      await FirebaseAuth.instance.setSettings(forceRecaptchaFlow: false);
+      // In local Android debug builds, prefer the reCAPTCHA fallback instead of
+      // Play-services verification. This avoids DEVELOPER_ERROR when the
+      // current debug keystore fingerprint is not yet registered in Firebase.
+      await FirebaseAuth.instance.setSettings(forceRecaptchaFlow: true);
     }
 
     FirebaseFirestore.instance.settings = const Settings(

@@ -31,16 +31,16 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyCL9zie59-f_Hiyqj_dYtaMziReezcd6fU',
-    appId: '1:29257648718:android:c1043847fbe09a43b8111f',
+    apiKey: 'AIzaSyB1CWooXT-Gxc4q1q4XmYGSE4Rixyp1EXk',
+    appId: '1:29257648718:android:e89f9a18d21f507db8111f',
     messagingSenderId: '29257648718',
     projectId: 'hire-hub-fe6c4',
     storageBucket: 'hire-hub-fe6c4.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyCL9zie59-f_Hiyqj_dYtaMziReezcd6fU',
-    appId: '1:29257648718:ios:5f3d489b4e609a43b8111f',
+    apiKey: 'AIzaSyDh5ZzwkafsDkup9k2sKMkykr5Ukra9xQA',
+    appId: '1:29257648718:ios:597a60baffedd410b8111f',
     messagingSenderId: '29257648718',
     projectId: 'hire-hub-fe6c4',
     storageBucket: 'hire-hub-fe6c4.firebasestorage.app',

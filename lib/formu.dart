@@ -1,15 +1,22 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:geocoding/geocoding.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:untitled1/map/location_picker.dart';
 import 'package:untitled1/services/language_provider.dart';
+import 'package:untitled1/services/subscription_access_service.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:untitled1/sign_in.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:untitled1/utils/profession_localization.dart';
+import 'package:untitled1/widgets/cached_video_player.dart';
 
 class BlogPage extends StatefulWidget {
   const BlogPage({super.key});
@@ -23,6 +30,7 @@ class _BlogPageState extends State<BlogPage> {
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
   StreamSubscription? _postsSubscription;
+  List<Map<String, dynamic>> _professionItems = [];
   List<Map<String, dynamic>> _posts = [];
   bool _isLoading = true;
   bool _isMoreLoading = false;
@@ -32,9 +40,20 @@ class _BlogPageState extends State<BlogPage> {
   int _selectedFilterIndex = 0;
   bool _isGuideExpanded = false;
 
+  Future<bool> _canSeeJobRequests() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return false;
+
+    final userDoc = await _firestore.collection('users').doc(user.uid).get();
+    return SubscriptionAccessService.hasActiveWorkerSubscriptionFromData(
+      userDoc.data(),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
+    _loadProfessionMetadata();
     _listenToPosts();
     _scrollController.addListener(_onScroll);
   }
@@ -64,6 +83,102 @@ class _BlogPageState extends State<BlogPage> {
     _listenToPosts();
   }
 
+  Future<void> _loadProfessionMetadata() async {
+    try {
+      final snapshot = await _firestore
+          .collection('metadata')
+          .doc('professions')
+          .get();
+      final data = snapshot.data();
+      final rawItems = data?['items'];
+      if (rawItems is! List) return;
+
+      final items = rawItems
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .where((item) => _professionCanonicalValue(item).isNotEmpty)
+          .toList()
+        ..sort((a, b) {
+          final aId = (a['id'] as num?)?.toInt() ?? 1 << 30;
+          final bId = (b['id'] as num?)?.toInt() ?? 1 << 30;
+          if (aId != bId) return aId.compareTo(bId);
+          return _professionCanonicalValue(
+            a,
+          ).compareTo(_professionCanonicalValue(b));
+        });
+
+      if (!mounted) return;
+      setState(() => _professionItems = items);
+    } catch (e) {
+      debugPrint('Failed to load profession metadata: $e');
+    }
+  }
+
+  String _professionCanonicalValue(Map<String, dynamic> item) {
+    final english = item['en']?.toString().trim();
+    if (english != null && english.isNotEmpty) return english;
+
+    for (final key in const ['he', 'ar', 'ru', 'am']) {
+      final value = item[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+    return '';
+  }
+
+  Map<String, dynamic>? _findProfessionItem(String value) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+
+    for (final item in _professionItems) {
+      for (final key in const ['en', 'he', 'ar', 'ru', 'am']) {
+        final candidate = item[key]?.toString().trim().toLowerCase();
+        if (candidate != null && candidate.isNotEmpty && candidate == normalized) {
+          return item;
+        }
+      }
+    }
+    return null;
+  }
+
+  String _normalizeStoredProfession(String value) {
+    final item = _findProfessionItem(value);
+    if (item != null) {
+      return _professionCanonicalValue(item);
+    }
+    return ProfessionLocalization.toCanonical(value);
+  }
+
+  String _professionLabel(Map<String, dynamic> item, String localeCode) {
+    final localized = item[localeCode]?.toString().trim();
+    if (localized != null && localized.isNotEmpty) return localized;
+    return _professionCanonicalValue(item);
+  }
+
+  DateTime? _extractDate(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value);
+    return null;
+  }
+
+  TimeOfDay? _extractTime(dynamic value) {
+    final raw = value?.toString().trim() ?? '';
+    if (raw.isEmpty) return null;
+    final parts = raw.split(':');
+    if (parts.length != 2) return null;
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null) return null;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+    return TimeOfDay(hour: hour, minute: minute);
+  }
+
+  String _formatTimeOfDay(TimeOfDay time) {
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
   void _listenToPosts() {
     _postsSubscription?.cancel();
 
@@ -90,11 +205,23 @@ class _BlogPageState extends State<BlogPage> {
         .limit(_postLimit)
         .snapshots()
         .listen(
-          (snapshot) {
+          (snapshot) async {
             List<Map<String, dynamic>> loadedPosts = [];
+            final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+            final canSeeJobRequests = await _canSeeJobRequests();
+
             for (var doc in snapshot.docs) {
               final post = doc.data() as Map<String, dynamic>;
               post['id'] = doc.id;
+
+               final isJobRequest = post['isJobRequest'] == true;
+               final isAuthor = currentUserId != null &&
+                   post['authorUid']?.toString() == currentUserId;
+
+               if (isJobRequest && !isAuthor && !canSeeJobRequests) {
+                 continue;
+               }
+
               loadedPosts.add(post);
             }
 
@@ -138,6 +265,15 @@ class _BlogPageState extends State<BlogPage> {
       _postLimit = 10;
     });
     _listenToPosts();
+  }
+
+  bool _isVideoPath(String path) {
+    final lower = path.toLowerCase();
+    return lower.contains('.mp4') ||
+        lower.contains('.mov') ||
+        lower.contains('.avi') ||
+        lower.contains('.mkv') ||
+        lower.contains('.webm');
   }
 
   Map<String, dynamic> _getLocalizedStrings(BuildContext context) {
@@ -184,6 +320,25 @@ class _BlogPageState extends State<BlogPage> {
           'empty_fields': 'נא למלא כותרת ותוכן',
           'location': 'מיקום (עיר/אזור)',
           'job_request': 'דרוש בעל מקצוע',
+          'profession': 'מקצוע',
+          'profession_hint': 'בחר בעל מקצוע נדרש',
+          'profession_required': 'נא לבחור מקצוע',
+          'use_current_location': 'השתמש במיקום נוכחי',
+          'choose_from_map': 'בחר מהמפה',
+          'selected_location': 'המיקום שנבחר',
+          'change_location': 'שנה מיקום',
+          'location_loading': 'מאתר מיקום...',
+          'date_from': 'מתאריך',
+          'date_to': 'עד תאריך',
+          'date_anytime': 'אם לא תבחר תאריכים, הבקשה תיחשב לכל זמן',
+          'select_date': 'בחר תאריך',
+          'time_from': 'משעה',
+          'time_to': 'עד שעה',
+          'time_anytime': 'אם לא תבחר שעות, הבקשה תיחשב לכל שעה',
+          'add_video': 'הוסף וידאו',
+          'media_limit': 'ניתן להעלות עד 5 תמונות/סרטונים',
+          'gallery': 'גלריה',
+          'camera': 'מצלמה',
           'guide_title': 'איך זה עובד?',
           'guide_content':
               '• שתפו שאלות, טיפים והמלצות.\n• צריכים עבודה? פרסמו "דרוש בעל מקצוע".\n• בעלי מקצוע? הציעו שירות בתגובות.\n• סננו לפי קטגוריה או מיין לפי פופולריות.',
@@ -261,6 +416,25 @@ class _BlogPageState extends State<BlogPage> {
           'empty_fields': 'Please fill both title and content',
           'location': 'Location (City/Area)',
           'job_request': 'Job Request',
+          'profession': 'Profession',
+          'profession_hint': 'Choose the profession you need',
+          'profession_required': 'Please choose a profession',
+          'use_current_location': 'Use current location',
+          'choose_from_map': 'Choose from map',
+          'selected_location': 'Selected location',
+          'change_location': 'Change location',
+          'location_loading': 'Getting location...',
+          'date_from': 'From date',
+          'date_to': 'To date',
+          'date_anytime': 'If you do not choose dates, the request will be considered anytime',
+          'select_date': 'Select date',
+          'time_from': 'From hour',
+          'time_to': 'To hour',
+          'time_anytime': 'If you do not choose hours, the request will be considered anytime',
+          'add_video': 'Add Video',
+          'media_limit': 'You can upload up to 5 photos/videos',
+          'gallery': 'Gallery',
+          'camera': 'Camera',
           'guide_title': 'How it works?',
           'guide_content':
               '• Share questions, tips, and recommendations.\n• Need a pro? Post a "Job Request".\n• Professionals? Offer your services in the comments.\n• Filter by category or sort by popularity.',
@@ -355,15 +529,230 @@ class _BlogPageState extends State<BlogPage> {
     final locationController = TextEditingController(
       text: existingPost?['location'],
     );
+    final localeCode = Provider.of<LanguageProvider>(
+      context,
+      listen: false,
+    ).locale.languageCode;
+    LatLng? selectedJobLocation =
+        existingPost?['locationLat'] != null && existingPost?['locationLng'] != null
+        ? LatLng(
+            (existingPost!['locationLat'] as num).toDouble(),
+            (existingPost['locationLng'] as num).toDouble(),
+          )
+        : null;
     String selectedCategory =
         existingPost?['category'] ?? (strings['categories'] as List)[1];
-    List<File> selectedImages = [];
-    List<String> existingImageUrls = existingPost?['imageUrls'] != null
+    DateTime? selectedDateFrom = _extractDate(existingPost?['requestDateFrom']);
+    DateTime? selectedDateTo = _extractDate(existingPost?['requestDateTo']);
+    TimeOfDay? selectedTimeFrom = _extractTime(existingPost?['requestTimeFrom']);
+    TimeOfDay? selectedTimeTo = _extractTime(existingPost?['requestTimeTo']);
+    String? selectedProfession = existingPost?['profession'] != null
+        ? _normalizeStoredProfession(
+            existingPost!['profession'].toString(),
+          )
+        : null;
+    List<File> selectedMediaFiles = [];
+    List<String> existingMediaUrls = existingPost?['imageUrls'] != null
         ? List<String>.from(existingPost!['imageUrls'])
         : (existingPost?['imageUrl'] != null
               ? [existingPost!['imageUrl']]
               : []);
     bool isUploading = false;
+    bool isResolvingLocation = false;
+    const maxMediaCount = 5;
+    final professionOptions = _professionItems.isNotEmpty
+        ? _professionItems
+        : ProfessionLocalization.canonicalProfessions
+              .map((profession) => <String, dynamic>{'en': profession})
+              .toList();
+
+    void showMediaLimitMessage() {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(strings['media_limit'])),
+      );
+    }
+
+    Future<void> showSourcePicker({
+      required String title,
+      required Future<void> Function(ImageSource source) onSelect,
+    }) async {
+      await showModalBottomSheet(
+        context: context,
+        builder: (context) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: Text(strings['gallery']),
+                onTap: () {
+                  Navigator.pop(context);
+                  onSelect(ImageSource.gallery);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined),
+                title: Text(strings['camera']),
+                onTap: () {
+                  Navigator.pop(context);
+                  onSelect(ImageSource.camera);
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    Future<void> updateLocationLabel(LatLng loc) async {
+      try {
+        final placemarks = await placemarkFromCoordinates(
+          loc.latitude,
+          loc.longitude,
+        );
+        if (placemarks.isNotEmpty) {
+          final place = placemarks.first;
+          final parts = [
+            place.locality,
+            place.subLocality,
+            place.administrativeArea,
+          ].where((part) => part != null && part!.trim().isNotEmpty).cast<String>().toList();
+          locationController.text = parts.isNotEmpty
+              ? parts.toSet().join(', ')
+              : '${loc.latitude.toStringAsFixed(5)}, ${loc.longitude.toStringAsFixed(5)}';
+        } else {
+          locationController.text =
+              '${loc.latitude.toStringAsFixed(5)}, ${loc.longitude.toStringAsFixed(5)}';
+        }
+      } catch (e) {
+        locationController.text =
+            '${loc.latitude.toStringAsFixed(5)}, ${loc.longitude.toStringAsFixed(5)}';
+        debugPrint("Reverse geocoding error: $e");
+      }
+    }
+
+    Future<void> pickCurrentLocation(StateSetter setSheetState) async {
+      setSheetState(() => isResolvingLocation = true);
+      try {
+        final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+        if (!serviceEnabled) {
+          throw 'Location services are disabled.';
+        }
+
+        var permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+          if (permission == LocationPermission.denied) {
+            throw 'Location permissions are denied.';
+          }
+        }
+
+        if (permission == LocationPermission.deniedForever) {
+          throw 'Location permissions are permanently denied.';
+        }
+
+        final position = await Geolocator.getCurrentPosition();
+        final loc = LatLng(position.latitude, position.longitude);
+        await updateLocationLabel(loc);
+        if (context.mounted) {
+          setSheetState(() {
+            selectedJobLocation = loc;
+          });
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(e.toString())));
+        }
+      } finally {
+        if (context.mounted) {
+          setSheetState(() => isResolvingLocation = false);
+        }
+      }
+    }
+
+    Future<void> pickLocationFromMap(StateSetter setSheetState) async {
+      final picked = await Navigator.push<LatLng>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => LocationPicker(initialCenter: selectedJobLocation),
+        ),
+      );
+
+      if (picked == null || !context.mounted) return;
+
+      setSheetState(() => isResolvingLocation = true);
+      await updateLocationLabel(picked);
+      if (context.mounted) {
+        setSheetState(() {
+          selectedJobLocation = picked;
+          isResolvingLocation = false;
+        });
+      }
+    }
+
+    Future<void> pickDate({
+      required bool isFrom,
+      required StateSetter setSheetState,
+    }) async {
+      final initialDate =
+          (isFrom ? selectedDateFrom : selectedDateTo) ??
+          DateTime.now();
+      final firstDate = isFrom
+          ? DateTime.now().subtract(const Duration(days: 1))
+          : (selectedDateFrom ?? DateTime.now());
+      final picked = await showDatePicker(
+        context: context,
+        initialDate: initialDate.isBefore(firstDate) ? firstDate : initialDate,
+        firstDate: firstDate,
+        lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+      );
+
+      if (picked == null) return;
+
+      setSheetState(() {
+        if (isFrom) {
+          selectedDateFrom = picked;
+          if (selectedDateTo != null && selectedDateTo!.isBefore(picked)) {
+            selectedDateTo = picked;
+          }
+        } else {
+          selectedDateTo = picked;
+        }
+      });
+    }
+
+    Future<void> pickTime({
+      required bool isFrom,
+      required StateSetter setSheetState,
+    }) async {
+      final picked = await showTimePicker(
+        context: context,
+        initialTime: (isFrom ? selectedTimeFrom : selectedTimeTo) ??
+            TimeOfDay.now(),
+      );
+
+      if (picked == null) return;
+
+      setSheetState(() {
+        if (isFrom) {
+          selectedTimeFrom = picked;
+        } else {
+          selectedTimeTo = picked;
+        }
+      });
+    }
 
     showModalBottomSheet(
       context: context,
@@ -441,14 +830,235 @@ class _BlogPageState extends State<BlogPage> {
                 ),
                 const SizedBox(height: 16),
                 if (selectedCategory == strings['job_request']) ...[
-                  TextField(
-                    controller: locationController,
+                  DropdownButtonFormField<String>(
+                    value: selectedProfession,
                     decoration: InputDecoration(
-                      labelText: strings['location'],
-                      prefixIcon: const Icon(Icons.location_on_outlined),
+                      labelText: strings['profession'],
+                      hintText: strings['profession_hint'],
+                      prefixIcon: const Icon(Icons.work_outline_rounded),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
+                    ),
+                    items: professionOptions
+                        .map(
+                          (profession) => DropdownMenuItem(
+                            value: _professionCanonicalValue(profession),
+                            child: Text(
+                              _professionLabel(profession, localeCode),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) =>
+                        setSheetState(() => selectedProfession = value),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => pickDate(
+                            isFrom: true,
+                            setSheetState: setSheetState,
+                          ),
+                          icon: const Icon(Icons.event_available_outlined),
+                          label: Text(
+                            selectedDateFrom == null
+                                ? strings['date_from']
+                                : '${selectedDateFrom!.day.toString().padLeft(2, '0')}/${selectedDateFrom!.month.toString().padLeft(2, '0')}/${selectedDateFrom!.year}',
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => pickDate(
+                            isFrom: false,
+                            setSheetState: setSheetState,
+                          ),
+                          icon: const Icon(Icons.event_outlined),
+                          label: Text(
+                            selectedDateTo == null
+                                ? strings['date_to']
+                                : '${selectedDateTo!.day.toString().padLeft(2, '0')}/${selectedDateTo!.month.toString().padLeft(2, '0')}/${selectedDateTo!.year}',
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    strings['date_anytime'],
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => pickTime(
+                            isFrom: true,
+                            setSheetState: setSheetState,
+                          ),
+                          icon: const Icon(Icons.schedule_outlined),
+                          label: Text(
+                            selectedTimeFrom == null
+                                ? strings['time_from']
+                                : selectedTimeFrom!.format(context),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => pickTime(
+                            isFrom: false,
+                            setSheetState: setSheetState,
+                          ),
+                          icon: const Icon(Icons.access_time_outlined),
+                          label: Text(
+                            selectedTimeTo == null
+                                ? strings['time_to']
+                                : selectedTimeTo!.format(context),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    strings['time_anytime'],
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      borderRadius: BorderRadius.circular(12),
+                      color: const Color(0xFFF8FAFC),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.location_on_outlined,
+                              color: Color(0xFF1976D2),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                strings['location'],
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF1E293B),
+                                ),
+                              ),
+                            ),
+                            if (isResolvingLocation)
+                              const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          locationController.text.isNotEmpty
+                              ? locationController.text
+                              : strings['selected_location'],
+                          style: TextStyle(
+                            color: locationController.text.isNotEmpty
+                                ? const Color(0xFF334155)
+                                : const Color(0xFF94A3B8),
+                            height: 1.4,
+                          ),
+                        ),
+                        if (selectedJobLocation != null) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            '${selectedJobLocation!.latitude.toStringAsFixed(5)}, ${selectedJobLocation!.longitude.toStringAsFixed(5)}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 14),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: isResolvingLocation
+                                    ? null
+                                    : () => pickCurrentLocation(setSheetState),
+                                icon: const Icon(Icons.my_location_rounded),
+                                label: Text(strings['use_current_location']),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: isResolvingLocation
+                                    ? null
+                                    : () => pickLocationFromMap(setSheetState),
+                                icon: const Icon(Icons.map_outlined),
+                                label: Text(strings['choose_from_map']),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -466,15 +1076,19 @@ class _BlogPageState extends State<BlogPage> {
                 ),
                 const SizedBox(height: 16),
 
-                if (selectedImages.isNotEmpty || existingImageUrls.isNotEmpty)
+                if (selectedMediaFiles.isNotEmpty || existingMediaUrls.isNotEmpty)
                   SizedBox(
                     height: 100,
                     child: ListView.builder(
                       scrollDirection: Axis.horizontal,
                       itemCount:
-                          selectedImages.length + existingImageUrls.length,
+                          selectedMediaFiles.length + existingMediaUrls.length,
                       itemBuilder: (context, index) {
-                        bool isExisting = index < existingImageUrls.length;
+                        final isExisting = index < existingMediaUrls.length;
+                        final mediaPath = isExisting
+                            ? existingMediaUrls[index]
+                            : selectedMediaFiles[index - existingMediaUrls.length].path;
+                        final isVideo = _isVideoPath(mediaPath);
                         return Stack(
                           children: [
                             Container(
@@ -482,19 +1096,48 @@ class _BlogPageState extends State<BlogPage> {
                               width: 100,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(12),
-                                image: DecorationImage(
-                                  image: isExisting
-                                      ? CachedNetworkImageProvider(
-                                              existingImageUrls[index],
-                                            )
-                                            as ImageProvider
-                                      : FileImage(
-                                          selectedImages[index -
-                                              existingImageUrls.length],
-                                        ),
-                                  fit: BoxFit.cover,
-                                ),
+                                color: Colors.black,
                               ),
+                              clipBehavior: Clip.antiAlias,
+                              child: isVideo
+                                  ? Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        if (isExisting)
+                                          CachedVideoPlayer(
+                                            url: mediaPath,
+                                            play: false,
+                                            showControls: false,
+                                            allowFullscreen: false,
+                                          )
+                                        else
+                                          Container(
+                                            color: Colors.black87,
+                                            alignment: Alignment.center,
+                                            child: const Icon(
+                                              Icons.videocam_rounded,
+                                              color: Colors.white70,
+                                              size: 34,
+                                            ),
+                                          ),
+                                        const Center(
+                                          child: Icon(
+                                            Icons.play_circle_fill_rounded,
+                                            color: Colors.white,
+                                            size: 28,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : isExisting
+                                  ? CachedNetworkImage(
+                                      imageUrl: mediaPath,
+                                      fit: BoxFit.cover,
+                                    )
+                                  : Image.file(
+                                      selectedMediaFiles[index - existingMediaUrls.length],
+                                      fit: BoxFit.cover,
+                                    ),
                             ),
                             Positioned(
                               right: 4,
@@ -502,10 +1145,10 @@ class _BlogPageState extends State<BlogPage> {
                               child: GestureDetector(
                                 onTap: () => setSheetState(() {
                                   if (isExisting) {
-                                    existingImageUrls.removeAt(index);
+                                    existingMediaUrls.removeAt(index);
                                   } else {
-                                    selectedImages.removeAt(
-                                      index - existingImageUrls.length,
+                                    selectedMediaFiles.removeAt(
+                                      index - existingMediaUrls.length,
                                     );
                                   }
                                 }),
@@ -527,27 +1170,110 @@ class _BlogPageState extends State<BlogPage> {
                   ),
 
                 const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    final picker = ImagePicker();
-                    final pickedFiles = await picker.pickMultiImage(
-                      imageQuality: 70,
-                    );
-                    if (pickedFiles.isNotEmpty) {
-                      setSheetState(
-                        () => selectedImages.addAll(
-                          pickedFiles.map((x) => File(x.path)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          await showSourcePicker(
+                            title: strings['upload_photo'],
+                            onSelect: (source) async {
+                              final currentCount =
+                                  selectedMediaFiles.length + existingMediaUrls.length;
+                              if (currentCount >= maxMediaCount) {
+                                showMediaLimitMessage();
+                                return;
+                              }
+
+                              final picker = ImagePicker();
+                              if (source == ImageSource.camera) {
+                                final picked = await picker.pickImage(
+                                  source: source,
+                                  imageQuality: 70,
+                                );
+                                if (picked == null) return;
+                                setSheetState(
+                                  () => selectedMediaFiles.add(File(picked.path)),
+                                );
+                                return;
+                              }
+
+                              final pickedFiles = await picker.pickMultiImage(
+                                imageQuality: 70,
+                              );
+                              if (pickedFiles.isEmpty) return;
+
+                              final remaining = maxMediaCount - currentCount;
+                              final files = pickedFiles
+                                  .take(remaining)
+                                  .map((x) => File(x.path))
+                                  .toList();
+                              if (pickedFiles.length > remaining) {
+                                showMediaLimitMessage();
+                              }
+                              setSheetState(
+                                () => selectedMediaFiles.addAll(files),
+                              );
+                            },
+                          );
+                        },
+                        icon: const Icon(Icons.add_photo_alternate_outlined),
+                        label: Text(strings['upload_photo']),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
-                      );
-                    }
-                  },
-                  icon: const Icon(Icons.add_a_photo_outlined),
-                  label: Text(strings['upload_photo']),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          await showSourcePicker(
+                            title: strings['add_video'],
+                            onSelect: (source) async {
+                              final currentCount =
+                                  selectedMediaFiles.length + existingMediaUrls.length;
+                              if (currentCount >= maxMediaCount) {
+                                showMediaLimitMessage();
+                                return;
+                              }
+
+                              final picker = ImagePicker();
+                              final pickedVideo = await picker.pickVideo(
+                                source: source,
+                              );
+                              if (pickedVideo == null) return;
+
+                              setSheetState(
+                                () => selectedMediaFiles.add(
+                                  File(pickedVideo.path),
+                                ),
+                              );
+                            },
+                          );
+                        },
+                        icon: const Icon(Icons.videocam_outlined),
+                        label: Text(strings['add_video']),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${selectedMediaFiles.length + existingMediaUrls.length}/$maxMediaCount',
+                  textAlign: TextAlign.end,
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
 
@@ -560,6 +1286,17 @@ class _BlogPageState extends State<BlogPage> {
                               contentController.text.trim().isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(content: Text(strings['empty_fields'])),
+                            );
+                            return;
+                          }
+
+                          if (selectedCategory == strings['job_request'] &&
+                              (selectedProfession == null ||
+                                  selectedProfession!.trim().isEmpty)) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(strings['profession_required']),
+                              ),
                             );
                             return;
                           }
@@ -585,18 +1322,25 @@ class _BlogPageState extends State<BlogPage> {
                               } catch (_) {}
                             }
 
-                            List<String> imageUrls = List.from(
-                              existingImageUrls,
+                            List<String> mediaUrls = List.from(
+                              existingMediaUrls,
                             );
-                            for (var file in selectedImages) {
+                            for (var i = 0; i < selectedMediaFiles.length; i++) {
+                              final file = selectedMediaFiles[i];
+                              final isVideo = _isVideoPath(file.path);
                               final storageRef = FirebaseStorage.instance
                                   .ref()
                                   .child(
-                                    'blog_images/${user.uid}_${DateTime.now().millisecondsSinceEpoch}_${selectedImages.indexOf(file)}.jpg',
+                                    'blog_media/${user.uid}_${DateTime.now().millisecondsSinceEpoch}_$i${isVideo ? '.mp4' : '.jpg'}',
                                   );
-                              await storageRef.putFile(file);
+                              await storageRef.putFile(
+                                file,
+                                SettableMetadata(
+                                  contentType: isVideo ? 'video/mp4' : 'image/jpeg',
+                                ),
+                              );
                               String url = await storageRef.getDownloadURL();
-                              imageUrls.add(url);
+                              mediaUrls.add(url);
                             }
 
                             final postData = {
@@ -604,10 +1348,34 @@ class _BlogPageState extends State<BlogPage> {
                               'content': contentController.text.trim(),
                               'category': selectedCategory,
                               'location': locationController.text.trim(),
-                              'imageUrls': imageUrls,
-                              'imageUrl': imageUrls.isNotEmpty
-                                  ? imageUrls[0]
+                              'locationLat': selectedJobLocation?.latitude,
+                              'locationLng': selectedJobLocation?.longitude,
+                              'profession': selectedProfession,
+                              'professionLabel': selectedProfession == null
+                                  ? null
+                                  : ProfessionLocalization.toLocalized(
+                                      selectedProfession!,
+                                      localeCode,
+                                    ),
+                              'requestDateFrom': selectedDateFrom == null
+                                  ? null
+                                  : Timestamp.fromDate(selectedDateFrom!),
+                              'requestDateTo': selectedDateTo == null
+                                  ? null
+                                  : Timestamp.fromDate(selectedDateTo!),
+                              'requestTimeFrom': selectedTimeFrom == null
+                                  ? null
+                                  : _formatTimeOfDay(selectedTimeFrom!),
+                              'requestTimeTo': selectedTimeTo == null
+                                  ? null
+                                  : _formatTimeOfDay(selectedTimeTo!),
+                              'imageUrls': mediaUrls,
+                              'imageUrl': mediaUrls.isNotEmpty
+                                  ? mediaUrls[0]
                                   : null,
+                              'mediaTypes': mediaUrls
+                                  .map((url) => _isVideoPath(url) ? 'video' : 'image')
+                                  .toList(),
                               'authorUid': user.uid,
                               'authorName': authorName,
                               'timestamp':
@@ -1211,9 +1979,12 @@ class _BlogCard extends StatelessWidget {
 
     final isJobRequest = post['isJobRequest'] == true;
     final isPinned = post['isPinned'] == true;
-    final imageUrls = post['imageUrls'] != null
+    final mediaUrls = post['imageUrls'] != null
         ? List<String>.from(post['imageUrls'])
         : (post['imageUrl'] != null ? [post['imageUrl'] as String] : []);
+    final firstMedia = mediaUrls.isNotEmpty ? mediaUrls.first : null;
+    final firstMediaIsVideo =
+        firstMedia != null && _isMediaVideoPath(firstMedia);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -1251,18 +2022,39 @@ class _BlogCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (imageUrls.isNotEmpty)
+            if (firstMedia != null)
               ClipRRect(
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(20),
                 ),
-                child: CachedNetworkImage(
-                  imageUrl: imageUrls[0],
+                child: SizedBox(
                   height: 180,
                   width: double.infinity,
-                  fit: BoxFit.cover,
-                  placeholder: (context, url) =>
-                      Container(color: Colors.grey[200]),
+                  child: firstMediaIsVideo
+                      ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            CachedVideoPlayer(
+                              url: firstMedia,
+                              play: false,
+                              showControls: false,
+                              allowFullscreen: false,
+                            ),
+                            const Center(
+                              child: Icon(
+                                Icons.play_circle_fill_rounded,
+                                color: Colors.white,
+                                size: 52,
+                              ),
+                            ),
+                          ],
+                        )
+                      : CachedNetworkImage(
+                          imageUrl: firstMedia,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) =>
+                              Container(color: Colors.grey[200]),
+                        ),
                 ),
               ),
             Padding(
@@ -1409,6 +2201,15 @@ class _BlogCard extends StatelessWidget {
   }
 }
 
+bool _isMediaVideoPath(String path) {
+  final lower = path.toLowerCase();
+  return lower.contains('.mp4') ||
+      lower.contains('.mov') ||
+      lower.contains('.avi') ||
+      lower.contains('.mkv') ||
+      lower.contains('.webm');
+}
+
 class PostDetailPage extends StatefulWidget {
   final Map<String, dynamic> post;
   final VoidCallback onLike;
@@ -1501,7 +2302,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
       else if (likedByData is List)
         isLiked = likedByData.contains(user.uid);
     }
-    final imageUrls = widget.post['imageUrls'] != null
+    final mediaUrls = widget.post['imageUrls'] != null
         ? List<String>.from(widget.post['imageUrls'])
         : (widget.post['imageUrl'] != null
               ? [widget.post['imageUrl'] as String]
@@ -1521,12 +2322,33 @@ class _PostDetailPageState extends State<PostDetailPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (imageUrls.isNotEmpty)
-                    CachedNetworkImage(
-                      imageUrl: imageUrls[0],
-                      width: double.infinity,
+                  if (mediaUrls.isNotEmpty)
+                    SizedBox(
                       height: 250,
-                      fit: BoxFit.cover,
+                      child: PageView.builder(
+                        itemCount: mediaUrls.length,
+                        itemBuilder: (context, index) {
+                          final mediaUrl = mediaUrls[index];
+                          final isVideo = _isMediaVideoPath(mediaUrl);
+                          return isVideo
+                              ? Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    CachedVideoPlayer(
+                                      url: mediaUrl,
+                                      play: false,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ],
+                                )
+                              : CachedNetworkImage(
+                                  imageUrl: mediaUrl,
+                                  width: double.infinity,
+                                  height: 250,
+                                  fit: BoxFit.cover,
+                                );
+                        },
+                      ),
                     ),
                   Padding(
                     padding: const EdgeInsets.all(24),
