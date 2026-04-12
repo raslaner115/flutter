@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart' as intl;
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
+import 'package:untitled1/pages/invoice_builder.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/widgets/tour_tip_dialog.dart';
 
@@ -136,6 +137,105 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
         ),
       );
     });
+  }
+
+  String _formatOriginalInvoiceDate(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.length == 8) {
+      try {
+        final parsed = intl.DateFormat('yyyyMMdd').parseStrict(trimmed);
+        return intl.DateFormat('dd/MM/yyyy').format(parsed);
+      } catch (_) {}
+    }
+    return trimmed;
+  }
+
+  Future<void> _openCreditNoteFromDocument(
+    Map<String, dynamic> savedData,
+    bool isRtl,
+  ) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+    final invoiceNumber = (savedData['invoiceNumber'] ?? '').toString().trim();
+    if (invoiceNumber.isEmpty) return;
+
+    try {
+      final userRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid);
+      final detailRef = userRef.collection('invoices').doc(invoiceNumber);
+
+      final results = await Future.wait([userRef.get(), detailRef.get()]);
+      final userSnap = results[0] as DocumentSnapshot<Map<String, dynamic>>;
+      final detailSnap = results[1] as DocumentSnapshot<Map<String, dynamic>>;
+
+      final userData = userSnap.data() ?? <String, dynamic>{};
+      final detailData = detailSnap.data() ?? <String, dynamic>{};
+      final originalDocType = (savedData['docType'] ?? '').toString();
+      final sourceDate = (detailData['date'] ?? savedData['date'] ?? '')
+          .toString();
+      final clientName = (detailData['clientName'] ?? savedData['clientName'] ?? '')
+          .toString();
+      final clientPhone = (detailData['clientPhone'] ?? '').toString();
+      final clientAddress = (detailData['clientAddress'] ?? '').toString();
+      final items = ((detailData['items'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from((e as Map)))
+          .toList();
+      final workerName =
+          (userData['name'] ?? currentUser.displayName ?? 'Worker')
+              .toString();
+      final workerPhone = (userData['phone'] ?? userData['phoneNumber'] ?? '')
+          .toString();
+      final workerEmail = (userData['email'] ?? currentUser.email ?? '')
+          .toString();
+      final label = _docTypeLabel(originalDocType, isRtl);
+      final originalDateFormatted = _formatOriginalInvoiceDate(sourceDate);
+      final autoReason = isRtl
+          ? 'זיכוי עבור $label מספר $invoiceNumber'
+          : 'Credit for $label #$invoiceNumber';
+      final autoReceiptConfirmation = isRtl
+          ? 'נוצר אוטומטית ממסמך שמור #$invoiceNumber. יש לעדכן אסמכתא למסירה בפועל לפני שימוש משפטי.'
+          : 'Auto-created from saved document #$invoiceNumber. Update with the actual delivery proof before legal use.';
+
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => InvoiceBuilderPage(
+            workerName: workerName,
+            workerPhone: workerPhone.isEmpty ? null : workerPhone,
+            workerEmail: workerEmail.isEmpty ? null : workerEmail,
+            receiverName: clientName.isEmpty ? null : clientName,
+            receiverPhone: clientPhone.isEmpty ? null : clientPhone,
+            receiverAddress: clientAddress.isEmpty ? null : clientAddress,
+            initialDocType: 'credit_note',
+            initialItems: items,
+            initialNotes: (detailData['notes'] ?? '').toString(),
+            initialPaymentMethod: (detailData['paymentMethod'] ?? '').toString(),
+            initialCheckNumber: (detailData['checkNumber'] ?? '').toString(),
+            initialTransferDetails:
+                (detailData['transferDetails'] ?? '').toString(),
+            initialCreditOriginalInvoiceNumber: invoiceNumber,
+            initialCreditOriginalInvoiceDate: originalDateFormatted,
+            initialCreditReason: autoReason,
+            initialCreditDeliveryMethod: 'email_confirmation',
+            initialCreditReceiptConfirmation: autoReceiptConfirmation,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isRtl
+                ? 'לא הצלחנו לפתוח הודעת זיכוי אוטומטית למסמך הזה.'
+                : 'Could not open an automatic credit note for this document.',
+          ),
+        ),
+      );
+    }
   }
 
   void _clearDateRange() {
@@ -432,6 +532,9 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
                             final invoiceNumber = (data['invoiceNumber'] ?? '')
                                 .toString();
                             final docType = (data['docType'] ?? '').toString();
+                            final canCreateCreditNote =
+                                docType == 'invoice' ||
+                                docType == 'invoice_receipt';
                             final createdText = createdAt == null
                                 ? ''
                                 : intl.DateFormat(
@@ -597,6 +700,38 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
                                           ),
                                       ],
                                     ),
+                                    if (canCreateCreditNote) ...[
+                                      const SizedBox(height: 14),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: OutlinedButton.icon(
+                                          onPressed: () =>
+                                              _openCreditNoteFromDocument(
+                                                data,
+                                                isRtl,
+                                              ),
+                                          icon: const Icon(
+                                            Icons.assignment_return_rounded,
+                                          ),
+                                          label: Text(
+                                            isRtl
+                                                ? 'צור הודעת זיכוי'
+                                                : 'Create Credit Note',
+                                          ),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: accent,
+                                            side: BorderSide(color: accent),
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 12,
+                                            ),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ),
