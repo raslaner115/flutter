@@ -10,6 +10,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:untitled1/ptofile.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:untitled1/services/bkmv_export_service.dart';
+import 'package:untitled1/utils/booking_mode.dart';
 
 class AdminPanel extends StatefulWidget {
   final bool showAppBar;
@@ -34,6 +36,94 @@ class _AdminPanelState extends State<AdminPanel> {
     return '${date.year}-$month-$day';
   }
 
+  String _fitAlphaField(String value, int length) {
+    final normalized = value.replaceAll('\n', ' ').replaceAll('\r', ' ').trim();
+    if (normalized.length >= length) {
+      return normalized.substring(0, length);
+    }
+    return normalized.padRight(length, ' ');
+  }
+
+  String _fitNumericField(String value, int length) {
+    final digitsOnly = value.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digitsOnly.isEmpty) {
+      return ''.padLeft(length, '0');
+    }
+    if (digitsOnly.length >= length) {
+      return digitsOnly.substring(digitsOnly.length - length);
+    }
+    return digitsOnly.padLeft(length, '0');
+  }
+
+  String _splitAddressPart(String address, int index) {
+    final parts = address
+        .split(',')
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (index < 0 || index >= parts.length) return '';
+    return parts[index];
+  }
+
+  String _sanitizeDelimitedField(String value) {
+    final normalized = value
+        .replaceAll('\r\n', ' ')
+        .replaceAll('\n', ' ')
+        .replaceAll('\r', ' ')
+        .trim();
+    if (normalized.contains('|')) {
+      throw FormatException('INI field cannot contain "|": $normalized');
+    }
+    return normalized;
+  }
+
+  String _buildDelimitedRecord(String recordType, List<String?> fields) {
+    final normalizedFields = fields
+        .map((field) => _sanitizeDelimitedField((field ?? '').toString()))
+        .toList();
+    return '${<String>[recordType, ...normalizedFields].join('|')}|';
+  }
+
+  String _buildIniRecord({
+    required int totalBkmvRecords,
+    required String businessNumber,
+    required String businessName,
+    required String softwareName,
+    required String appVersion,
+    required String exportDirectory,
+    required String address,
+    required String taxBranch,
+    required String fromDate,
+    required String toDate,
+  }) {
+    final normalizedFromDate = _fitNumericField(fromDate, 8);
+    final normalizedToDate = _fitNumericField(toDate, 8);
+    final normalizedBusinessNumber = _fitNumericField(businessNumber, 9);
+    final normalizedTaxBranch = _fitNumericField(taxBranch, 9);
+
+    if (normalizedBusinessNumber.isEmpty ||
+        normalizedBusinessNumber == '000000000') {
+      throw StateError('Missing required business number for INI.txt');
+    }
+
+    return _buildDelimitedRecord('A000', [
+      normalizedBusinessNumber,
+      totalBkmvRecords.toString(),
+      'OF1.31',
+      softwareName,
+      appVersion,
+      businessName,
+      normalizedTaxBranch,
+      _splitAddressPart(address, 0),
+      _splitAddressPart(address, 1),
+      _splitAddressPart(address, 2),
+      normalizedFromDate,
+      normalizedToDate,
+      'ILS',
+      exportDirectory,
+    ]);
+  }
+
   Future<DateTimeRange?> _pickExportDateRange() async {
     final now = DateTime.now();
     return showDateRangePicker(
@@ -48,9 +138,10 @@ class _AdminPanelState extends State<AdminPanel> {
   }
 
   Future<Directory> _getBkmvExportDirectory() async {
-    final downloadsDir =
-        await getApplicationDocumentsDirectory();
-    final directory = Directory('${downloadsDir.path}${Platform.pathSeparator}BKMVDATA');
+    final downloadsDir = await getApplicationDocumentsDirectory();
+    final directory = Directory(
+      '${downloadsDir.path}${Platform.pathSeparator}BKMVDATA',
+    );
     await directory.create(recursive: true);
     return directory;
   }
@@ -646,7 +737,10 @@ class _AdminPanelState extends State<AdminPanel> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 12,
+          ),
           contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
           title: const Row(
             children: [
@@ -660,275 +754,281 @@ class _AdminPanelState extends State<AdminPanel> {
             height: MediaQuery.of(context).size.height * 0.72,
             child: SingleChildScrollView(
               child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: titleController,
-                  decoration: const InputDecoration(
-                    labelText: 'Ad Title',
-                    hintText: 'Summer campaign',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: msgController,
-                  decoration: const InputDecoration(
-                    labelText: 'Ad Message',
-                    hintText: 'Describe the offer or update you want users to see.',
-                  ),
-                  maxLines: 4,
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: badgeController,
-                  decoration: const InputDecoration(
-                    labelText: 'Badge',
-                    hintText: 'Featured / Update / Limited Time',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: linkController,
-                  decoration: const InputDecoration(
-                    labelText: 'Action Link (Optional)',
-                    hintText: 'https://...',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: btnTextController,
-                  decoration: const InputDecoration(
-                    labelText: 'Button Label',
-                    hintText: 'e.g. Visit Website',
-                  ),
-                ),
-                const SizedBox(height: 16),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Show as popup'),
-                  subtitle: const Text('Display immediately in a dialog'),
-                  value: showPopup,
-                  onChanged: (value) => setState(() => showPopup = value),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Show as banner'),
-                  subtitle: const Text('Keep the ad visible in the home feed'),
-                  value: showBanner,
-                  onChanged: (value) => setState(() => showBanner = value),
-                ),
-                const SizedBox(height: 8),
-                InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () async {
-                    final picked = await showDateRangePicker(
-                      context: context,
-                      firstDate: DateTime(now.year - 1),
-                      lastDate: DateTime(now.year + 5),
-                      initialDateRange: selectedDateRange,
-                    );
-                    if (picked != null && context.mounted) {
-                      setState(() => selectedDateRange = picked);
-                    }
-                  },
-                  child: InputDecorator(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: titleController,
                     decoration: const InputDecoration(
-                      labelText: 'Ad start and end date',
-                      border: OutlineInputBorder(),
-                      suffixIcon: Icon(Icons.date_range_rounded),
-                    ),
-                    child: Text(
-                      '${selectedDateRange.start.year}-${selectedDateRange.start.month.toString().padLeft(2, '0')}-${selectedDateRange.start.day.toString().padLeft(2, '0')}  ->  ${selectedDateRange.end.year}-${selectedDateRange.end.month.toString().padLeft(2, '0')}-${selectedDateRange.end.day.toString().padLeft(2, '0')}',
+                      labelText: 'Ad Title',
+                      hintText: 'Summer campaign',
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.add_photo_alternate_outlined),
-                        label: Text(
-                          imageFiles.isEmpty
-                              ? 'Choose Photos'
-                              : 'Add More Photos',
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: msgController,
+                    decoration: const InputDecoration(
+                      labelText: 'Ad Message',
+                      hintText:
+                          'Describe the offer or update you want users to see.',
+                    ),
+                    maxLines: 4,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: badgeController,
+                    decoration: const InputDecoration(
+                      labelText: 'Badge',
+                      hintText: 'Featured / Update / Limited Time',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: linkController,
+                    decoration: const InputDecoration(
+                      labelText: 'Action Link (Optional)',
+                      hintText: 'https://...',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: btnTextController,
+                    decoration: const InputDecoration(
+                      labelText: 'Button Label',
+                      hintText: 'e.g. Visit Website',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Show as popup'),
+                    subtitle: const Text('Display immediately in a dialog'),
+                    value: showPopup,
+                    onChanged: (value) => setState(() => showPopup = value),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Show as banner'),
+                    subtitle: const Text(
+                      'Keep the ad visible in the home feed',
+                    ),
+                    value: showBanner,
+                    onChanged: (value) => setState(() => showBanner = value),
+                  ),
+                  const SizedBox(height: 8),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () async {
+                      final picked = await showDateRangePicker(
+                        context: context,
+                        firstDate: DateTime(now.year - 1),
+                        lastDate: DateTime(now.year + 5),
+                        initialDateRange: selectedDateRange,
+                      );
+                      if (picked != null && context.mounted) {
+                        setState(() => selectedDateRange = picked);
+                      }
+                    },
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Ad start and end date',
+                        border: OutlineInputBorder(),
+                        suffixIcon: Icon(Icons.date_range_rounded),
+                      ),
+                      child: Text(
+                        '${selectedDateRange.start.year}-${selectedDateRange.start.month.toString().padLeft(2, '0')}-${selectedDateRange.start.day.toString().padLeft(2, '0')}  ->  ${selectedDateRange.end.year}-${selectedDateRange.end.month.toString().padLeft(2, '0')}-${selectedDateRange.end.day.toString().padLeft(2, '0')}',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.add_photo_alternate_outlined),
+                          label: Text(
+                            imageFiles.isEmpty
+                                ? 'Choose Photos'
+                                : 'Add More Photos',
+                          ),
+                          onPressed: () async {
+                            final picked = await ImagePicker().pickMultiImage(
+                              maxWidth: 1600,
+                              maxHeight: 1600,
+                              imageQuality: 85,
+                            );
+                            if (picked.isNotEmpty && context.mounted) {
+                              setState(() {
+                                imageFiles.addAll(
+                                  picked.map((file) => File(file.path)),
+                                );
+                              });
+                            }
+                          },
                         ),
-                        onPressed: () async {
-                          final picked = await ImagePicker().pickMultiImage(
-                            maxWidth: 1600,
-                            maxHeight: 1600,
-                            imageQuality: 85,
+                      ),
+                      if (imageFiles.isNotEmpty) ...[
+                        const SizedBox(width: 12),
+                        TextButton.icon(
+                          onPressed: () => setState(() => imageFiles.clear()),
+                          icon: const Icon(Icons.delete_outline),
+                          label: const Text('Clear'),
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (imageFiles.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 148,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: imageFiles.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 10),
+                        itemBuilder: (context, index) {
+                          final file = imageFiles[index];
+                          return Stack(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(14),
+                                child: Image.file(
+                                  file,
+                                  width: 196,
+                                  height: 148,
+                                  fit: BoxFit.cover,
+                                  cacheWidth: 900,
+                                  filterQuality: FilterQuality.low,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Container(
+                                      width: 196,
+                                      height: 148,
+                                      color: const Color(0xFFF1F5F9),
+                                      alignment: Alignment.center,
+                                      child: const Icon(
+                                        Icons.broken_image_outlined,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                              Positioned(
+                                top: 4,
+                                right: 4,
+                                child: CircleAvatar(
+                                  radius: 14,
+                                  backgroundColor: Colors.black.withValues(
+                                    alpha: 0.55,
+                                  ),
+                                  child: IconButton(
+                                    padding: EdgeInsets.zero,
+                                    iconSize: 16,
+                                    icon: const Icon(
+                                      Icons.close,
+                                      color: Colors.white,
+                                    ),
+                                    onPressed: () => setState(
+                                      () => imageFiles.removeAt(index),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           );
-                          if (picked.isNotEmpty && context.mounted) {
-                            setState(() {
-                              imageFiles.addAll(
-                                picked.map((file) => File(file.path)),
-                              );
-                            });
-                          }
                         },
                       ),
                     ),
-                    if (imageFiles.isNotEmpty) ...[
-                      const SizedBox(width: 12),
-                      TextButton.icon(
-                        onPressed: () => setState(() => imageFiles.clear()),
-                        icon: const Icon(Icons.delete_outline),
-                        label: const Text('Clear'),
-                      ),
-                    ],
                   ],
-                ),
-                if (imageFiles.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    height: 148,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: imageFiles.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 10),
-                      itemBuilder: (context, index) {
-                        final file = imageFiles[index];
-                        return Stack(
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(14),
-                              child: Image.file(
-                                file,
-                                width: 196,
-                                height: 148,
-                                fit: BoxFit.cover,
-                                cacheWidth: 900,
-                                filterQuality: FilterQuality.low,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Container(
-                                    width: 196,
-                                    height: 148,
-                                    color: const Color(0xFFF1F5F9),
-                                    alignment: Alignment.center,
-                                    child: const Icon(Icons.broken_image_outlined),
-                                  );
-                                },
+                  const SizedBox(height: 20),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF0F172A), Color(0xFF1D4ED8)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Preview',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        if (badgeController.text.trim().isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              badgeController.text.trim(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                            Positioned(
-                              top: 4,
-                              right: 4,
-                              child: CircleAvatar(
-                                radius: 14,
-                                backgroundColor:
-                                    Colors.black.withValues(alpha: 0.55),
-                                child: IconButton(
-                                  padding: EdgeInsets.zero,
-                                  iconSize: 16,
-                                  icon: const Icon(
-                                    Icons.close,
-                                    color: Colors.white,
-                                  ),
-                                  onPressed: () => setState(
-                                    () => imageFiles.removeAt(index),
+                          ),
+                        if (badgeController.text.trim().isNotEmpty)
+                          const SizedBox(height: 12),
+                        if (imageFiles.isNotEmpty)
+                          SizedBox(
+                            height: 260,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: imageFiles.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 10),
+                              itemBuilder: (context, index) => ClipRRect(
+                                borderRadius: BorderRadius.circular(18),
+                                child: AspectRatio(
+                                  aspectRatio: 16 / 9,
+                                  child: Image.file(
+                                    imageFiles[index],
+                                    fit: BoxFit.cover,
+                                    cacheWidth: 1000,
+                                    filterQuality: FilterQuality.low,
                                   ),
                                 ),
                               ),
                             ),
-                          ],
-                        );
-                      },
+                          ),
+                        if (imageFiles.isNotEmpty) const SizedBox(height: 16),
+                        Text(
+                          titleController.text.trim().isEmpty
+                              ? 'Your ad title'
+                              : titleController.text.trim(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          msgController.text.trim().isEmpty
+                              ? 'Your message preview will appear here.'
+                              : msgController.text.trim(),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.86),
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
-                const SizedBox(height: 20),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF0F172A), Color(0xFF1D4ED8)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(22),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Preview',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      if (badgeController.text.trim().isNotEmpty)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            badgeController.text.trim(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      if (badgeController.text.trim().isNotEmpty)
-                        const SizedBox(height: 12),
-                      if (imageFiles.isNotEmpty)
-                        SizedBox(
-                          height: 260,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: imageFiles.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(width: 10),
-                            itemBuilder: (context, index) => ClipRRect(
-                              borderRadius: BorderRadius.circular(18),
-                              child: AspectRatio(
-                                aspectRatio: 16 / 9,
-                                child: Image.file(
-                                  imageFiles[index],
-                                  fit: BoxFit.cover,
-                                  cacheWidth: 1000,
-                                  filterQuality: FilterQuality.low,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      if (imageFiles.isNotEmpty) const SizedBox(height: 16),
-                      Text(
-                        titleController.text.trim().isEmpty
-                            ? 'Your ad title'
-                            : titleController.text.trim(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        msgController.text.trim().isEmpty
-                            ? 'Your message preview will appear here.'
-                            : msgController.text.trim(),
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.86),
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+              ),
             ),
           ),
           actions: [
@@ -969,7 +1069,8 @@ class _AdminPanelState extends State<AdminPanel> {
                         final parsed = Uri.tryParse(link);
                         final isValidHttp =
                             parsed != null &&
-                            (parsed.scheme == 'http' || parsed.scheme == 'https');
+                            (parsed.scheme == 'http' ||
+                                parsed.scheme == 'https');
                         if (!isValidHttp) {
                           messenger.showSnackBar(
                             const SnackBar(
@@ -1011,28 +1112,34 @@ class _AdminPanelState extends State<AdminPanel> {
                           imageUrls.add(await ref.getDownloadURL());
                         }
 
-                        await _firestore.collection('system_announcements').add({
-                          'title': title,
-                          'message': message,
-                          'badge': badge,
-                          'imageUrl': imageUrls.isEmpty ? null : imageUrls.first,
-                          'imageUrls': imageUrls,
-                          'link': link,
-                          'buttonText': buttonText.isEmpty
-                              ? 'Learn More'
-                              : buttonText,
-                          'timestamp': FieldValue.serverTimestamp(),
-                          'startsAt': startsAt,
-                          'expiresAt': expiresAt,
-                          'isPopup': showPopup,
-                          'showBanner': showBanner,
-                        });
+                        await _firestore
+                            .collection('system_announcements')
+                            .add({
+                              'title': title,
+                              'message': message,
+                              'badge': badge,
+                              'imageUrl': imageUrls.isEmpty
+                                  ? null
+                                  : imageUrls.first,
+                              'imageUrls': imageUrls,
+                              'link': link,
+                              'buttonText': buttonText.isEmpty
+                                  ? 'Learn More'
+                                  : buttonText,
+                              'timestamp': FieldValue.serverTimestamp(),
+                              'startsAt': startsAt,
+                              'expiresAt': expiresAt,
+                              'isPopup': showPopup,
+                              'showBanner': showBanner,
+                            });
 
                         if (context.mounted) {
                           Navigator.pop(context);
                           messenger.showSnackBar(
                             const SnackBar(
-                              content: Text('Broadcast published successfully.'),
+                              content: Text(
+                                'Broadcast published successfully.',
+                              ),
                             ),
                           );
                         }
@@ -1308,6 +1415,7 @@ class _AdminPanelState extends State<AdminPanel> {
     final amController = TextEditingController();
     String selectedIcon = 'engineering';
     String selectedColor = '#1976D2';
+    String selectedBookingMode = bookingModeProviderTravels;
 
     showDialog(
       context: context,
@@ -1343,6 +1451,29 @@ class _AdminPanelState extends State<AdminPanel> {
                   decoration: const InputDecoration(
                     labelText: 'Name (Amharic)',
                   ),
+                ),
+                const SizedBox(height: 20),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedBookingMode,
+                  decoration: const InputDecoration(labelText: 'Booking Mode'),
+                  items: const [
+                    DropdownMenuItem(
+                      value: bookingModeProviderTravels,
+                      child: Text('Provider comes to customer'),
+                    ),
+                    DropdownMenuItem(
+                      value: bookingModeCustomerTravels,
+                      child: Text('Customer goes to provider'),
+                    ),
+                    DropdownMenuItem(
+                      value: bookingModeOnline,
+                      child: Text('Online profession'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setDialogState(() => selectedBookingMode = value);
+                  },
                 ),
                 const SizedBox(height: 20),
                 const Text(
@@ -1383,25 +1514,24 @@ class _AdminPanelState extends State<AdminPanel> {
                   spacing: 10,
                   runSpacing: 10,
                   children: _availableProfessionColors.map((color) {
-                        bool isSelected = selectedColor == color;
-                        return GestureDetector(
-                          onTap: () =>
-                              setDialogState(() => selectedColor = color),
-                          child: Container(
-                            width: 30,
-                            height: 30,
-                            decoration: BoxDecoration(
-                              color: Color(
-                                int.parse(color.replaceFirst('#', '0xFF')),
-                              ),
-                              shape: BoxShape.circle,
-                              border: isSelected
-                                  ? Border.all(color: Colors.black, width: 2)
-                                  : null,
-                            ),
+                    bool isSelected = selectedColor == color;
+                    return GestureDetector(
+                      onTap: () => setDialogState(() => selectedColor = color),
+                      child: Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: Color(
+                            int.parse(color.replaceFirst('#', '0xFF')),
                           ),
-                        );
-                      }).toList(),
+                          shape: BoxShape.circle,
+                          border: isSelected
+                              ? Border.all(color: Colors.black, width: 2)
+                              : null,
+                        ),
+                      ),
+                    );
+                  }).toList(),
                 ),
               ],
             ),
@@ -1442,6 +1572,7 @@ class _AdminPanelState extends State<AdminPanel> {
                   'am': amController.text.trim(),
                   'logo': selectedIcon,
                   'color': selectedColor,
+                  'bookingMode': selectedBookingMode,
                   'updatedAt': Timestamp.now(),
                 };
 
@@ -1509,93 +1640,38 @@ class _AdminPanelState extends State<AdminPanel> {
 
       final fromDate = _formatCompactDate(selectedRange.start);
       final toDate = _formatCompactDate(selectedRange.end);
-      final systemSettings =
-          await _firestore.collection('metadata').doc('system').get();
-      final settingsData = systemSettings.data() ?? <String, dynamic>{};
-      final businessNumber = (settingsData['businessNumber'] ?? '').toString();
-      final businessName = (settingsData['businessName'] ?? '').toString();
-      final softwareName = (settingsData['appName'] ?? 'hiro').toString();
-      final appVersion =
-          (settingsData['minRequiredVersion'] ?? '1.0.0').toString();
-      final bucketNames = ['invoices', 'receipts', 'credit_notes'];
-      final snapshots = await Future.wait(
-        bucketNames.map(
-          (bucket) => _firestore
-              .collection('logs')
-              .doc(bucket)
-              .collection('files')
-              .where('date', isGreaterThanOrEqualTo: fromDate)
-              .where('date', isLessThanOrEqualTo: toDate)
-              .orderBy('date')
-              .orderBy('timestamp')
-              .get(),
-        ),
+      final directory = await _getBkmvExportDirectory();
+      final result = await BkmvExportService.exportForAllUsers(
+        firestore: _firestore,
+        fromDate: fromDate,
+        toDate: toDate,
+        rootDirectory: directory,
       );
-
-      final allDocs = snapshots.expand((snap) => snap.docs).toList()
-        ..sort((a, b) {
-          final aData = a.data();
-          final bData = b.data();
-          final dateCompare = (aData['date'] ?? '')
-              .toString()
-              .compareTo((bData['date'] ?? '').toString());
-          if (dateCompare != 0) return dateCompare;
-
-          final aTs = aData['timestamp'] as Timestamp?;
-          final bTs = bData['timestamp'] as Timestamp?;
-          if (aTs == null && bTs == null) return 0;
-          if (aTs == null) return -1;
-          if (bTs == null) return 1;
-          return aTs.compareTo(bTs);
-        });
-
-      final lines = <String>[
-        'Z900|$businessNumber|$businessName|$fromDate|$toDate|',
-      ];
-      for (final doc in allDocs) {
-        final data = doc.data();
-        final type = (data['type'] ?? '').toString();
-        final documentNumber = (data['documentNumber'] ?? '').toString();
-        final date = (data['date'] ?? '').toString();
-        final amount = ((data['amount'] as num?) ?? 0).toStringAsFixed(2);
-        final vatAmount = ((data['vatAmount'] as num?) ?? 0).toStringAsFixed(2);
-        final customerId = (data['customerId'] ?? '').toString();
-        lines.add(
-          '$type|$documentNumber|$date|$amount|$vatAmount|$customerId',
+      if (!result.hasFiles) {
+        throw StateError(
+          result.warnings.isNotEmpty
+              ? result.warnings.join('\n')
+              : 'No BKMVDATA files were generated.',
         );
       }
-      lines.add('FOOTER|END');
 
-      final bkmvContent = lines.join('\n');
-      final iniContent = '''
-[General]
-COMPANY=$businessName
-ID=$businessNumber
-FROMDATE=$fromDate
-TODATE=$toDate
-SOFTWARE=$softwareName
-VERSION=$appVersion
-''';
-
-      final directory = await _getBkmvExportDirectory();
-      final bkmvFile = File('${directory.path}${Platform.pathSeparator}BKMVDATA.txt');
-      final iniFile = File('${directory.path}${Platform.pathSeparator}INI.txt');
-      await bkmvFile.writeAsString(bkmvContent);
-      await iniFile.writeAsString(iniContent);
+      final files = <XFile>[
+        for (final package in result.packages) ...[
+          XFile(package.bkmvFile.path),
+          XFile(package.iniFile.path),
+        ],
+      ];
       await SharePlus.instance.share(
-        ShareParams(
-          files: [
-            XFile(bkmvFile.path),
-            XFile(iniFile.path),
-          ],
-          text: 'BKMVDATA export files',
-        ),
+        ShareParams(files: files, text: 'BKMVDATA export files'),
       );
       if (mounted) {
+        final warningSuffix = result.warnings.isEmpty
+            ? ''
+            : '\nWarnings: ${result.warnings.join(' | ')}';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'BKMVDATA exports prepared in: ${directory.path}',
+              'Prepared ${result.packages.length} BKMVDATA export package(s) in: ${directory.path}$warningSuffix',
             ),
           ),
         );
@@ -1817,12 +1893,14 @@ class _ProfessionCategoriesSheet extends StatefulWidget {
       _ProfessionCategoriesSheetState();
 }
 
-class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> {
+class _ProfessionCategoriesSheetState
+    extends State<_ProfessionCategoriesSheet> {
   bool _isUploadingImport = false;
   List<Map<String, dynamic>> _previewItems = const [];
   String? _previewFileName;
 
-  List<String> get _pickerIconKeys => _deduplicateIconKeys(widget.availableIcons);
+  List<String> get _pickerIconKeys =>
+      _deduplicateIconKeys(widget.availableIcons);
 
   static List<String> _deduplicateIconKeys(Map<String, IconData> icons) {
     final uniqueKeys = <String>[];
@@ -1883,6 +1961,7 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
       'am': (raw['am'] ?? '').toString().trim(),
       'logo': resolvedLogo,
       'color': _normalizeHexColor(raw['color']?.toString()),
+      'bookingMode': normalizeBookingMode(raw['bookingMode']?.toString()),
       'updatedAt': Timestamp.now(),
     };
   }
@@ -1933,7 +2012,9 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
   }
 
   Future<void> _removeCategoryByEn(String cat) async {
-    final metadataRef = widget.firestore.collection('metadata').doc('professions');
+    final metadataRef = widget.firestore
+        .collection('metadata')
+        .doc('professions');
     final snapshot = await metadataRef.get();
     final items = _itemsFromMetadata(snapshot.data());
     items.removeWhere(
@@ -1943,16 +2024,31 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
   }
 
   Future<void> _editExistingItem(Map<String, dynamic> item) async {
-    final enController = TextEditingController(text: item['en']?.toString() ?? '');
-    final heController = TextEditingController(text: item['he']?.toString() ?? '');
-    final arController = TextEditingController(text: item['ar']?.toString() ?? '');
-    final ruController = TextEditingController(text: item['ru']?.toString() ?? '');
-    final amController = TextEditingController(text: item['am']?.toString() ?? '');
-    final idController = TextEditingController(text: item['id']?.toString() ?? '');
+    final enController = TextEditingController(
+      text: item['en']?.toString() ?? '',
+    );
+    final heController = TextEditingController(
+      text: item['he']?.toString() ?? '',
+    );
+    final arController = TextEditingController(
+      text: item['ar']?.toString() ?? '',
+    );
+    final ruController = TextEditingController(
+      text: item['ru']?.toString() ?? '',
+    );
+    final amController = TextEditingController(
+      text: item['am']?.toString() ?? '',
+    );
+    final idController = TextEditingController(
+      text: item['id']?.toString() ?? '',
+    );
     final colorController = TextEditingController(
       text: item['color']?.toString() ?? '#1976D2',
     );
     String selectedIcon = item['logo']?.toString() ?? 'engineering';
+    String selectedBookingMode = normalizeBookingMode(
+      item['bookingMode']?.toString(),
+    );
 
     await showDialog<void>(
       context: context,
@@ -1992,17 +2088,47 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                   ),
                   TextField(
                     controller: colorController,
-                    decoration: const InputDecoration(labelText: 'Color (#RRGGBB)'),
+                    decoration: const InputDecoration(
+                      labelText: 'Color (#RRGGBB)',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedBookingMode,
+                    decoration: const InputDecoration(
+                      labelText: 'Booking Mode',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: bookingModeProviderTravels,
+                        child: Text('Provider comes to customer'),
+                      ),
+                      DropdownMenuItem(
+                        value: bookingModeCustomerTravels,
+                        child: Text('Customer goes to provider'),
+                      ),
+                      DropdownMenuItem(
+                        value: bookingModeOnline,
+                        child: Text('Online profession'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setDialogState(() => selectedBookingMode = value);
+                    },
                   ),
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 10,
                     runSpacing: 10,
-                    children: _AdminPanelState._availableProfessionColors.map((color) {
+                    children: _AdminPanelState._availableProfessionColors.map((
+                      color,
+                    ) {
                       final isSelected =
                           _normalizeHexColor(colorController.text) == color;
                       return GestureDetector(
-                        onTap: () => setDialogState(() => colorController.text = color),
+                        onTap: () =>
+                            setDialogState(() => colorController.text = color),
                         child: Container(
                           width: 30,
                           height: 30,
@@ -2033,7 +2159,8 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
-                          widget.availableIcons[selectedIcon] ?? Icons.engineering,
+                          widget.availableIcons[selectedIcon] ??
+                              Icons.engineering,
                           color: Colors.white,
                         ),
                       ),
@@ -2053,7 +2180,8 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                         final key = _pickerIconKeys[iconIndex];
                         final isSelected = selectedIcon == key;
                         return IconButton(
-                          onPressed: () => setDialogState(() => selectedIcon = key),
+                          onPressed: () =>
+                              setDialogState(() => selectedIcon = key),
                           icon: Icon(
                             widget.availableIcons[key],
                             color: isSelected ? Colors.red[900] : Colors.grey,
@@ -2085,16 +2213,19 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                 updated['am'] = amController.text.trim();
                 updated['logo'] = selectedIcon;
                 updated['color'] = _normalizeHexColor(colorController.text);
+                updated['bookingMode'] = selectedBookingMode;
                 updated['updatedAt'] = Timestamp.now();
                 if ((updated['en'] ?? '').toString().isEmpty) return;
 
-                final metadataRef =
-                    widget.firestore.collection('metadata').doc('professions');
+                final metadataRef = widget.firestore
+                    .collection('metadata')
+                    .doc('professions');
                 final snapshot = await metadataRef.get();
                 final items = _itemsFromMetadata(snapshot.data());
                 final index = items.indexWhere(
                   (entry) =>
-                      entry['en']?.toString().trim().toLowerCase() == originalKey,
+                      entry['en']?.toString().trim().toLowerCase() ==
+                      originalKey,
                 );
                 if (index == -1) return;
                 items[index] = updated;
@@ -2133,7 +2264,9 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
       if (!mounted) return;
       if (parsedItems.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No valid profession items found in JSON.')),
+          const SnackBar(
+            content: Text('No valid profession items found in JSON.'),
+          ),
         );
         return;
       }
@@ -2144,23 +2277,41 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Import error: $e'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('Import error: $e'),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
 
   Future<void> _editPreviewItem(int index) async {
     final item = Map<String, dynamic>.from(_previewItems[index]);
-    final enController = TextEditingController(text: item['en']?.toString() ?? '');
-    final heController = TextEditingController(text: item['he']?.toString() ?? '');
-    final arController = TextEditingController(text: item['ar']?.toString() ?? '');
-    final ruController = TextEditingController(text: item['ru']?.toString() ?? '');
-    final amController = TextEditingController(text: item['am']?.toString() ?? '');
-    final idController = TextEditingController(text: item['id']?.toString() ?? '');
+    final enController = TextEditingController(
+      text: item['en']?.toString() ?? '',
+    );
+    final heController = TextEditingController(
+      text: item['he']?.toString() ?? '',
+    );
+    final arController = TextEditingController(
+      text: item['ar']?.toString() ?? '',
+    );
+    final ruController = TextEditingController(
+      text: item['ru']?.toString() ?? '',
+    );
+    final amController = TextEditingController(
+      text: item['am']?.toString() ?? '',
+    );
+    final idController = TextEditingController(
+      text: item['id']?.toString() ?? '',
+    );
     final colorController = TextEditingController(
       text: item['color']?.toString() ?? '#1976D2',
     );
     String selectedIcon = item['logo']?.toString() ?? 'engineering';
+    String selectedBookingMode = normalizeBookingMode(
+      item['bookingMode']?.toString(),
+    );
 
     await showDialog<void>(
       context: context,
@@ -2200,17 +2351,47 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                   ),
                   TextField(
                     controller: colorController,
-                    decoration: const InputDecoration(labelText: 'Color (#RRGGBB)'),
+                    decoration: const InputDecoration(
+                      labelText: 'Color (#RRGGBB)',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedBookingMode,
+                    decoration: const InputDecoration(
+                      labelText: 'Booking Mode',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: bookingModeProviderTravels,
+                        child: Text('Provider comes to customer'),
+                      ),
+                      DropdownMenuItem(
+                        value: bookingModeCustomerTravels,
+                        child: Text('Customer goes to provider'),
+                      ),
+                      DropdownMenuItem(
+                        value: bookingModeOnline,
+                        child: Text('Online profession'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setDialogState(() => selectedBookingMode = value);
+                    },
                   ),
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 10,
                     runSpacing: 10,
-                    children: _AdminPanelState._availableProfessionColors.map((color) {
+                    children: _AdminPanelState._availableProfessionColors.map((
+                      color,
+                    ) {
                       final isSelected =
                           _normalizeHexColor(colorController.text) == color;
                       return GestureDetector(
-                        onTap: () => setDialogState(() => colorController.text = color),
+                        onTap: () =>
+                            setDialogState(() => colorController.text = color),
                         child: Container(
                           width: 30,
                           height: 30,
@@ -2241,7 +2422,8 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
-                          widget.availableIcons[selectedIcon] ?? Icons.engineering,
+                          widget.availableIcons[selectedIcon] ??
+                              Icons.engineering,
                           color: Colors.white,
                         ),
                       ),
@@ -2261,7 +2443,8 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                         final key = _pickerIconKeys[iconIndex];
                         final isSelected = selectedIcon == key;
                         return IconButton(
-                          onPressed: () => setDialogState(() => selectedIcon = key),
+                          onPressed: () =>
+                              setDialogState(() => selectedIcon = key),
                           icon: Icon(
                             widget.availableIcons[key],
                             color: isSelected ? Colors.red[900] : Colors.grey,
@@ -2283,7 +2466,9 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
               onPressed: () {
                 final updated = Map<String, dynamic>.from(item);
                 updated['id'] =
-                    int.tryParse(idController.text.trim()) ?? item['id'] ?? index + 1;
+                    int.tryParse(idController.text.trim()) ??
+                    item['id'] ??
+                    index + 1;
                 updated['en'] = enController.text.trim();
                 updated['he'] = heController.text.trim();
                 updated['ar'] = arController.text.trim();
@@ -2291,6 +2476,7 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                 updated['am'] = amController.text.trim();
                 updated['logo'] = selectedIcon;
                 updated['color'] = _normalizeHexColor(colorController.text);
+                updated['bookingMode'] = selectedBookingMode;
                 if ((updated['en'] ?? '').toString().isEmpty) return;
                 setState(() {
                   _previewItems[index] = updated;
@@ -2309,7 +2495,9 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
     if (_previewItems.isEmpty) return;
     setState(() => _isUploadingImport = true);
     try {
-      final metadataRef = widget.firestore.collection('metadata').doc('professions');
+      final metadataRef = widget.firestore
+          .collection('metadata')
+          .doc('professions');
       final snapshot = await metadataRef.get();
       final existingItems = _itemsFromMetadata(snapshot.data());
       final byEn = <String, Map<String, dynamic>>{
@@ -2340,12 +2528,17 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
         _previewFileName = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Imported professions uploaded successfully.')),
+        const SnackBar(
+          content: Text('Imported professions uploaded successfully.'),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Upload error: $e'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('Upload error: $e'),
+          backgroundColor: Colors.red,
+        ),
       );
     } finally {
       if (mounted) {
@@ -2393,8 +2586,9 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                 IconButton(
                   onPressed: () {
                     setState(() {
-                      _previewItems = List<Map<String, dynamic>>.from(_previewItems)
-                        ..removeAt(index);
+                      _previewItems = List<Map<String, dynamic>>.from(
+                        _previewItems,
+                      )..removeAt(index);
                     });
                   },
                   icon: const Icon(Icons.delete_outline, color: Colors.red),
@@ -2457,7 +2651,10 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                 IconButton(
                   tooltip: 'Import JSON',
                   onPressed: _pickAndPreviewJson,
-                  icon: const Icon(Icons.upload_file_rounded, color: Colors.deepPurple),
+                  icon: const Icon(
+                    Icons.upload_file_rounded,
+                    color: Colors.deepPurple,
+                  ),
                 ),
                 IconButton(
                   tooltip: 'Add manually',
@@ -2494,7 +2691,9 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                   Row(
                     children: [
                       ElevatedButton.icon(
-                        onPressed: _isUploadingImport ? null : _uploadPreviewItems,
+                        onPressed: _isUploadingImport
+                            ? null
+                            : _uploadPreviewItems,
                         icon: const Icon(Icons.cloud_upload_outlined),
                         label: Text(
                           _isUploadingImport ? 'Uploading...' : 'Upload Import',
@@ -2529,11 +2728,14 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                 }
 
                 final data =
-                    snapshot.data?.data() as Map<String, dynamic>? ?? <String, dynamic>{};
+                    snapshot.data?.data() as Map<String, dynamic>? ??
+                    <String, dynamic>{};
                 final items = _itemsFromMetadata(data)
                   ..sort((a, b) {
-                    final aId = int.tryParse(a['id']?.toString() ?? '') ?? 1 << 30;
-                    final bId = int.tryParse(b['id']?.toString() ?? '') ?? 1 << 30;
+                    final aId =
+                        int.tryParse(a['id']?.toString() ?? '') ?? 1 << 30;
+                    final bId =
+                        int.tryParse(b['id']?.toString() ?? '') ?? 1 << 30;
                     return aId.compareTo(bId);
                   });
 
@@ -2550,7 +2752,8 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                       ),
                       ...List.generate(
                         _previewItems.length,
-                        (index) => _buildPreviewCard(_previewItems[index], index),
+                        (index) =>
+                            _buildPreviewCard(_previewItems[index], index),
                       ),
                       const Divider(height: 28),
                     ],
@@ -2564,7 +2767,9 @@ class _ProfessionCategoriesSheetState extends State<_ProfessionCategoriesSheet> 
                     if (items.isEmpty)
                       const Padding(
                         padding: EdgeInsets.all(24),
-                        child: Center(child: Text('No profession entries found')),
+                        child: Center(
+                          child: Text('No profession entries found'),
+                        ),
                       )
                     else
                       ...items.map((item) {

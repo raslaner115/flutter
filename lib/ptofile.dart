@@ -28,6 +28,7 @@ import 'package:untitled1/pages/edit_profile.dart';
 import 'package:untitled1/pages/liked_pros_page.dart';
 import 'package:untitled1/services/location_context_service.dart';
 import 'package:untitled1/services/subscription_access_service.dart';
+import 'package:untitled1/utils/booking_mode.dart';
 
 import 'package:untitled1/widgets/cached_video_player.dart';
 import 'package:untitled1/widgets/tour_tip_dialog.dart';
@@ -80,6 +81,7 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
   String _userRole = "customer";
   List<String> _userProfessions = [];
   Map<String, Map<String, String>> _professionTranslations = {};
+  Map<String, String> _professionBookingModes = {};
   List<Map<String, dynamic>> _userReviews = [];
   List<Map<String, dynamic>> _projects = [];
   int _viewsCount = 0;
@@ -142,6 +144,7 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
       final items = (doc.data()?['items'] as List?) ?? const [];
 
       final map = <String, Map<String, String>>{};
+      final bookingModes = <String, String>{};
       for (final raw in items.whereType<Map>()) {
         final item = Map<String, dynamic>.from(raw);
         final en = item['en']?.toString().trim();
@@ -154,11 +157,15 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
           'ru': item['ru']?.toString().trim() ?? '',
           'am': item['am']?.toString().trim() ?? '',
         };
+        bookingModes[en.toLowerCase()] = normalizeBookingMode(
+          item['bookingMode']?.toString(),
+        );
       }
 
       if (!mounted) return;
       setState(() {
         _professionTranslations = map;
+        _professionBookingModes = bookingModes;
       });
     } catch (e) {
       debugPrint("Failed to load profession translations: $e");
@@ -182,6 +189,22 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
     return _userProfessions
         .map((p) => _translateProfessionName(p, localeCode))
         .toList();
+  }
+
+  String _resolvedBookingMode() {
+    final viewed = widget.viewedProfession?.trim().toLowerCase();
+    if (viewed != null && viewed.isNotEmpty) {
+      return normalizeBookingMode(_professionBookingModes[viewed]);
+    }
+
+    for (final profession in _userProfessions) {
+      final key = profession.trim().toLowerCase();
+      if (key.isEmpty) continue;
+      final mode = _professionBookingModes[key];
+      if (mode != null) return normalizeBookingMode(mode);
+    }
+
+    return bookingModeProviderTravels;
   }
 
   String _weekKey(DateTime date) {
@@ -1539,7 +1562,12 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
         _buildProjectsGrid(strings),
         _buildReviewsList(strings, localeCode),
         if (_shouldShowPublicScheduleSection)
-          SchedulePage(workerId: currentUserId, workerName: _userName),
+          SchedulePage(
+            workerId: currentUserId,
+            workerName: _userName,
+            bookingMode: _resolvedBookingMode(),
+            professionName: widget.viewedProfession,
+          ),
         _buildAboutSection(strings),
       ];
       return views;
@@ -2859,10 +2887,8 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
               'חדש את מנוי ה-Pro כדי להחזיר את כלי העסק, החשיפה והגישה המלאה לפרופיל המקצועי שלך.',
           'subscription_feature_1':
               'החזרת גישה לאנליטיקה, חשבוניות וכלי עבודה מתקדמים',
-          'subscription_feature_2':
-              'הצגת לוח זמנים ופרטי יצירת קשר ללקוחות',
-          'subscription_feature_3':
-              'שמירה על פרופיל מקצועי פעיל וזמין ללקוחות',
+          'subscription_feature_2': 'הצגת לוח זמנים ופרטי יצירת קשר ללקוחות',
+          'subscription_feature_3': 'שמירה על פרופיל מקצועי פעיל וזמין ללקוחות',
           'subscription_required_title': 'הפעלת מנוי מקצועי',
           'subscription_required_message':
               'חשבון בעל המקצוע שלך מוכן. כדי להשתמש בכל הכלים המקצועיים כמו אנליטיקה, חשבוניות וכלי עסק מתקדמים, יש להפעיל מנוי מקצועי.',
@@ -2914,8 +2940,7 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
               'جدّد اشتراك Pro لاستعادة أدوات العمل والظهور والوصول الكامل إلى ملفك المهني.',
           'subscription_feature_1':
               'استعادة الوصول إلى التحليلات والفواتير وأدوات العمل المتقدمة',
-          'subscription_feature_2':
-              'إظهار الجدول ووسائل التواصل للعملاء',
+          'subscription_feature_2': 'إظهار الجدول ووسائل التواصل للعملاء',
           'subscription_feature_3':
               'الحفاظ على ملفك المهني نشطاً ومتوفراً للعملاء',
           'subscription_required_title': 'تفعيل الاشتراك المهني',

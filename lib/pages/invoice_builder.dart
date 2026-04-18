@@ -15,6 +15,7 @@ import 'package:untitled1/services/subscription_access_service.dart';
 import 'package:untitled1/widgets/tour_tip_dialog.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import 'package:untitled1/services/bkmv_export_service.dart';
 
 class _SavedInvoiceResult {
   final String url;
@@ -119,58 +120,25 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     required String fromDate, // format: YYYYMMDD
     required String toDate, // format: YYYYMMDD
   }) async {
-    final bucketNames = ['invoices', 'receipts', 'credit_notes'];
-    final snapshots = await Future.wait(
-      bucketNames.map(
-        (bucket) => FirebaseFirestore.instance
-            .collection('logs')
-            .doc(bucket)
-            .collection('files')
-            .where('userId', isEqualTo: userId)
-            .where('date', isGreaterThanOrEqualTo: fromDate)
-            .where('date', isLessThanOrEqualTo: toDate)
-            .orderBy('date')
-            .orderBy('timestamp')
-            .get(),
-      ),
-    );
-
-    final allDocs = snapshots.expand((snap) => snap.docs).toList()
-      ..sort((a, b) {
-        final aData = a.data();
-        final bData = b.data();
-        final dateCompare =
-            (aData['date'] ?? '').toString().compareTo((bData['date'] ?? '').toString());
-        if (dateCompare != 0) return dateCompare;
-        final aTs = aData['timestamp'] as Timestamp?;
-        final bTs = bData['timestamp'] as Timestamp?;
-        if (aTs == null && bTs == null) return 0;
-        if (aTs == null) return -1;
-        if (bTs == null) return 1;
-        return aTs.compareTo(bTs);
-      });
-
-    final lines = <String>[];
-    for (final doc in allDocs) {
-      final data = doc.data();
-      final type = data['type'] ?? '';
-      final documentNumber = data['documentNumber']?.toString() ?? '';
-      final date = data['date'] ?? '';
-      final amount = (data['amount'] ?? 0).toStringAsFixed(2);
-      final vatAmount = (data['vatAmount'] ?? 0).toStringAsFixed(2);
-      final customerId = data['customerId'] ?? '';
-      lines.add('$type|$documentNumber|$date|$amount|$vatAmount|$customerId');
-    }
-
-    // Write to BKMVDATA.TXT in app's documents directory
     final dir = await getApplicationDocumentsDirectory();
-    final file = File('${dir.path}/BKMVDATA.TXT');
-    await file.writeAsString(lines.join('\n'));
-    // Optionally, show a snackbar or share the file
+    final exportRoot = Directory('${dir.path}/BKMVDATA');
+    await exportRoot.create(recursive: true);
+    final result = await BkmvExportService.exportForUser(
+      firestore: FirebaseFirestore.instance,
+      userId: userId,
+      fromDate: fromDate,
+      toDate: toDate,
+      rootDirectory: exportRoot,
+    );
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('BKMVDATA.TXT generated in documents folder.')),
-      );
+      final message = result.hasFiles
+          ? 'BKMVDATA files generated in ${result.packages.first.directory.path}'
+          : (result.warnings.isNotEmpty
+                ? result.warnings.join('\n')
+                : 'No BKMVDATA files were generated.');
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -187,7 +155,9 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
         : null;
     final docType = _selectedDocType;
     final creditNoteLegalData = _creditNoteLegalData;
-    final signedTotalAmount = docType == 'credit_note' ? -_totalAmount : _totalAmount;
+    final signedTotalAmount = docType == 'credit_note'
+        ? -_totalAmount
+        : _totalAmount;
     final vatAmount = (_dealerType == 'licensed' && docType != 'receipt')
         ? (docType == 'credit_note'
               ? -(_totalAmount - (_totalAmount / 1.17))
@@ -301,7 +271,8 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           'storagePath': '',
           'url': '',
           'timestamp': timestamp,
-          if (creditNoteLegalData != null) 'creditNoteLegal': creditNoteLegalData,
+          if (creditNoteLegalData != null)
+            'creditNoteLegal': creditNoteLegalData,
         };
         transaction.set(logFileRef, logData);
       }
@@ -412,7 +383,10 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
   double _signedItemTotal(InvoiceItem item) =>
       _isCreditNote ? -item.total : item.total;
 
-  String _creditDeliveryMethodLabel(Map<String, String> strings, String method) {
+  String _creditDeliveryMethodLabel(
+    Map<String, String> strings,
+    String method,
+  ) {
     switch (method) {
       case 'registered_mail':
         return strings['delivery_registered_mail']!;
@@ -429,13 +403,12 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
   Map<String, dynamic>? get _creditNoteLegalData {
     if (!_isCreditNote) return null;
     return {
-      'originalInvoiceNumber':
-          _creditOriginalInvoiceNumberController.text.trim(),
+      'originalInvoiceNumber': _creditOriginalInvoiceNumberController.text
+          .trim(),
       'originalInvoiceDate': _creditOriginalInvoiceDateController.text.trim(),
       'creditReason': _creditReasonController.text.trim(),
       'deliveryMethod': _selectedCreditDeliveryMethod,
-      'receiptConfirmation':
-          _creditReceiptConfirmationController.text.trim(),
+      'receiptConfirmation': _creditReceiptConfirmationController.text.trim(),
     };
   }
 
@@ -970,7 +943,8 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     if (!_isCreditNote) return true;
 
     final strings = _getLocalizedStrings(context, listen: false);
-    final missing = _creditOriginalInvoiceNumberController.text.trim().isEmpty ||
+    final missing =
+        _creditOriginalInvoiceNumberController.text.trim().isEmpty ||
         _creditOriginalInvoiceDateController.text.trim().isEmpty ||
         _creditReasonController.text.trim().isEmpty ||
         _creditReceiptConfirmationController.text.trim().isEmpty;
@@ -993,8 +967,9 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     );
 
     if (picked == null || !mounted) return;
-    _creditOriginalInvoiceDateController.text =
-        intl.DateFormat('dd/MM/yyyy').format(picked);
+    _creditOriginalInvoiceDateController.text = intl.DateFormat(
+      'dd/MM/yyyy',
+    ).format(picked);
   }
 
   Future<void> _openPreviewPage() async {
@@ -1140,7 +1115,8 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
         'amount': _signedTotalAmount,
         'invoiceNumber': _invoiceNumber,
         'createdAt': FieldValue.serverTimestamp(),
-        if (_creditNoteLegalData != null) 'creditNoteLegal': _creditNoteLegalData,
+        if (_creditNoteLegalData != null)
+          'creditNoteLegal': _creditNoteLegalData,
       });
 
       await _incrementInvoiceCounter();
@@ -1605,7 +1581,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                         ),
                       ],
                     ),
-                     pw.SizedBox(height: 28),
+                    pw.SizedBox(height: 28),
                     if (creditNoteLegalData != null) ...[
                       pw.Container(
                         width: double.infinity,
@@ -2057,18 +2033,21 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                               ),
                               const SizedBox(height: 12),
                               TextField(
-                                controller: _creditOriginalInvoiceDateController,
+                                controller:
+                                    _creditOriginalInvoiceDateController,
                                 readOnly: true,
                                 onTap: _pickCreditOriginalInvoiceDate,
-                                decoration: _inputStyle(
-                                  strings['original_invoice_date']!,
-                                  Icons.event_outlined,
-                                ).copyWith(
-                                  suffixIcon: TextButton(
-                                    onPressed: _pickCreditOriginalInvoiceDate,
-                                    child: Text(strings['pick_date']!),
-                                  ),
-                                ),
+                                decoration:
+                                    _inputStyle(
+                                      strings['original_invoice_date']!,
+                                      Icons.event_outlined,
+                                    ).copyWith(
+                                      suffixIcon: TextButton(
+                                        onPressed:
+                                            _pickCreditOriginalInvoiceDate,
+                                        child: Text(strings['pick_date']!),
+                                      ),
+                                    ),
                               ),
                               const SizedBox(height: 12),
                               TextField(

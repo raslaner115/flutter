@@ -11,6 +11,7 @@ import 'package:provider/provider.dart';
 import 'package:untitled1/map/location_picker.dart';
 import 'package:untitled1/pages/my_requests_page.dart';
 import 'package:untitled1/services/language_provider.dart';
+import 'package:untitled1/utils/booking_mode.dart';
 
 class SendRequestPage extends StatefulWidget {
   final String workerId;
@@ -20,6 +21,8 @@ class SendRequestPage extends StatefulWidget {
   final bool isQuoteRequest;
   final String? initialFrom;
   final String? initialTo;
+  final String bookingMode;
+  final String? professionName;
 
   const SendRequestPage({
     super.key,
@@ -30,6 +33,8 @@ class SendRequestPage extends StatefulWidget {
     this.isQuoteRequest = false,
     this.initialFrom,
     this.initialTo,
+    this.bookingMode = bookingModeProviderTravels,
+    this.professionName,
   });
 
   @override
@@ -49,6 +54,11 @@ class _SendRequestPageState extends State<SendRequestPage> {
   String? _locationSelectionMode;
   bool _isLoading = false;
   bool _isLocating = false;
+
+  String get _normalizedBookingMode => normalizeBookingMode(widget.bookingMode);
+  bool get _customerTravels =>
+      _normalizedBookingMode == bookingModeCustomerTravels;
+  bool get _onlineOnly => _normalizedBookingMode == bookingModeOnline;
 
   @override
   void initState() {
@@ -77,7 +87,7 @@ class _SendRequestPageState extends State<SendRequestPage> {
       _fromTime = const TimeOfDay(hour: 8, minute: 0);
       _toTime = const TimeOfDay(hour: 16, minute: 0);
     }
-    if (!widget.isQuoteRequest) {
+    if (!widget.isQuoteRequest && !_customerTravels && !_onlineOnly) {
       _fetchLocation();
     }
   }
@@ -150,27 +160,50 @@ class _SendRequestPageState extends State<SendRequestPage> {
   }
 
   Map<String, String> _getLocalizedStrings(BuildContext context) {
-    final locale =
-        Provider.of<LanguageProvider>(context, listen: false)
-            .locale
-            .languageCode;
+    final locale = Provider.of<LanguageProvider>(
+      context,
+      listen: false,
+    ).locale.languageCode;
     switch (locale) {
       case 'he':
         return {
           'title': 'שליחת בקשת עבודה',
-          'subtitle':
-              'מלא כמה פרטים כדי שהעובד יוכל להבין את העבודה ולהגיב מהר יותר.',
+          'subtitle': _onlineOnly
+              ? 'מלא כמה פרטים כדי לקבוע פגישה אונליין ברורה ומהירה.'
+              : _customerTravels
+              ? 'מלא כמה פרטים כדי לקבוע תור ברור ומהיר אצל בעל המקצוע.'
+              : 'מלא כמה פרטים כדי שהעובד יוכל להבין את העבודה ולהגיב מהר יותר.',
           'worker': 'בעל מקצוע:',
+          'profession': 'מקצוע',
           'date': 'תאריך:',
           'request_type': 'סוג בקשה',
           'my_requests': 'הבקשות שלי',
-          'extra_hours': 'שעות נוספות',
-          'regular_request': 'בקשת עבודה רגילה',
+          'extra_hours': _onlineOnly
+              ? 'שעות פגישה נוספות'
+              : _customerTravels
+              ? 'שעות תור נוספות'
+              : 'שעות נוספות',
+          'regular_request': _onlineOnly
+              ? 'קביעת פגישה אונליין'
+              : _customerTravels
+              ? 'קביעת תור'
+              : 'בקשת עבודה רגילה',
           'quote_request': 'בקשה לתן הצעת מחיר',
-          'desc_label': 'תיאור העבודה',
-          'desc_hint': 'תאר את העבודה שאתה צריך...',
-          'desc_helper':
-              'כדאי לציין מה צריך לבצע, מיקום, גודל עבודה ודגשים חשובים.',
+          'desc_label': _onlineOnly
+              ? 'פרטי הפגישה'
+              : _customerTravels
+              ? 'פרטי התור'
+              : 'תיאור העבודה',
+          'desc_hint': _onlineOnly
+              ? 'תאר מה אתה צריך ומה תרצה לכסות בפגישה האונליין...'
+              : _customerTravels
+              ? 'תאר מה אתה צריך ולמה אתה מגיע...'
+              : 'תאר את העבודה שאתה צריך...',
+          'desc_helper': _onlineOnly
+              ? 'כדאי לציין מה צריך לבצע, מטרת הפגישה, וכל פרט שיעזור להתכונן אונליין.'
+              : _customerTravels
+              ? 'כדאי לציין מה צריך לבצע, מה חשוב לביקור, וכל פרט שיעזור להכין את התור.'
+              : 'כדאי לציין מה צריך לבצע, מיקום, גודל עבודה ודגשים חשובים.',
           'desc_quick_help': 'עזרה מהירה לכתיבת תיאור',
           'desc_quick_help_subtitle':
               'בחר התחלה מהירה כדי למלא תיאור ברור ומדויק יותר.',
@@ -187,15 +220,26 @@ class _SendRequestPageState extends State<SendRequestPage> {
           'images_helper': 'הוסף תמונות כדי להסביר טוב יותר את העבודה.',
           'add_images': 'הוסף תמונות',
           'photos_count': 'תמונות',
-          'location': 'מיקום GPS',
+          'location': _onlineOnly
+              ? 'סוג הפגישה'
+              : _customerTravels
+              ? 'מיקום הפגישה'
+              : 'מיקום GPS',
           'loc_found': 'המיקום נמצא',
           'loc_not_found': 'מחפש מיקום...',
-            'loc_current_selected': 'נבחר המיקום הנוכחי שלך',
-            'loc_map_selected': 'נבחר מיקום מהמפה',
-          'location_helper':
-              'המיקום יתווסף לבקשה כדי לעזור לעובד להבין היכן העבודה.',
-            'use_current_location': 'השתמש במיקום נוכחי',
-            'choose_from_map': 'בחר מהמפה',
+          'loc_current_selected': 'נבחר המיקום הנוכחי שלך',
+          'loc_map_selected': 'נבחר מיקום מהמפה',
+          'location_helper': _onlineOnly
+              ? 'הפגישה תתקיים אונליין, לכן אין צורך לצרף מיקום.'
+              : _customerTravels
+              ? 'התור ייקבע אצל בעל המקצוע. אין צורך לצרף את המיקום שלך.'
+              : 'המיקום יתווסף לבקשה כדי לעזור לעובד להבין היכן העבודה.',
+          'appointment_place_helper':
+              'הבקשה תישלח כתור אצל בעל המקצוע, לפי המיקום שמופיע בפרופיל שלו.',
+          'online_place_helper':
+              'הבקשה תישלח כפגישה אונליין. אפשר לשתף קישור או פרטי התחברות בהמשך בצ׳אט.',
+          'use_current_location': 'השתמש במיקום נוכחי',
+          'choose_from_map': 'בחר מהמפה',
           'from': 'מ-',
           'to': 'עד',
           'time_window': 'שעות עבודה',
@@ -208,27 +252,57 @@ class _SendRequestPageState extends State<SendRequestPage> {
           'error': 'שליחת הבקשה נכשלה',
           'invalid_time_range': 'שעת הסיום חייבת להיות אחרי שעת ההתחלה.',
           'refresh_location': 'רענן מיקום',
-          'ready_to_send':
-              'הבקשה תישלח בצירוף תיאור, שעות, תמונות ומיקום אם זמינים.',
-          'chat_request_msg': 'שלחתי לך בקשת עבודה לתאריך: ',
+          'ready_to_send': _onlineOnly
+              ? 'הבקשה תישלח כפגישת אונליין עם תיאור, שעות ותמונות אם יש.'
+              : _customerTravels
+              ? 'הבקשה תישלח כתיאום תור עם תיאור, שעות ותמונות אם יש.'
+              : 'הבקשה תישלח בצירוף תיאור, שעות, תמונות ומיקום אם זמינים.',
+          'chat_request_msg': _onlineOnly
+              ? 'שלחתי לך בקשת פגישת אונליין לתאריך: '
+              : _customerTravels
+              ? 'שלחתי לך בקשת תור לתאריך: '
+              : 'שלחתי לך בקשת עבודה לתאריך: ',
           'error_not_found': 'שגיאה: משתמש לא נמצא',
         };
       case 'ar':
         return {
           'title': 'إرسال طلب عمل',
-          'subtitle':
-              'أضف بعض التفاصيل حتى يفهم العامل الطلب ويرد بشكل أسرع.',
+          'subtitle': _onlineOnly
+              ? 'أضف بعض التفاصيل لحجز جلسة أونلاين واضحة وسريعة.'
+              : _customerTravels
+              ? 'أضف بعض التفاصيل لحجز موعد واضح وسريع عند المحترف.'
+              : 'أضف بعض التفاصيل حتى يفهم العامل الطلب ويرد بشكل أسرع.',
           'worker': 'المحترف:',
+          'profession': 'المهنة',
           'date': 'التاريخ:',
           'request_type': 'نوع الطلب',
           'my_requests': 'طلباتي',
-          'extra_hours': 'ساعات إضافية',
-          'regular_request': 'طلب عمل عادي',
+          'extra_hours': _onlineOnly
+              ? 'ساعات جلسة إضافية'
+              : _customerTravels
+              ? 'ساعات موعد إضافية'
+              : 'ساعات إضافية',
+          'regular_request': _onlineOnly
+              ? 'حجز جلسة أونلاين'
+              : _customerTravels
+              ? 'حجز موعد'
+              : 'طلب عمل عادي',
           'quote_request': 'طلب تقديم عرض سعر',
-          'desc_label': 'وصف العمل',
-          'desc_hint': 'صف العمل الذي تحتاجه...',
-          'desc_helper':
-              'اذكر المطلوب والموقع وحجم العمل وأي تفاصيل مهمة.',
+          'desc_label': _onlineOnly
+              ? 'تفاصيل الجلسة'
+              : _customerTravels
+              ? 'تفاصيل الموعد'
+              : 'وصف العمل',
+          'desc_hint': _onlineOnly
+              ? 'اشرح ما تحتاجه وما الذي تريد تغطيته في الجلسة الأونلاين...'
+              : _customerTravels
+              ? 'اشرح ما تحتاجه ولماذا ستزور المحترف...'
+              : 'صف العمل الذي تحتاجه...',
+          'desc_helper': _onlineOnly
+              ? 'اذكر المطلوب وهدف الجلسة وأي تفاصيل تساعد على التحضير للجلسة أونلاين.'
+              : _customerTravels
+              ? 'اذكر المطلوب وأي تفاصيل تساعد المحترف على تجهيز الموعد.'
+              : 'اذكر المطلوب والموقع وحجم العمل وأي تفاصيل مهمة.',
           'desc_quick_help': 'مساعدة سريعة لكتابة الوصف',
           'desc_quick_help_subtitle':
               'اختر بداية سريعة لكتابة وصف أوضح وأكثر دقة.',
@@ -245,15 +319,26 @@ class _SendRequestPageState extends State<SendRequestPage> {
           'images_helper': 'أضف صورًا لتوضيح العمل بشكل أفضل.',
           'add_images': 'إضافة صور',
           'photos_count': 'صور',
-          'location': 'موقع GPS',
+          'location': _onlineOnly
+              ? 'نوع الجلسة'
+              : _customerTravels
+              ? 'مكان الموعد'
+              : 'موقع GPS',
           'loc_found': 'تم العثور على الموقع',
           'loc_not_found': 'جاري البحث عن الموقع...',
-            'loc_current_selected': 'تم اختيار موقعك الحالي',
-            'loc_map_selected': 'تم اختيار موقع من الخريطة',
-          'location_helper':
-              'سيتم إرفاق الموقع بالطلب لمساعدة العامل على فهم مكان العمل.',
-            'use_current_location': 'استخدم موقعي الحالي',
-            'choose_from_map': 'اختر من الخريطة',
+          'loc_current_selected': 'تم اختيار موقعك الحالي',
+          'loc_map_selected': 'تم اختيار موقع من الخريطة',
+          'location_helper': _onlineOnly
+              ? 'ستتم الجلسة عبر الإنترنت، لذلك لا حاجة لإرفاق موقعك.'
+              : _customerTravels
+              ? 'سيتم حجز الموعد لدى المحترف، لذلك لا حاجة لإرفاق موقعك.'
+              : 'سيتم إرفاق الموقع بالطلب لمساعدة العامل على فهم مكان العمل.',
+          'appointment_place_helper':
+              'سيتم إرسال الطلب كموعد لدى المحترف حسب الموقع الظاهر في ملفه.',
+          'online_place_helper':
+              'سيتم إرسال الطلب كجلسة أونلاين. يمكن مشاركة رابط الاجتماع أو تفاصيل الدخول لاحقًا في الدردشة.',
+          'use_current_location': 'استخدم موقعي الحالي',
+          'choose_from_map': 'اختر من الخريطة',
           'from': 'من',
           'to': 'إلى',
           'time_window': 'ساعات العمل',
@@ -266,27 +351,57 @@ class _SendRequestPageState extends State<SendRequestPage> {
           'error': 'فشل إرسال الطلب',
           'invalid_time_range': 'يجب أن يكون وقت الانتهاء بعد وقت البدء.',
           'refresh_location': 'تحديث الموقع',
-          'ready_to_send':
-              'سيتم إرسال الطلب مع الوصف والساعات والصور والموقع إذا كان متاحًا.',
-          'chat_request_msg': 'لقد أرسلت لك طلب عمل بتاريخ: ',
+          'ready_to_send': _onlineOnly
+              ? 'سيتم إرسال الطلب كجلسة أونلاين مع الوصف والساعات والصور إن وُجدت.'
+              : _customerTravels
+              ? 'سيتم إرسال الطلب كحجز موعد مع الوصف والساعات والصور إن وُجدت.'
+              : 'سيتم إرسال الطلب مع الوصف والساعات والصور والموقع إذا كان متاحًا.',
+          'chat_request_msg': _onlineOnly
+              ? 'لقد أرسلت لك طلب جلسة أونلاين بتاريخ: '
+              : _customerTravels
+              ? 'لقد أرسلت لك طلب موعد بتاريخ: '
+              : 'لقد أرسلت لك طلب عمل بتاريخ: ',
           'error_not_found': 'خطأ: المستخدم غير موجود',
         };
       default:
         return {
           'title': 'Send Work Request',
-          'subtitle':
-              'Add a few details so the worker can understand the job and reply faster.',
+          'subtitle': _onlineOnly
+              ? 'Add a few details to book a clear online session.'
+              : _customerTravels
+              ? 'Add a few details to book a clear appointment at the professional location.'
+              : 'Add a few details so the worker can understand the job and reply faster.',
           'worker': 'Professional:',
+          'profession': 'Profession',
           'date': 'Date:',
           'request_type': 'Request Type',
           'my_requests': 'My Requests',
-          'extra_hours': 'Extra Hours',
-          'regular_request': 'Standard Work Request',
+          'extra_hours': _onlineOnly
+              ? 'Extra Session Hours'
+              : _customerTravels
+              ? 'Extra Appointment Hours'
+              : 'Extra Hours',
+          'regular_request': _onlineOnly
+              ? 'Book Online Session'
+              : _customerTravels
+              ? 'Book Appointment'
+              : 'Standard Work Request',
           'quote_request': 'Request a Quote',
-          'desc_label': 'Job Description',
-          'desc_hint': 'Describe the job you need...',
-          'desc_helper':
-              'Include what needs to be done, the location, scope, and anything important.',
+          'desc_label': _onlineOnly
+              ? 'Session Details'
+              : _customerTravels
+              ? 'Appointment Details'
+              : 'Job Description',
+          'desc_hint': _onlineOnly
+              ? 'Describe what you need and what you want to cover in the online session...'
+              : _customerTravels
+              ? 'Describe what you need and what the visit is for...'
+              : 'Describe the job you need...',
+          'desc_helper': _onlineOnly
+              ? 'Include what you need, the goal of the session, and anything helpful for preparing online.'
+              : _customerTravels
+              ? 'Include what you need, what the visit is for, and anything helpful for preparing the appointment.'
+              : 'Include what needs to be done, the location, scope, and anything important.',
           'desc_quick_help': 'Quick description help',
           'desc_quick_help_subtitle':
               'Choose a quick start to write a clearer, more useful work description.',
@@ -300,18 +415,30 @@ class _SendRequestPageState extends State<SendRequestPage> {
           'desc_template_quote_text':
               'I would like a quote for:\n- What needs to be done:\n- Job size / quantity:\n- Address or area:\n- Photos or important details:\n- Best way / time to get back to me:',
           'images': 'Images (Optional)',
-          'images_helper': 'Add photos to make the request easier to understand.',
+          'images_helper':
+              'Add photos to make the request easier to understand.',
           'add_images': 'Add Images',
           'photos_count': 'Photos',
-          'location': 'GPS Location',
+          'location': _onlineOnly
+              ? 'Session Type'
+              : _customerTravels
+              ? 'Appointment Location'
+              : 'GPS Location',
           'loc_found': 'Location found',
           'loc_not_found': 'Locating...',
-            'loc_current_selected': 'Using your current location',
-            'loc_map_selected': 'Using a map-selected location',
-          'location_helper':
-              'Your location will be attached to help the worker understand where the job is.',
-            'use_current_location': 'Use current location',
-            'choose_from_map': 'Choose from map',
+          'loc_current_selected': 'Using your current location',
+          'loc_map_selected': 'Using a map-selected location',
+          'location_helper': _onlineOnly
+              ? 'This session is online, so your location is not needed.'
+              : _customerTravels
+              ? 'This appointment is at the professional location, so your location is not needed.'
+              : 'Your location will be attached to help the worker understand where the job is.',
+          'appointment_place_helper':
+              'The request will be sent as an appointment at the professional location shown on their profile.',
+          'online_place_helper':
+              'The request will be sent as an online session. You can share a meeting link or access details later in chat.',
+          'use_current_location': 'Use current location',
+          'choose_from_map': 'Choose from map',
           'from': 'From',
           'to': 'To',
           'time_window': 'Time Window',
@@ -324,9 +451,16 @@ class _SendRequestPageState extends State<SendRequestPage> {
           'error': 'Failed to send request',
           'invalid_time_range': 'End time must be after start time.',
           'refresh_location': 'Refresh location',
-          'ready_to_send':
-              'The request will include description, hours, images, and location when available.',
-          'chat_request_msg': 'I sent you a work request for: ',
+          'ready_to_send': _onlineOnly
+              ? 'The request will be sent as an online session with details, hours, and images when available.'
+              : _customerTravels
+              ? 'The request will be sent as an appointment with details, hours, and images when available.'
+              : 'The request will include description, hours, images, and location when available.',
+          'chat_request_msg': _onlineOnly
+              ? 'I sent you an online session request for: '
+              : _customerTravels
+              ? 'I sent you an appointment request for: '
+              : 'I sent you a work request for: ',
           'error_not_found': 'Error: User not found',
         };
     }
@@ -373,9 +507,9 @@ class _SendRequestPageState extends State<SendRequestPage> {
 
     final strings = _getLocalizedStrings(context);
     if (!widget.isQuoteRequest && !_hasValidTimeRange()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(strings['invalid_time_range']!)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(strings['invalid_time_range']!)));
       return;
     }
 
@@ -396,13 +530,15 @@ class _SendRequestPageState extends State<SendRequestPage> {
         imageUrls.add(await ref.getDownloadURL());
       }
 
-      final userDoc =
-          await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
       if (!userDoc.exists) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(strings['error_not_found']!)),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(strings['error_not_found']!)));
         }
         return;
       }
@@ -416,32 +552,64 @@ class _SendRequestPageState extends State<SendRequestPage> {
           .get();
       if (!workerDoc.exists) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(strings['error_not_found']!)),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(strings['error_not_found']!)));
         }
         return;
       }
       final workerData = workerDoc.data();
       final workerFcmToken = workerData?['fcmToken'] as String?;
 
-        final fStr = !widget.isQuoteRequest && _fromTime != null
+      final fStr = !widget.isQuoteRequest && _fromTime != null
           ? '${_fromTime!.hour.toString().padLeft(2, '0')}:${_fromTime!.minute.toString().padLeft(2, '0')}'
           : null;
-        final tStr = !widget.isQuoteRequest && _toTime != null
+      final tStr = !widget.isQuoteRequest && _toTime != null
           ? '${_toTime!.hour.toString().padLeft(2, '0')}:${_toTime!.minute.toString().padLeft(2, '0')}'
           : null;
 
-        final notifTitle = widget.isQuoteRequest
+      final professionLabel = widget.professionName?.trim();
+      final workerLocationName =
+          (workerData?['town'] ?? workerData?['address'] ?? '')
+              .toString()
+              .trim();
+      final locationName = widget.isQuoteRequest
+          ? null
+          : _onlineOnly
+          ? 'online'
+          : _customerTravels
+          ? (workerLocationName.isEmpty
+                ? widget.workerName
+                : workerLocationName)
+          : userTown?.toString().trim();
+      final serviceLocationType = _onlineOnly
+          ? bookingModeOnline
+          : _customerTravels
+          ? bookingModeCustomerTravels
+          : bookingModeProviderTravels;
+
+      final notifTitle = widget.isQuoteRequest
           ? 'Quote Request'
+          : _onlineOnly
+          ? 'Online Session Request'
+          : _customerTravels
+          ? 'Appointment Request'
           : widget.isExtraHours
-            ? 'Extra Hours Request'
-            : 'Work Request';
-        final notifBody = widget.isQuoteRequest
+          ? 'Extra Hours Request'
+          : 'Work Request';
+      final notifBody = widget.isQuoteRequest
           ? '$userName ($userTown) requested a quote.'
+          : _onlineOnly
+          ? (widget.isExtraHours
+                ? '$userName requested an online session on $dStr from $fStr to $tStr.'
+                : '$userName requested an online session on $dStr.')
+          : _customerTravels
+          ? (widget.isExtraHours
+                ? '$userName requested an appointment on $dStr from $fStr to $tStr.'
+                : '$userName requested an appointment on $dStr.')
           : !widget.isExtraHours
-            ? '$userName ($userTown) requested you to work on $dStr.'
-            : '$userName ($userTown) requested you to work on $dStr from $fStr to $tStr.';
+          ? '$userName ($userTown) requested you to work on $dStr.'
+          : '$userName ($userTown) requested you to work on $dStr from $fStr to $tStr.';
 
       final firestore = FirebaseFirestore.instance;
       final requestId = firestore
@@ -465,13 +633,20 @@ class _SendRequestPageState extends State<SendRequestPage> {
         'fromId': user.uid,
         'fromName': userName,
         'fromLocation': userTown,
+        'profession': professionLabel,
         'jobDescription': _descriptionController.text.trim(),
         'images': imageUrls,
-        'latitude': widget.isQuoteRequest ? null : _selectedLocation?.latitude,
-        'longitude': widget.isQuoteRequest ? null : _selectedLocation?.longitude,
+        'latitude': widget.isQuoteRequest || _customerTravels || _onlineOnly
+            ? null
+            : _selectedLocation?.latitude,
+        'longitude': widget.isQuoteRequest || _customerTravels || _onlineOnly
+            ? null
+            : _selectedLocation?.longitude,
         'date': widget.isQuoteRequest ? null : dStr,
         'requestedFrom': fStr,
         'requestedTo': tStr,
+        'locationName': locationName,
+        'serviceLocationType': serviceLocationType,
         'timestamp': FieldValue.serverTimestamp(),
         'status': 'pending',
         'title': notifTitle,
@@ -499,42 +674,42 @@ class _SendRequestPageState extends State<SendRequestPage> {
           .doc(chatRoomId)
           .collection('messages')
           .add({
-        'senderId': user.uid,
-        'receiverId': widget.workerId,
-        'message': chatMsg,
-        'timestamp': FieldValue.serverTimestamp(),
-        'isSystem': true,
-      });
+            'senderId': user.uid,
+            'receiverId': widget.workerId,
+            'message': chatMsg,
+            'timestamp': FieldValue.serverTimestamp(),
+            'isSystem': true,
+          });
 
-      await FirebaseFirestore.instance.collection('chat_rooms').doc(chatRoomId).set(
-        {
-          'lastMessage': chatMsg,
-          'lastTimestamp': FieldValue.serverTimestamp(),
-          'users': [user.uid, widget.workerId],
-          'userNames': {
-            user.uid: userName,
-            widget.workerId: widget.workerName,
-          },
-        },
-        SetOptions(merge: true),
-      );
+      await FirebaseFirestore.instance
+          .collection('chat_rooms')
+          .doc(chatRoomId)
+          .set({
+            'lastMessage': chatMsg,
+            'lastTimestamp': FieldValue.serverTimestamp(),
+            'users': [user.uid, widget.workerId],
+            'userNames': {
+              user.uid: userName,
+              widget.workerId: widget.workerName,
+            },
+          }, SetOptions(merge: true));
 
       if (workerFcmToken != null) {
         await _sendFCMNotification(workerFcmToken, notifTitle, notifBody);
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(strings['success']!)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(strings['success']!)));
         Navigator.pop(context, true);
       }
     } catch (e) {
       debugPrint('Submit error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(strings['error']!)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(strings['error']!)));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -561,9 +736,7 @@ class _SendRequestPageState extends State<SendRequestPage> {
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (_) => const MyRequestsPage(),
-                  ),
+                  MaterialPageRoute(builder: (_) => const MyRequestsPage()),
                 );
               },
             ),
@@ -610,9 +783,7 @@ class _SendRequestPageState extends State<SendRequestPage> {
                         children: [
                           _buildHeroCard(strings, theme),
                           const SizedBox(height: 16),
-                          _buildSectionCard(
-                            child: _buildInfoSection(strings),
-                          ),
+                          _buildSectionCard(child: _buildInfoSection(strings)),
                           const SizedBox(height: 16),
                           _buildSectionCard(
                             child: _buildDescriptionSection(strings),
@@ -624,9 +795,7 @@ class _SendRequestPageState extends State<SendRequestPage> {
                             ),
                           ],
                           const SizedBox(height: 16),
-                          _buildSectionCard(
-                            child: _buildImageSection(strings),
-                          ),
+                          _buildSectionCard(child: _buildImageSection(strings)),
                           if (!widget.isQuoteRequest) ...[
                             const SizedBox(height: 16),
                             _buildSectionCard(
@@ -756,11 +925,17 @@ class _SendRequestPageState extends State<SendRequestPage> {
               _buildHeroChip(
                 Icons.schedule_send_rounded,
                 widget.isQuoteRequest
-                  ? strings['quote_request']!
-                  : widget.isExtraHours
+                    ? strings['quote_request']!
+                    : widget.isExtraHours
                     ? strings['extra_hours']!
                     : strings['regular_request']!,
               ),
+              if (widget.professionName != null &&
+                  widget.professionName!.trim().isNotEmpty)
+                _buildHeroChip(
+                  Icons.work_outline_rounded,
+                  widget.professionName!.trim(),
+                ),
             ],
           ),
         ],
@@ -889,11 +1064,18 @@ class _SendRequestPageState extends State<SendRequestPage> {
               icon: Icons.bolt_rounded,
               label: strings['request_type']!,
               value: widget.isQuoteRequest
-                ? strings['quote_request']!
-                : widget.isExtraHours
+                  ? strings['quote_request']!
+                  : widget.isExtraHours
                   ? strings['extra_hours']!
                   : strings['regular_request']!,
             ),
+            if (widget.professionName != null &&
+                widget.professionName!.trim().isNotEmpty)
+              _buildInfoTile(
+                icon: Icons.work_outline_rounded,
+                label: strings['profession']!,
+                value: widget.professionName!.trim(),
+              ),
           ],
         ),
       ],
@@ -987,7 +1169,10 @@ class _SendRequestPageState extends State<SendRequestPage> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(18),
-              borderSide: const BorderSide(color: Color(0xFF0A7E8C), width: 1.3),
+              borderSide: const BorderSide(
+                color: Color(0xFF0A7E8C),
+                width: 1.3,
+              ),
             ),
           ),
           validator: (value) =>
@@ -1202,6 +1387,106 @@ class _SendRequestPageState extends State<SendRequestPage> {
   }
 
   Widget _buildLocationCard(Map<String, String> strings) {
+    if (_onlineOnly) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            icon: Icons.videocam_outlined,
+            title: strings['location']!,
+            subtitle: strings['online_place_helper'],
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEEF2FF),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFC7D2FE)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.video_call_outlined,
+                    color: Color(0xFF4F46E5),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    strings['online_place_helper']!,
+                    style: const TextStyle(
+                      color: Color(0xFF475569),
+                      height: 1.4,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (_customerTravels) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            icon: Icons.storefront_outlined,
+            title: strings['location']!,
+            subtitle: strings['appointment_place_helper'],
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFF6FF),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFBFDBFE)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.store_mall_directory_outlined,
+                    color: Color(0xFF2563EB),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    strings['appointment_place_helper']!,
+                    style: const TextStyle(
+                      color: Color(0xFF475569),
+                      height: 1.4,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
     final hasLocation = _selectedLocation != null;
     final isMapLocation = _locationSelectionMode == 'map';
     final statusColor = hasLocation
@@ -1219,7 +1504,9 @@ class _SendRequestPageState extends State<SendRequestPage> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: hasLocation ? const Color(0xFFEAF8EF) : const Color(0xFFFFF7E8),
+            color: hasLocation
+                ? const Color(0xFFEAF8EF)
+                : const Color(0xFFFFF7E8),
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
               color: hasLocation
@@ -1243,8 +1530,8 @@ class _SendRequestPageState extends State<SendRequestPage> {
                     child: Icon(
                       hasLocation
                           ? isMapLocation
-                              ? Icons.map_rounded
-                              : Icons.my_location_rounded
+                                ? Icons.map_rounded
+                                : Icons.my_location_rounded
                           : Icons.location_searching_rounded,
                       color: hasLocation
                           ? const Color(0xFF2D8F5B)
@@ -1259,8 +1546,8 @@ class _SendRequestPageState extends State<SendRequestPage> {
                         Text(
                           hasLocation
                               ? isMapLocation
-                                  ? strings['loc_map_selected']!
-                                  : strings['loc_current_selected']!
+                                    ? strings['loc_map_selected']!
+                                    : strings['loc_current_selected']!
                               : strings['loc_not_found']!,
                           style: TextStyle(
                             fontWeight: FontWeight.w800,

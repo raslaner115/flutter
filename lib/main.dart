@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -34,76 +35,16 @@ void main() async {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
-  bool firebaseInitialized = false;
-  Object? initializationError;
-
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-
-    try {
-      await FirebaseAppCheck.instance.activate(
-        androidProvider: kDebugMode
-            ? AndroidProvider.debug
-            : AndroidProvider.playIntegrity,
-        appleProvider: kDebugMode
-            ? AppleProvider.debug
-            : AppleProvider.appAttestWithDeviceCheckFallback,
-      );
-    } catch (e) {
-      debugPrint('App Check activation warning: $e');
-    }
-
-    if (!kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        kDebugMode) {
-      // In local Android debug builds, prefer the reCAPTCHA fallback instead of
-      // Play-services verification. This avoids DEVELOPER_ERROR when the
-      // current debug keystore fingerprint is not yet registered in Firebase.
-      await FirebaseAuth.instance.setSettings(forceRecaptchaFlow: true);
-    }
-
-    FirebaseFirestore.instance.settings = const Settings(
-      persistenceEnabled: true,
-      cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
-    );
-
-    await NotificationService.init().timeout(
-      const Duration(seconds: 5),
-      onTimeout: () => debugPrint("Notification initialization timed out"),
-    );
-    await AnalyticsService.logAppOpen();
-    firebaseInitialized = true;
-  } catch (e, stack) {
-    initializationError = e;
-    debugPrint("FATAL: Firebase initialization failed: $e");
-    debugPrint(stack.toString());
-  }
-
   runApp(
     ChangeNotifierProvider(
       create: (context) => LanguageProvider(),
-      child: MyApp(
-        isFirebaseInitialized: firebaseInitialized,
-        initializationError: initializationError,
-      ),
+      child: const MyApp(),
     ),
   );
-
-  // Native splash is removed once the Flutter app is ready to take over.
-  FlutterNativeSplash.remove();
 }
 
 class MyApp extends StatefulWidget {
-  final bool isFirebaseInitialized;
-  final Object? initializationError;
-
-  const MyApp({
-    super.key,
-    required this.isFirebaseInitialized,
-    this.initializationError,
-  });
+  const MyApp({super.key});
 
   @override
   State<MyApp> createState() => _MyAppState();
@@ -111,24 +52,118 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  bool _isInitializing = true;
+  bool _isFirebaseInitialized = false;
+  Object? _initializationError;
+
+  StreamSubscription<String?>? _notificationTapSubscription;
 
   @override
   void initState() {
     super.initState();
-    if (widget.isFirebaseInitialized) {
-      NotificationService.selectNotificationStream.stream.listen((
-        String? payload,
-      ) {
-        if (payload != null && payload.isNotEmpty) {
-          try {
-            final data = jsonDecode(payload);
-            _handleDeepLink(data);
-          } catch (e) {
-            debugPrint("Error parsing notification payload: $e");
-          }
+    _initializeApp();
+  }
+
+  @override
+  void dispose() {
+    _notificationTapSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _initializeApp() async {
+    Object? initializationError;
+    var firebaseInitialized = false;
+    final isIos = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
+    try {
+      debugPrint('Startup: begin Firebase.initializeApp');
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      ).timeout(
+        const Duration(seconds: 12),
+        onTimeout: () {
+          throw Exception('Firebase.initializeApp timed out on startup.');
+        },
+      );
+      debugPrint('Startup: Firebase.initializeApp completed');
+
+      if (isIos) {
+        debugPrint(
+          'iOS diagnostic mode: skipping App Check and notification init during startup.',
+        );
+      } else {
+        try {
+          await FirebaseAppCheck.instance.activate(
+            androidProvider: kDebugMode
+                ? AndroidProvider.debug
+                : AndroidProvider.playIntegrity,
+            appleProvider: kDebugMode
+                ? AppleProvider.debug
+                : AppleProvider.appAttestWithDeviceCheckFallback,
+          );
+        } catch (e) {
+          debugPrint('App Check activation warning: $e');
         }
-      });
+      }
+
+      if (!kIsWeb &&
+          defaultTargetPlatform == TargetPlatform.android &&
+          kDebugMode) {
+        // In local Android debug builds, prefer the reCAPTCHA fallback instead
+        // of Play-services verification. This avoids DEVELOPER_ERROR when the
+        // current debug keystore fingerprint is not yet registered in Firebase.
+        await FirebaseAuth.instance.setSettings(forceRecaptchaFlow: true);
+      }
+
+      if (!isIos) {
+        FirebaseFirestore.instance.settings = const Settings(
+          persistenceEnabled: true,
+          cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+        );
+
+        await NotificationService.init().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => debugPrint("Notification initialization timed out"),
+        );
+        await AnalyticsService.logAppOpen();
+        _attachNotificationTapListener();
+      } else {
+        debugPrint(
+          'iOS diagnostic mode: skipping Firestore settings and analytics during startup.',
+        );
+      }
+      firebaseInitialized = true;
+    } catch (e, stack) {
+      initializationError = e;
+      debugPrint("FATAL: Firebase initialization failed: $e");
+      debugPrint(stack.toString());
+    } finally {
+      FlutterNativeSplash.remove();
     }
+
+    if (!mounted) return;
+    setState(() {
+      _isInitializing = false;
+      _isFirebaseInitialized = firebaseInitialized;
+      _initializationError = initializationError;
+    });
+  }
+
+  void _attachNotificationTapListener() {
+    _notificationTapSubscription?.cancel();
+    _notificationTapSubscription =
+        NotificationService.selectNotificationStream.stream.listen((
+          String? payload,
+        ) {
+          if (payload != null && payload.isNotEmpty) {
+            try {
+              final data = jsonDecode(payload);
+              _handleDeepLink(data);
+            } catch (e) {
+              debugPrint("Error parsing notification payload: $e");
+            }
+          }
+        });
   }
 
   void _handleDeepLink(Map<String, dynamic> data) {
@@ -172,9 +207,11 @@ class _MyAppState extends State<MyApp> {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1976D2)),
       ),
       navigatorObservers: [AnalyticsService.observer],
-      home: widget.isFirebaseInitialized
+      home: _isInitializing
+          ? const SplashScreen()
+          : _isFirebaseInitialized
           ? const AuthWrapper()
-          : _ErrorScreen(error: widget.initializationError),
+          : _ErrorScreen(error: _initializationError),
     );
   }
 }
@@ -195,7 +232,7 @@ class _ErrorScreen extends StatelessWidget {
               const Icon(Icons.error_outline, color: Colors.red, size: 60),
               const SizedBox(height: 16),
               const Text(
-                "Firebase Initialization Failed",
+                "Startup Failed",
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),

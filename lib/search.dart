@@ -8,6 +8,7 @@ import 'package:untitled1/services/location_context_service.dart';
 import 'package:untitled1/services/subscription_access_service.dart';
 import 'package:untitled1/ptofile.dart';
 import 'package:untitled1/pages/location_manager_page.dart';
+import 'package:untitled1/utils/booking_mode.dart';
 
 class SearchPage extends StatefulWidget {
   final String? initialTrade;
@@ -84,6 +85,18 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     return terms.toList();
+  }
+
+  bool _defaultFilterByRadiusForProfession(Map<String, dynamic>? profession) {
+    return normalizeBookingMode(profession?['bookingMode']?.toString()) ==
+        bookingModeProviderTravels;
+  }
+
+  String _defaultSortForProfession(Map<String, dynamic>? profession) {
+    return normalizeBookingMode(profession?['bookingMode']?.toString()) ==
+            bookingModeCustomerTravels
+        ? 'distance'
+        : 'rating';
   }
 
   void _onLocationPermissionGranted() {
@@ -195,6 +208,8 @@ class _SearchPageState extends State<SearchPage> {
           if (initial.isNotEmpty) {
             _selectedProfession = initial;
             _showWorkerList = true;
+            _filterByRadius = _defaultFilterByRadiusForProfession(initial);
+            _sortBy = _defaultSortForProfession(initial);
             _fetchWorkers(isRefresh: true);
             _trackSearch(initial['en']);
           }
@@ -289,12 +304,14 @@ class _SearchPageState extends State<SearchPage> {
             )
             .toList();
 
+        final enrichedWorkers = await _attachScheduleInfo(newWorkers);
+
         if (mounted && currentId == _fetchSessionId) {
           setState(() {
             if (isRefresh) {
-              _allWorkers = newWorkers;
+              _allWorkers = enrichedWorkers;
             } else {
-              _allWorkers.addAll(newWorkers);
+              _allWorkers.addAll(enrichedWorkers);
             }
             _applyFilters();
             _isLoadingWorkers = false;
@@ -319,6 +336,40 @@ class _SearchPageState extends State<SearchPage> {
         });
       }
     }
+  }
+
+  Future<List<Map<String, dynamic>>> _attachScheduleInfo(
+    List<Map<String, dynamic>> workers,
+  ) async {
+    if (workers.isEmpty) return workers;
+
+    final results = await Future.wait(
+      workers.map((worker) async {
+        final enriched = Map<String, dynamic>.from(worker);
+        final uid = (worker['uid'] ?? '').toString();
+        if (uid.isEmpty) return enriched;
+
+        try {
+          final scheduleDoc = await _firestore
+              .collection('users')
+              .doc(uid)
+              .collection('Schedule')
+              .doc('info')
+              .get();
+          final scheduleData = scheduleDoc.data();
+          if (scheduleData != null &&
+              scheduleData['defaultWorkingHours'] is Map) {
+            enriched['defaultWorkingHours'] = Map<String, dynamic>.from(
+              scheduleData['defaultWorkingHours'] as Map,
+            );
+          }
+        } catch (_) {}
+
+        return enriched;
+      }),
+    );
+
+    return results;
   }
 
   Future<void> _getCurrentLocation({bool silent = false}) async {
@@ -399,6 +450,37 @@ class _SearchPageState extends State<SearchPage> {
 
   double _distanceValueForWorker(Map<String, dynamic> worker) {
     return _localDistanceToWorker(worker);
+  }
+
+  int? _parseTimeStringToMinutes(String? value) {
+    final raw = (value ?? '').trim();
+    final parts = raw.split(':');
+    if (parts.length != 2) return null;
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null) return null;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+    return (hour * 60) + minute;
+  }
+
+  bool _isWorkerAvailableNow(Map<String, dynamic> worker) {
+    final hours = worker['defaultWorkingHours'];
+    if (hours is! Map) return false;
+
+    final fromMinutes = _parseTimeStringToMinutes(hours['from']?.toString());
+    final toMinutes = _parseTimeStringToMinutes(hours['to']?.toString());
+    if (fromMinutes == null || toMinutes == null) return false;
+
+    final now = DateTime.now();
+    final currentMinutes = (now.hour * 60) + now.minute;
+    return currentMinutes >= fromMinutes && currentMinutes < toMinutes;
+  }
+
+  bool _hasWorkingHours(Map<String, dynamic> worker) {
+    final hours = worker['defaultWorkingHours'];
+    if (hours is! Map) return false;
+    return _parseTimeStringToMinutes(hours['from']?.toString()) != null &&
+        _parseTimeStringToMinutes(hours['to']?.toString()) != null;
   }
 
   void _applyFilters() {
@@ -780,6 +862,8 @@ class _SearchPageState extends State<SearchPage> {
               setState(() {
                 _selectedProfession = p;
                 _showWorkerList = true;
+                _filterByRadius = _defaultFilterByRadiusForProfession(p);
+                _sortBy = _defaultSortForProfession(p);
                 _allWorkers = [];
                 _filteredWorkers = [];
                 _isLoadingWorkers = true;
@@ -949,6 +1033,8 @@ class _SearchPageState extends State<SearchPage> {
             final diff = DateTime.now().difference(createdAt.toDate());
             isNew = diff.inDays <= 7;
           }
+          final isAvailableNow = _isWorkerAvailableNow(w);
+          final hasWorkingHours = _hasWorkingHours(w);
 
           return Container(
             margin: const EdgeInsets.only(bottom: 16),
@@ -1059,6 +1145,34 @@ class _SearchPageState extends State<SearchPage> {
                           ],
                         ],
                       ),
+                      if (hasWorkingHours) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: (isAvailableNow ? Colors.green : Colors.red)
+                                .withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            locale == 'he'
+                                ? (isAvailableNow
+                                      ? 'זמין עכשיו'
+                                      : 'לא זמין עכשיו')
+                                : (isAvailableNow
+                                      ? 'Available now'
+                                      : 'Not available now'),
+                            style: TextStyle(
+                              color: isAvailableNow ? Colors.green : Colors.red,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
                       if (w['professions'] != null &&
                           (w['professions'] as List).isNotEmpty) ...[
                         const SizedBox(height: 4),

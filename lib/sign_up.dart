@@ -42,6 +42,7 @@ enum SignUpStep { profile, phone }
 enum UserType { normal, worker }
 
 class _SignUpPageState extends State<SignUpPage> {
+  static const List<int> _displayWeekdayOrder = [7, 1, 2, 3, 4, 5, 6];
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
   final _codeController = TextEditingController();
@@ -71,6 +72,10 @@ class _SignUpPageState extends State<SignUpPage> {
 
   LatLng? _workCenter;
   double _workRadius = 5000.0;
+  bool _hideSchedule = false;
+  List<int> _disabledDays = [];
+  TimeOfDay _workingHoursFrom = const TimeOfDay(hour: 8, minute: 0);
+  TimeOfDay _workingHoursTo = const TimeOfDay(hour: 16, minute: 0);
 
   @override
   void initState() {
@@ -92,6 +97,18 @@ class _SignUpPageState extends State<SignUpPage> {
           widget.pendingWorkerData!['optionalPhone'] ?? "";
       _descriptionController.text =
           widget.pendingWorkerData!['description'] ?? "";
+      _hideSchedule = widget.pendingWorkerData!['hideSchedule'] ?? false;
+      _disabledDays = List<int>.from(
+        widget.pendingWorkerData!['disabledDays'] ?? [],
+      );
+      _workingHoursFrom = _parseStoredTime(
+        widget.pendingWorkerData!['defaultWorkingHours']?['from']?.toString(),
+        fallback: const TimeOfDay(hour: 8, minute: 0),
+      );
+      _workingHoursTo = _parseStoredTime(
+        widget.pendingWorkerData!['defaultWorkingHours']?['to']?.toString(),
+        fallback: const TimeOfDay(hour: 16, minute: 0),
+      );
       _dateOfBirth = _parseDateOfBirth(
         widget.pendingWorkerData!['dateOfBirth'],
       );
@@ -123,19 +140,20 @@ class _SignUpPageState extends State<SignUpPage> {
       final rawItems = data?['items'];
       if (rawItems is! List) return;
 
-      final items = rawItems
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .where((item) => _professionCanonicalValue(item).isNotEmpty)
-          .toList()
-        ..sort((a, b) {
-          final aId = (a['id'] as num?)?.toInt() ?? 1 << 30;
-          final bId = (b['id'] as num?)?.toInt() ?? 1 << 30;
-          if (aId != bId) return aId.compareTo(bId);
-          return _professionCanonicalValue(
-            a,
-          ).compareTo(_professionCanonicalValue(b));
-        });
+      final items =
+          rawItems
+              .whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item))
+              .where((item) => _professionCanonicalValue(item).isNotEmpty)
+              .toList()
+            ..sort((a, b) {
+              final aId = (a['id'] as num?)?.toInt() ?? 1 << 30;
+              final bId = (b['id'] as num?)?.toInt() ?? 1 << 30;
+              if (aId != bId) return aId.compareTo(bId);
+              return _professionCanonicalValue(
+                a,
+              ).compareTo(_professionCanonicalValue(b));
+            });
 
       if (!mounted) return;
       setState(() {
@@ -169,7 +187,9 @@ class _SignUpPageState extends State<SignUpPage> {
     for (final item in _professionItems) {
       for (final key in const ['en', 'he', 'ar', 'ru', 'am']) {
         final candidate = item[key]?.toString().trim().toLowerCase();
-        if (candidate != null && candidate.isNotEmpty && candidate == normalized) {
+        if (candidate != null &&
+            candidate.isNotEmpty &&
+            candidate == normalized) {
           return item;
         }
       }
@@ -197,6 +217,58 @@ class _SignUpPageState extends State<SignUpPage> {
       return _professionLabel(item, localeCode);
     }
     return ProfessionLocalization.toLocalized(profession, localeCode);
+  }
+
+  TimeOfDay _parseStoredTime(String? value, {required TimeOfDay fallback}) {
+    final raw = (value ?? '').trim();
+    final parts = raw.split(':');
+    if (parts.length != 2) return fallback;
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null) return fallback;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return fallback;
+    return TimeOfDay(hour: hour, minute: minute);
+  }
+
+  String _formatStoredTime(TimeOfDay time) {
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  String _displayTime(TimeOfDay time) {
+    return MaterialLocalizations.of(
+      context,
+    ).formatTimeOfDay(time, alwaysUse24HourFormat: true);
+  }
+
+  Future<void> _pickWorkingHour({required bool isStart}) async {
+    final initialTime = isStart ? _workingHoursFrom : _workingHoursTo;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initialTime,
+      initialEntryMode: TimePickerEntryMode.input,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
+    );
+
+    if (picked == null || !mounted) return;
+
+    final currentStart = isStart ? picked : _workingHoursFrom;
+    final currentEnd = isStart ? _workingHoursTo : picked;
+    final startMinutes = (currentStart.hour * 60) + currentStart.minute;
+    final endMinutes = (currentEnd.hour * 60) + currentEnd.minute;
+    if (endMinutes <= startMinutes) return;
+
+    setState(() {
+      if (isStart) {
+        _workingHoursFrom = picked;
+      } else {
+        _workingHoursTo = picked;
+      }
+    });
   }
 
   Future<void> _tryFinalizePaidWorkerRegistrationAfterSubscription() async {
@@ -280,6 +352,12 @@ class _SignUpPageState extends State<SignUpPage> {
           'current_loc': 'מיקום נוכחי',
           'pick_map': 'בחר מהמפה',
           'work_radius': 'רדיוס עבודה',
+          'hide_schedule': 'הסתר לוח זמנים מאחרים',
+          'working_hours': 'שעות עבודה',
+          'available_from': 'זמין מ-',
+          'available_to': 'זמין עד',
+          'select_off_days': 'בחר ימי חופש קבועים',
+          'days': 'א,ב,ג,ד,ה,ו,ש',
           'radius_val': 'רדיוס: {val} ק"מ',
           'select_radius': 'בחר רדיוס על המפה',
           'edit_phone': 'ערוך מספר טלפון',
@@ -325,6 +403,12 @@ class _SignUpPageState extends State<SignUpPage> {
           'current_loc': 'Current Location',
           'pick_map': 'Select on Map',
           'work_radius': 'Work Radius',
+          'hide_schedule': 'Hide schedule from others',
+          'working_hours': 'Working Hours',
+          'available_from': 'Available from',
+          'available_to': 'Available to',
+          'select_off_days': 'Select fixed days off',
+          'days': 'Su,Mo,Tu,We,Th,Fr,Sa',
           'radius_val': 'Radius: {val} km',
           'select_radius': 'Select radius on Map',
           'edit_phone': 'Edit Phone Number',
@@ -472,6 +556,12 @@ class _SignUpPageState extends State<SignUpPage> {
       'workRadius': _workRadius,
       'workCenterLat': _workCenter?.latitude,
       'workCenterLng': _workCenter?.longitude,
+      'hideSchedule': _hideSchedule,
+      'disabledDays': _disabledDays,
+      'defaultWorkingHours': {
+        'from': _formatStoredTime(_workingHoursFrom),
+        'to': _formatStoredTime(_workingHoursTo),
+      },
       'avgRating': 0.0,
       'reviewCount': 0,
     };
@@ -647,6 +737,8 @@ class _SignUpPageState extends State<SignUpPage> {
           'workRadius': _workRadius,
           'workCenterLat': _workCenter?.latitude,
           'workCenterLng': _workCenter?.longitude,
+          'hideSchedule': _hideSchedule,
+          'disabledDays': _disabledDays,
           'subscriptionDate': hasActiveSubscriptionFromPending
               ? Timestamp.fromDate(pendingDate ?? now)
               : null,
@@ -659,6 +751,21 @@ class _SignUpPageState extends State<SignUpPage> {
       }
 
       await firestore.collection('users').doc(user.uid).set(userData);
+      if (_userType == UserType.worker) {
+        await firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('Schedule')
+            .doc('info')
+            .set({
+              'hideSchedule': _hideSchedule,
+              'disabledDays': _disabledDays,
+              'defaultWorkingHours': {
+                'from': _formatStoredTime(_workingHoursFrom),
+                'to': _formatStoredTime(_workingHoursTo),
+              },
+            }, SetOptions(merge: true));
+      }
       await user.updateDisplayName(finalName);
 
       await AnalyticsService.logSignUpCompleted(
@@ -999,6 +1106,8 @@ class _SignUpPageState extends State<SignUpPage> {
                     const SizedBox(height: 24),
                     _buildWorkRadiusSelector(strings),
                     const SizedBox(height: 24),
+                    _buildScheduleSection(strings),
+                    const SizedBox(height: 24),
                     _buildMultiSelectProfessions(strings),
                     const SizedBox(height: 16),
                     _buildStyledTextField(
@@ -1276,8 +1385,11 @@ class _SignUpPageState extends State<SignUpPage> {
             ],
           ),
           const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 12,
+            runSpacing: 8,
             children: [
               Text(
                 strings['radius_val']!.replaceFirst(
@@ -1306,8 +1418,9 @@ class _SignUpPageState extends State<SignUpPage> {
                       _workCenter = result['center'];
                       _workRadius = result['radius'];
                     });
-                    if (_workCenter != null)
+                    if (_workCenter != null) {
                       _updateTownFromLocation(_workCenter!);
+                    }
                   }
                 },
                 icon: const Icon(Icons.edit_location_alt_rounded, size: 18),
@@ -1318,6 +1431,109 @@ class _SignUpPageState extends State<SignUpPage> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScheduleSection(Map<String, String> strings) {
+    final dayNames = strings['days']!.split(',');
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _hideSchedule,
+            activeColor: const Color(0xFF1976D2),
+            title: Text(
+              strings['hide_schedule']!,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+            ),
+            onChanged: (value) => setState(() => _hideSchedule = value),
+          ),
+          const SizedBox(height: 8),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(
+              Icons.schedule_rounded,
+              color: Color(0xFF1976D2),
+            ),
+            title: Text(
+              strings['working_hours']!,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+            ),
+            subtitle: Text(
+              '${strings['available_from']!} ${_displayTime(_workingHoursFrom)}   ${strings['available_to']!} ${_displayTime(_workingHoursTo)}',
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () async {
+              await _pickWorkingHour(isStart: true);
+              if (!mounted) return;
+              await _pickWorkingHour(isStart: false);
+            },
+          ),
+          const SizedBox(height: 8),
+          Text(
+            strings['select_off_days']!,
+            style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: List.generate(7, (index) {
+              final dayNum = _displayWeekdayOrder[index];
+              final isOff = _disabledDays.contains(dayNum);
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    if (isOff) {
+                      _disabledDays.remove(dayNum);
+                    } else {
+                      _disabledDays.add(dayNum);
+                    }
+                  });
+                },
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: isOff
+                        ? Colors.red.withOpacity(0.1)
+                        : const Color(0xFF1976D2).withOpacity(0.1),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isOff ? Colors.red : const Color(0xFF1976D2),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      dayNames[index],
+                      style: TextStyle(
+                        color: isOff ? Colors.red : const Color(0xFF1976D2),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
           ),
         ],
       ),

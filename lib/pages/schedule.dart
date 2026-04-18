@@ -5,15 +5,20 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/pages/send_request.dart';
+import 'package:untitled1/utils/booking_mode.dart';
 
 class SchedulePage extends StatefulWidget {
   final String workerId;
   final String workerName;
+  final String bookingMode;
+  final String? professionName;
 
   const SchedulePage({
     super.key,
     required this.workerId,
     required this.workerName,
+    this.bookingMode = bookingModeProviderTravels,
+    this.professionName,
   });
 
   @override
@@ -40,6 +45,11 @@ class _SchedulePageState extends State<SchedulePage> {
   List<int> _permanentlyDisabledDays = []; // 1=Mon, 7=Sun
 
   final TextEditingController _notesController = TextEditingController();
+
+  String get _normalizedBookingMode => normalizeBookingMode(widget.bookingMode);
+  bool get _customerTravels =>
+      _normalizedBookingMode == bookingModeCustomerTravels;
+  bool get _onlineOnly => _normalizedBookingMode == bookingModeOnline;
 
   // Updated to use 'users' collection
   DocumentReference get _scheduleDoc => _firestore
@@ -88,10 +98,7 @@ class _SchedulePageState extends State<SchedulePage> {
           }
           if (data.containsKey('partialWorkDays')) {
             _partialWorkDays = (data['partialWorkDays'] as Map).map(
-              (k, v) => MapEntry(
-                k.toString(),
-                _normalizePartialRanges(v),
-              ),
+              (k, v) => MapEntry(k.toString(), _normalizePartialRanges(v)),
             );
           }
           if (data.containsKey('vacations')) {
@@ -293,8 +300,16 @@ class _SchedulePageState extends State<SchedulePage> {
           'not_working': 'אין פעילות ביום זה',
           'working_hours': 'שעות עבודה',
           'hidden_msg': 'לוח הזמנים של בעל המקצוע מוסתר',
-          'request_work': 'בקש מהמקצוען לעבוד ביום זה',
-          'request_hours': 'בקש שעות עבודה נוספות',
+          'request_work': _onlineOnly
+              ? 'קבע פגישה אונליין ביום הזה'
+              : _customerTravels
+              ? 'קבע תור ליום הזה'
+              : 'בקש מהמקצוען לעבוד ביום זה',
+          'request_hours': _onlineOnly
+              ? 'קבע פגישה אונליין בשעות האלו'
+              : _customerTravels
+              ? 'בקש תור בשעות האלו'
+              : 'בקש שעות עבודה נוספות',
           'request_quote': 'בקש הצעת מחיר',
           'set_vacation': 'קבע חופשה',
           'on_vacation': 'בחופשה',
@@ -343,8 +358,16 @@ class _SchedulePageState extends State<SchedulePage> {
           'not_working': 'No activity on this day',
           'working_hours': 'Working Hours',
           'hidden_msg': 'Professional schedule is private',
-          'request_work': 'Request pro to work this day',
-          'request_hours': 'Request extra working hours',
+          'request_work': _onlineOnly
+              ? 'Book online session on this day'
+              : _customerTravels
+              ? 'Book appointment on this day'
+              : 'Request pro to work this day',
+          'request_hours': _onlineOnly
+              ? 'Book online session during these hours'
+              : _customerTravels
+              ? 'Book during these hours'
+              : 'Request extra working hours',
           'request_quote': 'Request Quote',
           'set_vacation': 'Set Vacation',
           'on_vacation': 'On Vacation',
@@ -365,11 +388,14 @@ class _SchedulePageState extends State<SchedulePage> {
           'add_time_range': 'Add Time Range',
           'remove_time_range': 'Remove Range',
           'time_range': 'Time Range',
-          'multi_hours_hint': 'You can add multiple working-hour ranges for the same day.',
+          'multi_hours_hint':
+              'You can add multiple working-hour ranges for the same day.',
           'selected_hours': 'Selected Hours',
-          'edit_hours_hint': 'Tap "Partial Working Hours" to edit these ranges.',
+          'edit_hours_hint':
+              'Tap "Partial Working Hours" to edit these ranges.',
           'clock_hint': 'Choose working hours in a simple, clear way.',
-          'save_hours_failed': 'Failed to save working hours. Please try again.',
+          'save_hours_failed':
+              'Failed to save working hours. Please try again.',
         };
     }
   }
@@ -386,9 +412,7 @@ class _SchedulePageState extends State<SchedulePage> {
           .map((item) => Map<String, String>.from(item as Map))
           .where((item) => item['from'] != null && item['to'] != null)
           .toList();
-      ranges.sort(
-        (a, b) => _compareTimeStrings(a['from']!, b['from']!),
-      );
+      ranges.sort((a, b) => _compareTimeStrings(a['from']!, b['from']!));
       return ranges;
     }
 
@@ -414,7 +438,9 @@ class _SchedulePageState extends State<SchedulePage> {
   }
 
   List<Map<String, String>> _getPartialRanges(String dateStr) {
-    return List<Map<String, String>>.from(_partialWorkDays[dateStr] ?? const []);
+    return List<Map<String, String>>.from(
+      _partialWorkDays[dateStr] ?? const [],
+    );
   }
 
   String _formatPartialRangesText(String dateStr) {
@@ -466,9 +492,7 @@ class _SchedulePageState extends State<SchedulePage> {
         return Directionality(
           textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
           child: MediaQuery(
-            data: MediaQuery.of(
-              context,
-            ).copyWith(alwaysUse24HourFormat: true),
+            data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
             child: Theme(
               data: theme.copyWith(
                 colorScheme: theme.colorScheme.copyWith(
@@ -772,7 +796,10 @@ class _SchedulePageState extends State<SchedulePage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => Dialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 24,
+          ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(28),
           ),
@@ -857,13 +884,17 @@ class _SchedulePageState extends State<SchedulePage> {
 
                             return Container(
                               margin: EdgeInsets.only(
-                                bottom: index == editableRanges.length - 1 ? 0 : 14,
+                                bottom: index == editableRanges.length - 1
+                                    ? 0
+                                    : 14,
                               ),
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
                                 color: const Color(0xFFF8FAFC),
                                 borderRadius: BorderRadius.circular(18),
-                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                                border: Border.all(
+                                  color: const Color(0xFFE2E8F0),
+                                ),
                               ),
                               child: Column(
                                 children: [
@@ -881,7 +912,9 @@ class _SchedulePageState extends State<SchedulePage> {
                                         IconButton(
                                           onPressed: () {
                                             setDialogState(
-                                              () => editableRanges.removeAt(index),
+                                              () => editableRanges.removeAt(
+                                                index,
+                                              ),
                                             );
                                           },
                                           style: IconButton.styleFrom(
@@ -907,10 +940,11 @@ class _SchedulePageState extends State<SchedulePage> {
                                           value: from,
                                           accentColor: const Color(0xFF1976D2),
                                           onTap: () async {
-                                            final picked = await _showWorkingHoursPicker(
-                                              initialTime: from,
-                                              helpText: strings['from']!,
-                                            );
+                                            final picked =
+                                                await _showWorkingHoursPicker(
+                                                  initialTime: from,
+                                                  helpText: strings['from']!,
+                                                );
                                             if (picked != null) {
                                               setDialogState(() {
                                                 editableRanges[index]['from'] =
@@ -933,10 +967,11 @@ class _SchedulePageState extends State<SchedulePage> {
                                           value: to,
                                           accentColor: const Color(0xFF1976D2),
                                           onTap: () async {
-                                            final picked = await _showWorkingHoursPicker(
-                                              initialTime: to,
-                                              helpText: strings['to']!,
-                                            );
+                                            final picked =
+                                                await _showWorkingHoursPicker(
+                                                  initialTime: to,
+                                                  helpText: strings['to']!,
+                                                );
                                             if (picked != null) {
                                               setDialogState(() {
                                                 editableRanges[index]['to'] =
@@ -958,12 +993,19 @@ class _SchedulePageState extends State<SchedulePage> {
                             child: OutlinedButton.icon(
                               onPressed: () {
                                 setDialogState(() {
-                                  editableRanges.add({'from': '08:00', 'to': '16:00'});
+                                  editableRanges.add({
+                                    'from': '08:00',
+                                    'to': '16:00',
+                                  });
                                 });
                               },
                               style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 14),
-                                side: const BorderSide(color: Color(0xFF1976D2)),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                side: const BorderSide(
+                                  color: Color(0xFF1976D2),
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(18),
                                 ),
@@ -995,12 +1037,19 @@ class _SchedulePageState extends State<SchedulePage> {
                       Expanded(
                         child: ElevatedButton(
                           onPressed: () async {
-                            final normalizedRanges = editableRanges
-                                .map((range) => Map<String, String>.from(range))
-                                .toList()
-                              ..sort(
-                                (a, b) => _compareTimeStrings(a['from']!, b['from']!),
-                              );
+                            final normalizedRanges =
+                                editableRanges
+                                    .map(
+                                      (range) =>
+                                          Map<String, String>.from(range),
+                                    )
+                                    .toList()
+                                  ..sort(
+                                    (a, b) => _compareTimeStrings(
+                                      a['from']!,
+                                      b['from']!,
+                                    ),
+                                  );
 
                             final hasInvalidRange = normalizedRanges.any(
                               (range) =>
@@ -1010,14 +1059,18 @@ class _SchedulePageState extends State<SchedulePage> {
 
                             if (hasInvalidRange) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(strings['invalid_hours']!)),
+                                SnackBar(
+                                  content: Text(strings['invalid_hours']!),
+                                ),
                               );
                               return;
                             }
 
                             if (_hasOverlappingRanges(normalizedRanges)) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(strings['overlap_hours']!)),
+                                SnackBar(
+                                  content: Text(strings['overlap_hours']!),
+                                ),
                               );
                               return;
                             }
@@ -1430,60 +1483,63 @@ class _SchedulePageState extends State<SchedulePage> {
     String label,
     bool active,
     Color color,
-    VoidCallback onTap,
-    {bool disabled = false}
-  ) {
+    VoidCallback onTap, {
+    bool disabled = false,
+  }) {
     return InkWell(
       onTap: disabled ? null : onTap,
       borderRadius: BorderRadius.circular(22),
       child: SizedBox(
         width: 92,
         child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: disabled
-                  ? Colors.grey.shade100
-                  : (active ? color : Colors.white),
-              shape: BoxShape.circle,
-              border: Border.all(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
                 color: disabled
-                    ? Colors.grey.shade300
-                    : (active ? color : Colors.grey.shade200),
+                    ? Colors.grey.shade100
+                    : (active ? color : Colors.white),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: disabled
+                      ? Colors.grey.shade300
+                      : (active ? color : Colors.grey.shade200),
+                ),
+                boxShadow: [
+                  if (active && !disabled)
+                    BoxShadow(color: color.withOpacity(0.3), blurRadius: 8),
+                ],
               ),
-              boxShadow: [
-                if (active && !disabled)
-                  BoxShadow(color: color.withOpacity(0.3), blurRadius: 8),
-              ],
+              child: Icon(
+                icon,
+                color: disabled
+                    ? Colors.grey.shade400
+                    : (active ? Colors.white : Colors.grey),
+                size: 24,
+              ),
             ),
-            child: Icon(
-              icon,
-              color: disabled
-                  ? Colors.grey.shade400
-                  : (active ? Colors.white : Colors.grey),
-              size: 24,
+            const SizedBox(height: 8),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: disabled
+                    ? Colors.grey.shade400
+                    : (active ? color : Colors.grey),
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              color: disabled
-                  ? Colors.grey.shade400
-                  : (active ? color : Colors.grey),
-            ),
-          ),
-        ],
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildWorkingHoursSummary(Map<String, String> strings, String dateStr) {
+  Widget _buildWorkingHoursSummary(
+    Map<String, String> strings,
+    String dateStr,
+  ) {
     final ranges = _getPartialRanges(dateStr);
     return Container(
       width: double.infinity,
@@ -1719,6 +1775,8 @@ class _SchedulePageState extends State<SchedulePage> {
                         isExtraHours: isWorking,
                         initialFrom: partial?['from'],
                         initialTo: partial?['to'],
+                        bookingMode: widget.bookingMode,
+                        professionName: widget.professionName,
                       ),
                     ),
                   );
@@ -1754,6 +1812,8 @@ class _SchedulePageState extends State<SchedulePage> {
                         workerName: widget.workerName,
                         selectedDay: _selectedDay,
                         isQuoteRequest: true,
+                        bookingMode: widget.bookingMode,
+                        professionName: widget.professionName,
                       ),
                     ),
                   );

@@ -28,6 +28,10 @@ class _MyRequestsPageState extends State<MyRequestsPage> {
           'date': 'תאריך',
           'hours': 'שעות',
           'location': 'מיקום',
+          'service_location': 'אופן השירות',
+          'service_at_provider': 'אני מגיע לבעל המקצוע',
+          'service_at_customer': 'בעל המקצוע מגיע אליי',
+          'service_online': 'פגישה אונליין',
           'description': 'תיאור',
           'created_at': 'נוצר בתאריך',
           'additional_details': 'פרטים נוספים',
@@ -59,6 +63,10 @@ class _MyRequestsPageState extends State<MyRequestsPage> {
           'date': 'التاريخ',
           'hours': 'الساعات',
           'location': 'الموقع',
+          'service_location': 'طريقة تقديم الخدمة',
+          'service_at_provider': 'سأذهب إلى المحترف',
+          'service_at_customer': 'المحترف سيأتي إلي',
+          'service_online': 'جلسة أونلاين',
           'description': 'الوصف',
           'created_at': 'تاريخ الإنشاء',
           'additional_details': 'تفاصيل إضافية',
@@ -90,6 +98,10 @@ class _MyRequestsPageState extends State<MyRequestsPage> {
           'date': 'Date',
           'hours': 'Hours',
           'location': 'Location',
+          'service_location': 'Service Location',
+          'service_at_provider': 'I go to the professional',
+          'service_at_customer': 'The professional comes to me',
+          'service_online': 'Online session',
           'description': 'Description',
           'created_at': 'Created At',
           'additional_details': 'Additional Details',
@@ -149,6 +161,8 @@ class _MyRequestsPageState extends State<MyRequestsPage> {
     final to = data['requestedTo']?.toString();
     final body = (data['jobDescription'] ?? '').toString();
     final location = (data['locationName'] ?? '-').toString();
+    final serviceLocationType =
+        (data['serviceLocationType'] ?? 'provider_travels').toString();
     final requestType = _requestTypeLabel(
       (data['type'] ?? 'work_request').toString(),
       strings,
@@ -167,6 +181,7 @@ class _MyRequestsPageState extends State<MyRequestsPage> {
       'date',
       'locationName',
       'type',
+      'serviceLocationType',
       'images',
       'image',
       'imageUrl',
@@ -230,6 +245,10 @@ class _MyRequestsPageState extends State<MyRequestsPage> {
                     _detailRow(strings['date']!, date),
                     if (from != null && to != null)
                       _detailRow(strings['hours']!, '$from - $to'),
+                    _detailRow(
+                      strings['service_location']!,
+                      _serviceLocationLabel(serviceLocationType, strings),
+                    ),
                     _detailRow(strings['location']!, location),
                     _detailRow(
                       strings['status']!,
@@ -315,6 +334,18 @@ class _MyRequestsPageState extends State<MyRequestsPage> {
       case 'work_request':
       default:
         return strings['work_request']!;
+    }
+  }
+
+  String _serviceLocationLabel(String type, Map<String, String> strings) {
+    switch (type.trim().toLowerCase()) {
+      case 'customer_travels':
+        return strings['service_at_provider']!;
+      case 'online':
+        return strings['service_online']!;
+      case 'provider_travels':
+      default:
+        return strings['service_at_customer']!;
     }
   }
 
@@ -406,10 +437,7 @@ class _MyRequestsPageState extends State<MyRequestsPage> {
               .doc(workerId)
               .collection('notifications')
               .doc(workerNotificationId),
-          {
-            'status': 'cancelled',
-            'cancelledAt': FieldValue.serverTimestamp(),
-          },
+          {'status': 'cancelled', 'cancelledAt': FieldValue.serverTimestamp()},
         );
       }
 

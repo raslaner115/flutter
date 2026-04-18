@@ -21,9 +21,12 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
+  static const List<int> _displayWeekdayOrder = [7, 1, 2, 3, 4, 5, 6];
   bool _notificationsEnabled = true;
   bool _hideSchedule = false;
   List<int> _disabledDays = []; // 1 = Monday, 7 = Sunday
+  TimeOfDay _workingHoursFrom = const TimeOfDay(hour: 8, minute: 0);
+  TimeOfDay _workingHoursTo = const TimeOfDay(hour: 16, minute: 0);
   bool _isLoadingSettings = true;
   Map<String, dynamic>? _userData;
   String _userRole = "customer";
@@ -42,19 +45,34 @@ class _SettingsPageState extends State<SettingsPage> {
     }
 
     try {
-      final doc = await FirebaseFirestore.instance
+      final firestore = FirebaseFirestore.instance;
+      final doc = await firestore.collection('users').doc(user.uid).get();
+      final scheduleDoc = await firestore
           .collection('users')
           .doc(user.uid)
+          .collection('Schedule')
+          .doc('info')
           .get();
 
       if (doc.exists) {
         final data = doc.data() as Map<String, dynamic>;
+        final scheduleData = scheduleDoc.data() as Map<String, dynamic>?;
+        final defaultWorkingHours =
+            scheduleData?['defaultWorkingHours'] as Map<String, dynamic>?;
         final status = await Permission.notification.status;
         setState(() {
           _userData = data;
           _userRole = data['role'] ?? 'customer';
           _hideSchedule = data['hideSchedule'] ?? false;
           _disabledDays = List<int>.from(data['disabledDays'] ?? []);
+          _workingHoursFrom = _parseStoredTime(
+            defaultWorkingHours?['from']?.toString(),
+            fallback: const TimeOfDay(hour: 8, minute: 0),
+          );
+          _workingHoursTo = _parseStoredTime(
+            defaultWorkingHours?['to']?.toString(),
+            fallback: const TimeOfDay(hour: 16, minute: 0),
+          );
           _notificationsEnabled =
               (data['notificationsEnabled'] ?? true) &&
               !status.isPermanentlyDenied;
@@ -84,6 +102,76 @@ class _SettingsPageState extends State<SettingsPage> {
           .doc('info')
           .set({key: value}, SetOptions(merge: true));
     }
+  }
+
+  TimeOfDay _parseStoredTime(String? value, {required TimeOfDay fallback}) {
+    final raw = (value ?? '').trim();
+    final parts = raw.split(':');
+    if (parts.length != 2) return fallback;
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null) return fallback;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return fallback;
+    return TimeOfDay(hour: hour, minute: minute);
+  }
+
+  String _formatStoredTime(TimeOfDay time) {
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  String _displayTime(TimeOfDay time) {
+    return MaterialLocalizations.of(
+      context,
+    ).formatTimeOfDay(time, alwaysUse24HourFormat: true);
+  }
+
+  Future<void> _updateWorkingHours() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('Schedule')
+        .doc('info')
+        .set({
+          'defaultWorkingHours': {
+            'from': _formatStoredTime(_workingHoursFrom),
+            'to': _formatStoredTime(_workingHoursTo),
+          },
+        }, SetOptions(merge: true));
+  }
+
+  Future<void> _pickWorkingHour({required bool isStart}) async {
+    final initialTime = isStart ? _workingHoursFrom : _workingHoursTo;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initialTime,
+      initialEntryMode: TimePickerEntryMode.input,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
+    );
+
+    if (picked == null || !mounted) return;
+
+    final currentStart = isStart ? picked : _workingHoursFrom;
+    final currentEnd = isStart ? _workingHoursTo : picked;
+    final startMinutes = (currentStart.hour * 60) + currentStart.minute;
+    final endMinutes = (currentEnd.hour * 60) + currentEnd.minute;
+    if (endMinutes <= startMinutes) return;
+
+    setState(() {
+      if (isStart) {
+        _workingHoursFrom = picked;
+      } else {
+        _workingHoursTo = picked;
+      }
+    });
+    await _updateWorkingHours();
   }
 
   Future<void> _toggleNotifications(bool value) async {
@@ -155,6 +243,9 @@ class _SettingsPageState extends State<SettingsPage> {
           'schedule': 'לוח זמנים',
           'hide_schedule': 'הסתר לוח זמנים מאחרים',
           'work_days': 'ימי עבודה',
+          'working_hours': 'שעות עבודה',
+          'available_from': 'זמין מ-',
+          'available_to': 'זמין עד',
           'select_off_days': 'בחר ימי חופש קבועים',
           'days': 'א,ב,ג,ד,ה,ו,ש',
           'permission_denied':
@@ -178,12 +269,66 @@ class _SettingsPageState extends State<SettingsPage> {
           'schedule': 'الجدول الزمني',
           'hide_schedule': 'إخفاء الجدول عن الآخرين',
           'work_days': 'أيام العمل',
+          'working_hours': 'ساعات العمل',
+          'available_from': 'متاح من',
+          'available_to': 'متاح حتى',
           'select_off_days': 'اختر أيام العطلة الثابتة',
-          'days': 'ن,ث,ر,خ,ج,س,ح',
+          'days': 'ح,ن,ث,ر,خ,ج,س',
           'permission_denied':
               'الإشعارات محظورة في إعدادات الجهاز. هل تريد فتح الإعدادات؟',
           'settings': 'الإعدادات',
           'cancel': 'إلغاء',
+        };
+      case 'ru':
+        return {
+          'title': 'Настройки',
+          'notifications': 'Уведомления',
+          'language': 'Язык',
+          'about': 'О приложении',
+          'account': 'Аккаунт',
+          'privacy': 'Политика конфиденциальности',
+          'terms': 'Условия использования',
+          'delete_account': 'Удалить аккаунт',
+          'help': 'Помощь',
+          'logout': 'Выйти',
+          'appearance': 'Внешний вид',
+          'schedule': 'Расписание',
+          'hide_schedule': 'Скрыть расписание от других',
+          'work_days': 'Рабочие дни',
+          'working_hours': 'Рабочие часы',
+          'available_from': 'Доступен с',
+          'available_to': 'Доступен до',
+          'select_off_days': 'Выберите постоянные выходные',
+          'days': 'Вс,Пн,Вт,Ср,Чт,Пт,Сб',
+          'permission_denied':
+              'Уведомления заблокированы в настройках устройства. Открыть настройки?',
+          'settings': 'Настройки',
+          'cancel': 'Отмена',
+        };
+      case 'am':
+        return {
+          'title': 'ቅንብሮች',
+          'notifications': 'ማሳወቂያዎች',
+          'language': 'ቋንቋ',
+          'about': 'ስለ መተግበሪያው',
+          'account': 'መለያ',
+          'privacy': 'የግላዊነት ፖሊሲ',
+          'terms': 'የአጠቃቀም ውል',
+          'delete_account': 'መለያ ሰርዝ',
+          'help': 'እገዛ',
+          'logout': 'ውጣ',
+          'appearance': 'መልክ',
+          'schedule': 'መርሃ ግብር',
+          'hide_schedule': 'መርሃ ግብሩን ከሌሎች ደብቅ',
+          'work_days': 'የስራ ቀናት',
+          'working_hours': 'የስራ ሰዓቶች',
+          'available_from': 'ዝግጁ ከ',
+          'available_to': 'ዝግጁ እስከ',
+          'select_off_days': 'ቋሚ የእረፍት ቀናትን ይምረጡ',
+          'days': 'እ,ሰ,ማ,ረ,ሐ,ዓ,ቅ',
+          'permission_denied': 'ማሳወቂያዎች በመሣሪያው ቅንብሮች ውስጥ ታግደዋል። ቅንብሮቹን ልክፈት?',
+          'settings': 'ቅንብሮች',
+          'cancel': 'ሰርዝ',
         };
       default:
         return {
@@ -201,8 +346,11 @@ class _SettingsPageState extends State<SettingsPage> {
           'schedule': 'Schedule',
           'hide_schedule': 'Hide schedule from others',
           'work_days': 'Working Days',
+          'working_hours': 'Working Hours',
+          'available_from': 'Available from',
+          'available_to': 'Available to',
           'select_off_days': 'Select fixed days off',
-          'days': 'M,T,W,T,F,S,S',
+          'days': 'Su,Mo,Tu,We,Th,Fr,Sa',
           'permission_denied':
               'Notifications are blocked in system settings. Would you like to open settings?',
           'settings': 'Settings',
@@ -284,6 +432,23 @@ class _SettingsPageState extends State<SettingsPage> {
         },
       ),
       const Divider(height: 1, indent: 50),
+      ListTile(
+        leading: const Icon(Icons.schedule_rounded, color: Color(0xFF1976D2)),
+        title: Text(
+          strings['working_hours']!,
+          style: const TextStyle(fontWeight: FontWeight.w500),
+        ),
+        subtitle: Text(
+          '${strings['available_from']!} ${_displayTime(_workingHoursFrom)}   ${strings['available_to']!} ${_displayTime(_workingHoursTo)}',
+        ),
+        trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+        onTap: () async {
+          await _pickWorkingHour(isStart: true);
+          if (!mounted) return;
+          await _pickWorkingHour(isStart: false);
+        },
+      ),
+      const Divider(height: 1, indent: 50),
       Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -297,7 +462,7 @@ class _SettingsPageState extends State<SettingsPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: List.generate(7, (index) {
-                final dayNum = index + 1;
+                final dayNum = _displayWeekdayOrder[index];
                 final isOff = _disabledDays.contains(dayNum);
                 return GestureDetector(
                   onTap: () {
@@ -632,6 +797,22 @@ class _SettingsPageState extends State<SettingsPage> {
                       },
                     ),
                   ),
+                  CupertinoListTile(
+                    leading: const Icon(
+                      CupertinoIcons.time,
+                      color: CupertinoColors.systemBlue,
+                    ),
+                    title: Text(strings['working_hours']!),
+                    subtitle: Text(
+                      '${strings['available_from']!} ${_displayTime(_workingHoursFrom)}   ${strings['available_to']!} ${_displayTime(_workingHoursTo)}',
+                    ),
+                    trailing: const CupertinoListTileChevron(),
+                    onTap: () async {
+                      await _pickWorkingHour(isStart: true);
+                      if (!mounted) return;
+                      await _pickWorkingHour(isStart: false);
+                    },
+                  ),
                   Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
@@ -640,7 +821,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: List.generate(7, (index) {
-                        final dayNum = index + 1;
+                        final dayNum = _displayWeekdayOrder[index];
                         final isOff = _disabledDays.contains(dayNum);
                         return GestureDetector(
                           onTap: () {
