@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:untitled1/ptofile.dart';
 import 'package:untitled1/pages/admin_profile.dart';
 import 'package:untitled1/services/language_provider.dart';
@@ -13,8 +12,6 @@ import 'package:untitled1/pages/location_manager_page.dart';
 import 'package:untitled1/widgets/skeleton.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:untitled1/services/location_context_service.dart';
-import 'package:untitled1/services/subscription_access_service.dart';
 import 'dart:async';
 
 class HomePage extends StatefulWidget {
@@ -40,18 +37,12 @@ class _HomePageState extends State<HomePage> {
   int _bannerPageIndex = 0;
   int _bannerCount = 0;
 
-  List<Map<String, dynamic>> _topRatedWorkers = [];
-  List<Map<String, dynamic>> _topRatedWorkersSource = [];
-  List<Map<String, dynamic>> _newWorkers = [];
   List<Map<String, dynamic>> _popularCategories = [];
   List<Map<String, dynamic>> _professionItems = [];
-  bool _isTopRatedLoading = true;
-  bool _isNewWorkersLoading = true;
   bool _isPopularLoading = true;
   String? _cachedName;
   String? _profileImageUrl;
   String _userRole = "customer";
-  AppLocation? _currentPosition;
 
   List<String> _announcementImages(Map<String, dynamic> data) {
     final raw = data['imageUrls'];
@@ -138,40 +129,17 @@ class _HomePageState extends State<HomePage> {
     return diff.inHours < fallbackHours;
   }
 
-  void _onLocationPermissionGranted() {
-    if (!mounted) return;
-    _reloadAfterPermissionGranted();
-  }
-
-  Future<void> _reloadAfterPermissionGranted() async {
-    await _getCurrentLocation();
-    if (!mounted) return;
-    setState(() {
-      _topRatedWorkers = _filterByProximity(_topRatedWorkersSource)
-          .take(10)
-          .toList();
-    });
-    if (!mounted) return;
-    setState(() {});
-  }
-
   @override
   void initState() {
     super.initState();
     _bannerPageController = PageController(initialPage: 1000);
-    LocationContextService.locationPermissionGrantedTick.addListener(
-      _onLocationPermissionGranted,
-    );
     _initData();
     _listenForPopups();
     _startBannerAutoScroll();
   }
 
   Future<void> _initData() async {
-    _getCurrentLocation();
     final professionLoad = _loadProfessionMetadata();
-    _fetchTopRatedWorkers();
-    _fetchNewWorkers();
     _fetchCurrentUserName();
     await professionLoad;
     _fetchPopularCategories();
@@ -183,11 +151,10 @@ class _HomePageState extends State<HomePage> {
           .collection('metadata')
           .doc('professions')
           .get();
-      final items =
-          ((professionsDoc.data()?['items'] as List?) ?? const [])
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList();
+      final items = ((professionsDoc.data()?['items'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
 
       if (!mounted) return;
       setState(() {
@@ -198,63 +165,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Map<String, dynamic>? _findProfessionItem(String value) {
-    final normalized = value.trim().toLowerCase();
-    if (normalized.isEmpty) return null;
-
-    for (final item in _professionItems) {
-      for (final key in const ['en', 'he', 'ar', 'ru', 'am']) {
-        final candidate = item[key]?.toString().trim().toLowerCase();
-        if (candidate != null && candidate.isNotEmpty && candidate == normalized) {
-          return item;
-        }
-      }
-    }
-    return null;
-  }
-
-  String _localizedProfessionLabel(String profession, String localeCode) {
-    final item = _findProfessionItem(profession);
-    if (item == null) return profession;
-
-    final localized = item[localeCode]?.toString().trim();
-    if (localized != null && localized.isNotEmpty) {
-      return localized;
-    }
-
-    final english = item['en']?.toString().trim();
-    if (english != null && english.isNotEmpty) {
-      return english;
-    }
-
-    return profession;
-  }
-
-  String _localizedProfessionsText(dynamic professions, String localeCode) {
-    final values = (professions as List?)
-            ?.map((value) => value?.toString().trim() ?? '')
-            .where((value) => value.isNotEmpty)
-            .toList() ??
-        const <String>[];
-
-    if (values.isEmpty) return 'Service';
-    return values
-        .map((profession) => _localizedProfessionLabel(profession, localeCode))
-        .join(', ');
-  }
-
-  Future<void> _getCurrentLocation() async {
-    try {
-      final location = await LocationContextService.getActiveLocation();
-      if (!mounted) return;
-      setState(() {
-        _currentPosition = location;
-      });
-    } catch (e) {
-      debugPrint("Location error: $e");
-    }
-  }
-
   Future<void> _openLocationManager() async {
     final changed = await Navigator.push<bool>(
       context,
@@ -262,17 +172,12 @@ class _HomePageState extends State<HomePage> {
     );
 
     if (changed == true) {
-      await _getCurrentLocation();
-      await _fetchTopRatedWorkers();
       if (mounted) setState(() {});
     }
   }
 
   @override
   void dispose() {
-    LocationContextService.locationPermissionGrantedTick.removeListener(
-      _onLocationPermissionGranted,
-    );
     _popupSubscription?.cancel();
     _bannerAutoScrollTimer?.cancel();
     _bannerPageController.dispose();
@@ -286,7 +191,8 @@ class _HomePageState extends State<HomePage> {
         return;
       }
       final currentPage =
-          _bannerPageController.page?.round() ?? _bannerPageController.initialPage;
+          _bannerPageController.page?.round() ??
+          _bannerPageController.initialPage;
       _bannerPageController.animateToPage(
         currentPage + 1,
         duration: const Duration(milliseconds: 320),
@@ -332,8 +238,13 @@ class _HomePageState extends State<HomePage> {
 
         return StatefulBuilder(
           builder: (context, setDialogState) => Dialog(
-            insetPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 12,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(32),
+            ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(32),
               child: Container(
@@ -452,7 +363,9 @@ class _HomePageState extends State<HomePage> {
                                                     0xFFEFF6FF,
                                                   ),
                                                   borderRadius:
-                                                      BorderRadius.circular(999),
+                                                      BorderRadius.circular(
+                                                        999,
+                                                      ),
                                                 ),
                                                 child: const Text(
                                                   'System Promotion',
@@ -534,19 +447,17 @@ class _HomePageState extends State<HomePage> {
                                             children: [
                                               Expanded(
                                                 child: OutlinedButton(
-                                                  style:
-                                                      OutlinedButton.styleFrom(
-                                                        padding:
-                                                            const EdgeInsets.symmetric(
-                                                              vertical: 14,
-                                                            ),
-                                                      ),
+                                                  style: OutlinedButton.styleFrom(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          vertical: 14,
+                                                        ),
+                                                  ),
                                                   onPressed: () {
                                                     setState(
-                                                      () =>
-                                                          _hiddenPopupIds.add(
-                                                            adId,
-                                                          ),
+                                                      () => _hiddenPopupIds.add(
+                                                        adId,
+                                                      ),
                                                     );
                                                     Navigator.pop(context);
                                                   },
@@ -560,19 +471,18 @@ class _HomePageState extends State<HomePage> {
                                                 const SizedBox(width: 12),
                                                 Expanded(
                                                   child: ElevatedButton.icon(
-                                                    style:
-                                                        ElevatedButton.styleFrom(
-                                                          backgroundColor:
-                                                              const Color(
-                                                                0xFF1D4ED8,
-                                                              ),
-                                                          foregroundColor:
-                                                              Colors.white,
-                                                          padding:
-                                                              const EdgeInsets.symmetric(
-                                                                vertical: 14,
-                                                              ),
-                                                        ),
+                                                    style: ElevatedButton.styleFrom(
+                                                      backgroundColor:
+                                                          const Color(
+                                                            0xFF1D4ED8,
+                                                          ),
+                                                      foregroundColor:
+                                                          Colors.white,
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            vertical: 14,
+                                                          ),
+                                                    ),
                                                     onPressed: () async {
                                                       final url = Uri.parse(
                                                         data['link'],
@@ -587,7 +497,8 @@ class _HomePageState extends State<HomePage> {
                                                       }
                                                     },
                                                     icon: const Icon(
-                                                      Icons.arrow_outward_rounded,
+                                                      Icons
+                                                          .arrow_outward_rounded,
                                                     ),
                                                     label: Text(
                                                       data['buttonText'] ??
@@ -739,99 +650,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _fetchTopRatedWorkers() async {
-    if (!mounted) return;
-    setState(() => _isTopRatedLoading = true);
-
-    try {
-      final snapshot = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'worker')
-          .orderBy('avgRating', descending: true)
-          .limit(30) // Fetch more to filter locally
-          .get();
-
-      final workers = snapshot.docs
-          .map((doc) {
-            var userData = doc.data();
-            userData['uid'] = doc.id;
-            userData['avgRating'] = (userData['avgRating'] ?? 0.0).toDouble();
-            userData['reviewCount'] = userData['reviewCount'] ?? 0;
-            return userData;
-          })
-          .where(SubscriptionAccessService.hasActiveWorkerSubscriptionFromData)
-          .toList();
-
-      final filtered = _filterByProximity(workers);
-
-      if (mounted) {
-        setState(() {
-          _topRatedWorkersSource = workers;
-          _topRatedWorkers = filtered.take(10).toList();
-          _isTopRatedLoading = false;
-        });
-      }
-    } catch (e) {
-      debugPrint("HOME OPTIMIZED FETCH ERROR: $e");
-      if (mounted) setState(() => _isTopRatedLoading = false);
-    }
-  }
-
-  List<Map<String, dynamic>> _filterByProximity(
-    List<Map<String, dynamic>> workers,
-  ) {
-    if (_currentPosition == null) return workers;
-
-    return workers.where((w) {
-      if (w['lat'] == null || w['lng'] == null) return false;
-
-      double distanceInMeters = Geolocator.distanceBetween(
-        _currentPosition!.latitude,
-        _currentPosition!.longitude,
-        w['lat'].toDouble(),
-        w['lng'].toDouble(),
-      );
-
-      double radiusInKm = (w['serviceRadius'] ?? 20.0).toDouble();
-      return (distanceInMeters / 1000) <= radiusInKm;
-    }).toList();
-  }
-
-  Future<void> _fetchNewWorkers() async {
-    if (!mounted) return;
-    setState(() => _isNewWorkersLoading = true);
-
-    try {
-      final snapshot = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'worker')
-          .orderBy('createdAt', descending: true)
-          .limit(7)
-          .get();
-
-      final workers = snapshot.docs
-          .map((doc) {
-            var userData = doc.data();
-            userData['uid'] = doc.id;
-            userData['avgRating'] = (userData['avgRating'] ?? 0.0).toDouble();
-            userData['reviewCount'] = userData['reviewCount'] ?? 0;
-            return userData;
-          })
-          .where(SubscriptionAccessService.hasActiveWorkerSubscriptionFromData)
-          .toList();
-
-      if (mounted) {
-        setState(() {
-          _newWorkers = workers;
-          _isNewWorkersLoading = false;
-        });
-      }
-    } catch (e) {
-      debugPrint("Fetch new workers error: $e");
-      if (mounted) setState(() => _isNewWorkersLoading = false);
-    }
-  }
-
   Map<String, dynamic> _getLocalizedStrings(
     BuildContext context, {
     bool listen = true,
@@ -847,15 +665,94 @@ class _HomePageState extends State<HomePage> {
           'guest': 'אורח',
           'find_pros': 'איזה שירות דרוש לך היום?',
           'search_hint': 'חפש מקצוען (למשל: אינסטלטור)...',
+          'latest_request': 'הבקשה האחרונה',
+          'view_all': 'הכל',
+          'request_someone_else': 'בקש ממישהו אחר',
+          'project_ideas_title': 'איזו עבודה אתה צריך?',
+          'project_ideas_subtitle':
+              'בחר לפי הבעיה או סוג הפרויקט וקבל כיוון מהיר',
+          'project_ideas_hint':
+              'בעיות דחופות, שיפוצים ורעיונות לפרויקט במקום אחד',
+          'project_ideas_cta': 'צפה באפשרויות',
+          'project_find_pros': 'מצא בעלי מקצוע',
+          'project_example': 'דוגמאות',
+          'project_problem_badge': 'בעיה',
+          'project_project_badge': 'פרויקט',
+          'project_trade_plumber': 'אינסטלטור',
+          'project_trade_electrician': 'חשמלאי',
+          'project_trade_painter': 'צבעי',
+          'project_trade_handyman': 'הנדימן',
+          'project_trade_gardener': 'גנן',
+          'project_trade_ac': 'טכנאי מזגנים',
+          'project_trade_mover': 'מוביל',
+          'project_roof_title': 'בניית או תיקון גג',
+          'project_roof_subtitle': 'בדוק סוגי גגות לפני שאתה בוחר בעל מקצוע',
+          'project_leak_title': 'נזילת מים',
+          'project_leak_subtitle': 'צריך אינסטלטור לאיתור ותיקון מהיר',
+          'project_power_title': 'בעיית חשמל',
+          'project_power_subtitle': 'שקעים, עומס או קצר? מצא חשמלאי',
+          'project_drain_title': 'סתימה או ריח מהניקוז',
+          'project_drain_subtitle': 'לכיורים, מקלחות וניקוז שדורשים טיפול מהיר',
+          'project_ac_title': 'המזגן לא מקרר',
+          'project_ac_subtitle': 'בדיקה, ניקוי או תיקון לפני שהחום מחמיר',
+          'project_paint_title': 'צביעת הבית',
+          'project_paint_subtitle': 'צביעה פנימית, חיצונית או חידוש קירות',
+          'project_bathroom_title': 'שיפוץ חדר רחצה',
+          'project_bathroom_subtitle': 'ריצוף, כלים סניטריים, איטום וחידוש מלא',
+          'project_garden_title': 'עבודות גינה',
+          'project_garden_subtitle': 'דשא, גיזום, השקיה ועיצוב חוץ',
+          'project_cracks_title': 'סדקים בקיר',
+          'project_cracks_subtitle':
+              'בדיקה, תיקון וטיח לקירות פנימיים או חיצוניים',
+          'project_move_title': 'עוברים דירה',
+          'project_move_subtitle': 'הובלה, פירוק והרכבה לבית או למשרד',
+          'roof_options_title': 'אפשרויות לגג',
+          'roof_options_subtitle':
+              'בחר סגנון כדי לראות דוגמאות ולהמשיך לבעלי מקצוע',
+          'roof_tile_title': 'גג רעפים',
+          'roof_tile_subtitle': 'מראה קלאסי עם בידוד טוב לבית פרטי',
+          'roof_wood_title': 'גג עץ',
+          'roof_wood_subtitle': 'מראה חם וטבעי לפרגולות ומבנים מיוחדים',
+          'roof_panel_title': 'גג פנלים',
+          'roof_panel_subtitle': 'פתרון מהיר, נקי ומודרני למבנים שונים',
+          'roof_metal_title': 'גג מתכת',
+          'roof_metal_subtitle': 'עמיד וחזק למחסנים, חניות ומבנים תעשייתיים',
+          'maintenance_title': 'רשימת תחזוקת הבית',
+          'maintenance_subtitle':
+              'בדיקות פשוטות שכדאי לעשות לפני שהבעיה מתייקרת',
+          'seasonal_pick': 'בחירה עונתית',
+          'maintenance_cta': 'מצא בעל מקצוע',
+          'maintenance_hint': '6 בדיקות חכמות ששווה לעשות בבית',
+          'maintenance_item_1_title': 'ניקוי מסנני מזגן',
+          'maintenance_item_1_subtitle': 'לשיפור הקירור ואיכות האוויר בבית',
+          'maintenance_item_1_trade': 'טכנאי מזגנים',
+          'maintenance_item_2_title': 'בדיקת דוד מים',
+          'maintenance_item_2_subtitle': 'למניעת נזילות וחימום חלש',
+          'maintenance_item_2_trade': 'אינסטלטור',
+          'maintenance_item_3_title': 'בדיקת בטיחות חשמל',
+          'maintenance_item_3_subtitle': 'לבדיקת שקעים, עומסים וחיבורים',
+          'maintenance_item_3_trade': 'חשמלאי',
+          'maintenance_item_4_title': 'ניקוי יסודי לבית',
+          'maintenance_item_4_subtitle': 'מעולה לפני חגים, מעבר או אירוח',
+          'maintenance_item_4_trade': 'מנקה',
+          'maintenance_item_5_title': 'איטום חלונות ומרפסות',
+          'maintenance_item_5_subtitle': 'למניעת חדירת מים ורוח בעונות מעבר',
+          'maintenance_item_5_trade': 'איש איטום',
+          'maintenance_item_6_title': 'גיזום וניקוי גינה',
+          'maintenance_item_6_subtitle': 'שומר על החוץ מסודר ובטוח כל השנה',
+          'maintenance_item_6_trade': 'גנן',
+          'no_active_requests': 'עדיין אין בקשות פעילות',
+          'request_sent': 'נשלח',
+          'request_pending': 'ממתין לבדיקה',
+          'request_reviewed': 'נבדק',
+          'request_accepted': 'אושר',
+          'request_scheduled': 'נקבע',
+          'request_declined': 'נדחה',
+          'request_cancelled': 'בוטל',
           'categories': 'קטגוריות פופולריות',
           'see_all': 'הכל',
-          'top_rated': 'מקצוענים מובילך בשבילך',
-          'new_team': 'חדש בצוות הירו',
-          'view_all': 'ראה עוד',
           'broadcast_title': 'הודעת מערכת',
           'my_requests': 'הבקשות שלי',
-          'new_tag': 'חדש',
-          'no_reviews': 'אין ביקורות',
         };
       case 'ar':
         return {
@@ -863,15 +760,99 @@ class _HomePageState extends State<HomePage> {
           'guest': 'ضيف',
           'find_pros': 'ما هي الخدمة التي تحتاجها اليوم؟',
           'search_hint': 'ابحث عن محترف (مثلاً: سباك)...',
+          'latest_request': 'أحدث طلب',
+          'view_all': 'عرض الكل',
+          'request_someone_else': 'اطلب من شخص آخر',
+          'project_ideas_title': 'ما هو العمل الذي تحتاجه؟',
+          'project_ideas_subtitle':
+              'اختر حسب المشكلة أو نوع المشروع واحصل على بداية سريعة',
+          'project_ideas_hint':
+              'مشاكل عاجلة وتجديدات وأفكار مشاريع في مكان واحد',
+          'project_ideas_cta': 'عرض الخيارات',
+          'project_find_pros': 'اعثر على محترفين',
+          'project_example': 'أمثلة',
+          'project_problem_badge': 'مشكلة',
+          'project_project_badge': 'مشروع',
+          'project_trade_plumber': 'سباك',
+          'project_trade_electrician': 'كهربائي',
+          'project_trade_painter': 'دهان',
+          'project_trade_handyman': 'فني متعدد المهام',
+          'project_trade_gardener': 'بستاني',
+          'project_trade_ac': 'فني تكييف',
+          'project_trade_mover': 'نقّال',
+          'project_roof_title': 'بناء أو إصلاح سقف',
+          'project_roof_subtitle': 'تعرّف على أنواع الأسقف قبل اختيار المحترف',
+          'project_leak_title': 'تسرّب مياه',
+          'project_leak_subtitle': 'تحتاج سباكاً للكشف والإصلاح السريع',
+          'project_power_title': 'مشكلة كهرباء',
+          'project_power_subtitle':
+              'مقبس أو حمل زائد أو تماس؟ اعثر على كهربائي',
+          'project_drain_title': 'انسداد أو رائحة من المصرف',
+          'project_drain_subtitle':
+              'للمغاسل والحمامات والتصريف الذي يحتاج معالجة سريعة',
+          'project_ac_title': 'المكيف لا يبرّد',
+          'project_ac_subtitle': 'فحص أو تنظيف أو إصلاح قبل اشتداد الحر',
+          'project_paint_title': 'دهان المنزل',
+          'project_paint_subtitle': 'دهان داخلي أو خارجي أو تجديد الجدران',
+          'project_bathroom_title': 'تجديد الحمام',
+          'project_bathroom_subtitle': 'بلاط وأدوات صحية وعزل وتجديد كامل',
+          'project_garden_title': 'أعمال الحديقة',
+          'project_garden_subtitle': 'عشب وتشذيب وري وتصميم خارجي',
+          'project_cracks_title': 'تشققات في الجدار',
+          'project_cracks_subtitle':
+              'فحص وإصلاح وطرطشة للجدران الداخلية أو الخارجية',
+          'project_move_title': 'الانتقال إلى منزل جديد',
+          'project_move_subtitle': 'نقل وفك وتركيب للمنزل أو المكتب',
+          'roof_options_title': 'خيارات السقف',
+          'roof_options_subtitle':
+              'اختر النمط لرؤية أمثلة ثم تابع إلى المحترفين',
+          'roof_tile_title': 'سقف قرميد',
+          'roof_tile_subtitle': 'مظهر كلاسيكي مع عزل جيد للمنازل',
+          'roof_wood_title': 'سقف خشبي',
+          'roof_wood_subtitle': 'مظهر دافئ وطبيعي للبرجولات والمباني المميزة',
+          'roof_panel_title': 'سقف ألواح',
+          'roof_panel_subtitle': 'حل سريع وحديث ونظيف لمشاريع متعددة',
+          'roof_metal_title': 'سقف معدني',
+          'roof_metal_subtitle': 'متين وقوي للمخازن والمواقف والمباني الصناعية',
+          'maintenance_title': 'قائمة صيانة المنزل',
+          'maintenance_subtitle': 'فحوصات بسيطة قبل أن تصبح المشكلة أكثر كلفة',
+          'seasonal_pick': 'اختيار موسمي',
+          'maintenance_cta': 'اعثر على محترف',
+          'maintenance_hint': '6 فحوصات ذكية تستحق القيام بها في المنزل',
+          'maintenance_item_1_title': 'تنظيف فلاتر المكيف',
+          'maintenance_item_1_subtitle':
+              'لتحسين التبريد وجودة الهواء في المنزل',
+          'maintenance_item_1_trade': 'فني تكييف',
+          'maintenance_item_2_title': 'فحص سخان المياه',
+          'maintenance_item_2_subtitle': 'لمنع التسريبات وضعف التسخين',
+          'maintenance_item_2_trade': 'سباك',
+          'maintenance_item_3_title': 'فحص سلامة الكهرباء',
+          'maintenance_item_3_subtitle': 'لفحص المقابس والأحمال والتوصيلات',
+          'maintenance_item_3_trade': 'كهربائي',
+          'maintenance_item_4_title': 'تنظيف عميق للمنزل',
+          'maintenance_item_4_subtitle':
+              'مناسب قبل الأعياد أو الانتقال أو استقبال الضيوف',
+          'maintenance_item_4_trade': 'عامل تنظيف',
+          'maintenance_item_5_title': 'عزل النوافذ والشرفات',
+          'maintenance_item_5_subtitle':
+              'لمنع تسرب الماء والهواء في تغيّر الفصول',
+          'maintenance_item_5_trade': 'فني عزل',
+          'maintenance_item_6_title': 'تشذيب وتنظيف الحديقة',
+          'maintenance_item_6_subtitle':
+              'يبقي المساحة الخارجية مرتبة وآمنة طوال العام',
+          'maintenance_item_6_trade': 'بستاني',
+          'no_active_requests': 'لا توجد طلبات نشطة بعد',
+          'request_sent': 'تم الإرسال',
+          'request_pending': 'بانتظار المراجعة',
+          'request_reviewed': 'تمت المراجعة',
+          'request_accepted': 'تم القبول',
+          'request_scheduled': 'تمت الجدولة',
+          'request_declined': 'تم الرفض',
+          'request_cancelled': 'تم الإلغاء',
           'categories': 'الفئات الشائعة',
           'see_all': 'الكل',
-          'top_rated': 'المحترفون الأعلى تقييماً',
-          'new_team': 'جديد في فريق هايرو',
-          'view_all': 'عرض الكل',
           'broadcast_title': 'بلاغ النظام',
           'my_requests': 'طلباتي',
-          'new_tag': 'جديد',
-          'no_reviews': 'لا توجد تقييمات',
         };
       default:
         return {
@@ -879,15 +860,113 @@ class _HomePageState extends State<HomePage> {
           'guest': 'Guest',
           'find_pros': 'What service do you need today?',
           'search_hint': 'Search for a pro (e.g. Plumber)...',
+          'latest_request': 'Latest Request',
+          'view_all': 'View all',
+          'request_someone_else': 'Request from someone else',
+          'project_ideas_title': 'What work do you need?',
+          'project_ideas_subtitle':
+              'Choose by problem or project type and get started faster',
+          'project_ideas_hint':
+              'Urgent fixes, renovations, and project ideas in one place',
+          'project_ideas_cta': 'View options',
+          'project_find_pros': 'Find pros',
+          'project_example': 'Examples',
+          'project_problem_badge': 'Problem',
+          'project_project_badge': 'Project',
+          'project_trade_plumber': 'Plumber',
+          'project_trade_electrician': 'Electrician',
+          'project_trade_painter': 'Painter',
+          'project_trade_handyman': 'Handyman',
+          'project_trade_gardener': 'Gardener',
+          'project_trade_ac': 'AC Technician',
+          'project_trade_mover': 'Mover',
+          'project_roof_title': 'Build or repair a roof',
+          'project_roof_subtitle':
+              'Explore roof types before choosing the right pro',
+          'project_leak_title': 'Water leakage',
+          'project_leak_subtitle':
+              'Need a plumber for fast detection and repair',
+          'project_power_title': 'Power issue',
+          'project_power_subtitle':
+              'Sockets, overload, or short circuit? Find an electrician',
+          'project_drain_title': 'Blocked drain or bad smell',
+          'project_drain_subtitle':
+              'For sinks, showers, and drains that need fast attention',
+          'project_ac_title': 'AC not cooling',
+          'project_ac_subtitle':
+              'Check, clean, or repair it before the heat gets worse',
+          'project_paint_title': 'Paint my house',
+          'project_paint_subtitle':
+              'Interior, exterior, or wall refresh projects',
+          'project_bathroom_title': 'Bathroom renovation',
+          'project_bathroom_subtitle':
+              'Tiles, fixtures, waterproofing, and full refresh work',
+          'project_garden_title': 'Garden work',
+          'project_garden_subtitle':
+              'Grass, trimming, irrigation, and outdoor improvement',
+          'project_cracks_title': 'Wall cracks',
+          'project_cracks_subtitle':
+              'Inspection, patching, and plaster work for indoor or outdoor walls',
+          'project_move_title': 'Moving to a new place',
+          'project_move_subtitle':
+              'Moving, disassembly, and setup for home or office',
+          'roof_options_title': 'Roof options',
+          'roof_options_subtitle':
+              'Choose a style to see examples and continue to pros',
+          'roof_tile_title': 'Tiled roof',
+          'roof_tile_subtitle':
+              'Classic look with strong insulation for family homes',
+          'roof_wood_title': 'Wooden roof',
+          'roof_wood_subtitle':
+              'Warm natural style for pergolas and custom structures',
+          'roof_panel_title': 'Panel roof',
+          'roof_panel_subtitle':
+              'Fast, clean, modern solution for many building types',
+          'roof_metal_title': 'Metal roof',
+          'roof_metal_subtitle':
+              'Durable and strong for storage, parking, and industrial use',
+          'maintenance_title': 'Home Maintenance Checklist',
+          'maintenance_subtitle':
+              'Simple things to check before they become expensive',
+          'seasonal_pick': 'Seasonal pick',
+          'maintenance_cta': 'Find a pro',
+          'maintenance_hint': '6 smart checks worth doing around your home',
+          'maintenance_item_1_title': 'Clean AC filters',
+          'maintenance_item_1_subtitle':
+              'Improve cooling and air quality at home',
+          'maintenance_item_1_trade': 'AC Technician',
+          'maintenance_item_2_title': 'Check water heater',
+          'maintenance_item_2_subtitle':
+              'Prevent leaks and weak heating before they get worse',
+          'maintenance_item_2_trade': 'Plumber',
+          'maintenance_item_3_title': 'Electrical safety check',
+          'maintenance_item_3_subtitle':
+              'Inspect sockets, overload risks, and wiring',
+          'maintenance_item_3_trade': 'Electrician',
+          'maintenance_item_4_title': 'Deep home cleaning',
+          'maintenance_item_4_subtitle':
+              'Great before holidays, moving, or hosting guests',
+          'maintenance_item_4_trade': 'Cleaner',
+          'maintenance_item_5_title': 'Seal windows and balconies',
+          'maintenance_item_5_subtitle':
+              'Help prevent water and draft issues during season changes',
+          'maintenance_item_5_trade': 'Sealing specialist',
+          'maintenance_item_6_title': 'Trim and clean the garden',
+          'maintenance_item_6_subtitle':
+              'Keep outdoor spaces neat, safe, and easier to maintain',
+          'maintenance_item_6_trade': 'Gardener',
+          'no_active_requests': 'No active requests yet',
+          'request_sent': 'Sent',
+          'request_pending': 'Waiting for review',
+          'request_reviewed': 'Reviewed',
+          'request_accepted': 'Accepted',
+          'request_scheduled': 'Scheduled',
+          'request_declined': 'Declined',
+          'request_cancelled': 'Cancelled',
           'categories': 'Popular Categories',
           'see_all': 'See all',
-          'top_rated': 'Top Rated Professionals',
-          'new_team': 'New to hiro Team',
-          'view_all': 'View all',
           'broadcast_title': 'System Broadcast',
           'my_requests': 'My Requests',
-          'new_tag': 'NEW',
-          'no_reviews': 'No reviews',
         };
     }
   }
@@ -921,10 +1000,12 @@ class _HomePageState extends State<HomePage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildCategories(context, localized, theme),
-                      const SizedBox(height: 8),
-                      _buildNewToTeamSection(context, localized, theme),
-                      const SizedBox(height: 8),
-                      _buildTopRatedSection(context, localized, theme),
+                      const SizedBox(height: 24),
+                      _buildRequestStatusTimeline(localized),
+                      const SizedBox(height: 20),
+                      _buildProjectIdeasSection(localized),
+                      const SizedBox(height: 24),
+                      _buildMaintenanceChecklist(localized),
                       const SizedBox(height: 32),
                     ],
                   ),
@@ -997,7 +1078,9 @@ class _HomePageState extends State<HomePage> {
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF1D4ED8).withValues(alpha: 0.28),
+                            color: const Color(
+                              0xFF1D4ED8,
+                            ).withValues(alpha: 0.28),
                             blurRadius: 22,
                             offset: const Offset(0, 10),
                           ),
@@ -1031,11 +1114,12 @@ class _HomePageState extends State<HomePage> {
                                                       vertical: 6,
                                                     ),
                                                 decoration: BoxDecoration(
-                                                  color: Colors.white.withValues(
-                                                    alpha: 0.14,
-                                                  ),
+                                                  color: Colors.white
+                                                      .withValues(alpha: 0.14),
                                                   borderRadius:
-                                                      BorderRadius.circular(999),
+                                                      BorderRadius.circular(
+                                                        999,
+                                                      ),
                                                 ),
                                                 child: Text(
                                                   data['badge'].toString(),
@@ -1050,9 +1134,8 @@ class _HomePageState extends State<HomePage> {
                                               Text(
                                                 '${(index % docs.length) + 1}/${docs.length}',
                                                 style: TextStyle(
-                                                  color: Colors.white.withValues(
-                                                    alpha: 0.78,
-                                                  ),
+                                                  color: Colors.white
+                                                      .withValues(alpha: 0.78),
                                                   fontWeight: FontWeight.w700,
                                                 ),
                                               ),
@@ -1133,8 +1216,9 @@ class _HomePageState extends State<HomePage> {
                                     ElevatedButton.icon(
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.white,
-                                        foregroundColor:
-                                            const Color(0xFF0F172A),
+                                        foregroundColor: const Color(
+                                          0xFF0F172A,
+                                        ),
                                         elevation: 0,
                                         padding: const EdgeInsets.symmetric(
                                           horizontal: 16,
@@ -1211,13 +1295,64 @@ class _HomePageState extends State<HomePage> {
           icon: const Icon(Icons.place_outlined, color: Colors.white),
           onPressed: _openLocationManager,
         ),
-        IconButton(
-          tooltip: strings['my_requests'],
-          icon: const Icon(Icons.list_alt_rounded, color: Colors.white),
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const MyRequestsPage()),
+        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: (user != null && !user.isAnonymous)
+              ? _firestore
+                    .collection('users')
+                    .doc(user.uid)
+                    .collection('requests')
+                    .snapshots()
+              : const Stream.empty(),
+          builder: (context, snapshot) {
+            final requestCount = (snapshot.data?.docs ?? const []).where((doc) {
+              final status = (doc.data()['status'] ?? 'pending')
+                  .toString()
+                  .toLowerCase();
+              return status == 'pending';
+            }).length;
+            return Stack(
+              alignment: Alignment.center,
+              children: [
+                IconButton(
+                  tooltip: strings['my_requests'],
+                  icon: const Icon(Icons.list_alt_rounded, color: Colors.white),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const MyRequestsPage()),
+                    );
+                  },
+                ),
+                if (requestCount > 0)
+                  Positioned(
+                    right: 2,
+                    top: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDC2626),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: const Color(0xFF1976D2)),
+                      ),
+                      constraints: const BoxConstraints(
+                        minWidth: 18,
+                        minHeight: 18,
+                      ),
+                      child: Text(
+                        requestCount > 99 ? '99+' : '$requestCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
             );
           },
         ),
@@ -1538,335 +1673,1169 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildTopRatedSection(
-    BuildContext context,
-    Map<String, dynamic> strings,
-    ThemeData theme,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                strings['top_rated'],
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF1E293B),
-                ),
-              ),
-              TextButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const SearchPage()),
-                ),
-                child: Text(
-                  strings['view_all'],
-                  style: const TextStyle(
-                    color: Color(0xFF1976D2),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(
-          height: 220,
-          child: _isTopRatedLoading
-              ? ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: 5,
-                  itemBuilder: (context, index) => _buildWorkerSkeleton(),
-                )
-              : _topRatedWorkers.isEmpty
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Text("No pros found nearby"),
-                  ),
-                )
-              : ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: _topRatedWorkers.length,
-                  itemBuilder: (context, index) {
-                    final worker = _topRatedWorkers[index];
-                    return _buildWorkerCard(worker, null, strings);
-                  },
-                ),
-        ),
-      ],
-    );
-  }
+  Widget _buildRequestStatusTimeline(Map<String, dynamic> strings) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) {
+      return const SizedBox.shrink();
+    }
 
-  Widget _buildNewToTeamSection(
-    BuildContext context,
-    Map<String, dynamic> strings,
-    ThemeData theme,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-          child: Text(
-            strings['new_team'],
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF1E293B),
-            ),
-          ),
-        ),
-        SizedBox(
-          height: 220,
-          child: _isNewWorkersLoading
-              ? ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: 5,
-                  itemBuilder: (context, index) => _buildWorkerSkeleton(),
-                )
-              : _newWorkers.isEmpty
-              ? const SizedBox.shrink()
-              : ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: _newWorkers.length,
-                  itemBuilder: (context, index) {
-                    final worker = _newWorkers[index];
-                    final createdAt = worker['createdAt'] as Timestamp?;
-                    bool isNew = false;
-                    if (createdAt != null) {
-                      final diff = DateTime.now().difference(
-                        createdAt.toDate(),
-                      );
-                      isNew = diff.inDays <= 7;
-                    }
-
-                    return _buildWorkerCard(
-                      worker,
-                      isNew ? strings['new_tag'] : null,
-                      strings,
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildWorkerCard(
-    Map<String, dynamic> worker,
-    String? tag,
-    Map<String, dynamic> strings,
-  ) {
-    return GestureDetector(
-      onTap: () {
-        if (worker['role'] == 'admin') {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const AdminProfile()),
-          );
-        } else {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => Profile(userId: worker['uid']),
-            ),
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('requests')
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _buildEmptyRequestCard(strings),
           );
         }
-      },
-      child: Container(
-        width: 160,
-        margin: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ClipRRect(
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(20),
-                  ),
-                  child:
-                      (worker['profileImageUrl'] != null &&
-                          worker['profileImageUrl'].toString().isNotEmpty)
-                      ? CachedNetworkImage(
-                          imageUrl: worker['profileImageUrl'],
-                          height: 110,
-                          width: 160,
-                          fit: BoxFit.cover,
-                          placeholder: (context, url) =>
-                              Container(color: const Color(0xFFE2E8F0)),
-                          errorWidget: (context, url, error) =>
-                              const Icon(Icons.error),
-                        )
-                      : Container(
-                          height: 110,
-                          width: 160,
-                          color: const Color(0xFFE2E8F0),
-                          child: const Icon(
-                            Icons.person,
-                            size: 40,
-                            color: Colors.white,
-                          ),
-                        ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        worker['name'] ?? 'Worker',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                          color: Color(0xFF1E293B),
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _localizedProfessionsText(
-                          worker['professions'],
-                          Provider.of<LanguageProvider>(
-                            context,
-                            listen: false,
-                          ).locale.languageCode,
-                        ),
-                        style: const TextStyle(
-                          color: Color(0xFF64748B),
-                          fontSize: 12,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          if ((worker['reviewCount'] ?? 0) > 0) ...[
-                            const Icon(
-                              Icons.star_rounded,
-                              color: Colors.amber,
-                              size: 16,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              worker['avgRating'].toStringAsFixed(1),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                                color: Color(0xFF1E293B),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              "(${worker['reviewCount']})",
-                              style: const TextStyle(
-                                color: Color(0xFF94A3B8),
-                                fontSize: 12,
-                              ),
-                            ),
-                          ] else ...[
-                            Text(
-                              strings['no_reviews'],
-                              style: const TextStyle(
-                                color: Color(0xFF94A3B8),
-                                fontSize: 12,
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
+
+        final doc = snapshot.data!.docs.first;
+        final data = doc.data();
+        final status = _normalizeHomeRequestStatus(
+          (data['status'] ?? 'pending').toString(),
+        );
+        final reviewedAt = data['reviewedAt'] as Timestamp?;
+        final hasSchedule = data['acceptedWindow'] != null;
+        final isReviewed =
+            reviewedAt != null ||
+            status == 'accepted' ||
+            status == 'rejected' ||
+            status == 'cancelled';
+        final currentStep = switch (status) {
+          'accepted' when hasSchedule => 3,
+          'accepted' => 2,
+          'rejected' || 'cancelled' => 2,
+          _ when isReviewed => 1,
+          _ => 0,
+        };
+        final stepLabels = [
+          strings['request_sent'] ?? 'Sent',
+          strings['request_reviewed'] ?? 'Reviewed',
+          status == 'rejected'
+              ? (strings['request_declined'] ?? 'Declined')
+              : status == 'cancelled'
+              ? (strings['request_cancelled'] ?? 'Cancelled')
+              : (strings['request_accepted'] ?? 'Accepted'),
+          strings['request_scheduled'] ?? 'Scheduled',
+        ];
+        final statusLabel = switch (status) {
+          'rejected' => strings['request_declined'] ?? 'Declined',
+          'cancelled' => strings['request_cancelled'] ?? 'Cancelled',
+          'accepted' when hasSchedule =>
+            strings['request_scheduled'] ?? 'Scheduled',
+          'accepted' => strings['request_accepted'] ?? 'Accepted',
+          _ when isReviewed => strings['request_reviewed'] ?? 'Reviewed',
+          _ => strings['request_pending'] ?? 'Waiting for review',
+        };
+        final statusColor = switch (status) {
+          'rejected' => const Color(0xFFDC2626),
+          'cancelled' => const Color(0xFF64748B),
+          'accepted' => const Color(0xFF059669),
+          _ when isReviewed => const Color(0xFF1D4ED8),
+          _ => const Color(0xFFF59E0B),
+        };
+        final title = (data['jobDescription'] ?? 'Request').toString().trim();
+        final date = (data['date'] ?? '').toString().trim();
+        final profession = (data['profession'] ?? '').toString().trim();
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
-            if (tag != null)
-              Positioned(
-                top: 8,
-                left: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.red,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    tag,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildWorkerSkeleton() {
-    return Container(
-      width: 160,
-      margin: const EdgeInsets.symmetric(horizontal: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Skeleton(height: 110, width: 160, borderRadius: 20),
-          Padding(
-            padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Skeleton(height: 16, width: 100),
-                const SizedBox(height: 8),
-                const Skeleton(height: 12, width: 120),
-                const SizedBox(height: 16),
                 Row(
-                  children: const [
-                    Skeleton(height: 16, width: 16, borderRadius: 8),
-                    SizedBox(width: 8),
-                    Skeleton(height: 14, width: 40),
+                  children: [
+                    const Icon(Icons.route_rounded, color: Color(0xFF1976D2)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        strings['latest_request'] ?? 'Latest Request',
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const MyRequestsPage(),
+                          ),
+                        );
+                      },
+                      child: Text(strings['view_all'] ?? 'View all'),
+                    ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                Text(
+                  title.isEmpty ? 'Request' : title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF334155),
+                    fontWeight: FontWeight.w700,
+                    height: 1.35,
+                  ),
+                ),
+                if (date.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    date,
+                    style: const TextStyle(
+                      color: Color(0xFF64748B),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    statusLabel,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: List.generate(stepLabels.length * 2 - 1, (index) {
+                    if (index.isOdd) {
+                      final connectorIndex = index ~/ 2;
+                      final isActive = connectorIndex < currentStep;
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 15),
+                          child: Container(
+                            height: 3,
+                            decoration: BoxDecoration(
+                              color: isActive
+                                  ? const Color(0xFF1976D2)
+                                  : const Color(0xFFE2E8F0),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+
+                    final stepIndex = index ~/ 2;
+                    final isActive = stepIndex <= currentStep;
+                    final isRejectedStep =
+                        status == 'rejected' && stepIndex == 2 && isActive;
+                    final isCancelledStep =
+                        status == 'cancelled' && stepIndex == 2 && isActive;
+                    final stepColor = isRejectedStep
+                        ? const Color(0xFFDC2626)
+                        : isCancelledStep
+                        ? const Color(0xFF64748B)
+                        : isActive
+                        ? const Color(0xFF1976D2)
+                        : const Color(0xFFE2E8F0);
+                    final stepIcon = isRejectedStep
+                        ? Icons.close_rounded
+                        : isCancelledStep
+                        ? Icons.remove_rounded
+                        : isActive
+                        ? Icons.check_rounded
+                        : Icons.circle;
+                    final iconColor =
+                        isActive && !isCancelledStep && !isRejectedStep
+                        ? Colors.white
+                        : isRejectedStep || isCancelledStep
+                        ? Colors.white
+                        : const Color(0xFF94A3B8);
+
+                    return SizedBox(
+                      width: 62,
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: stepColor,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(stepIcon, size: 18, color: iconColor),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            stepLabels[stepIndex],
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF475569),
+                              height: 1.25,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ),
+                if (status == 'rejected' && profession.isNotEmpty) ...[
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFDC2626),
+                        side: const BorderSide(color: Color(0xFFFCA5A5)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                SearchPage(initialTrade: profession),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.person_search_rounded),
+                      label: Text(
+                        strings['request_someone_else'] ??
+                            'Request from someone else',
+                      ),
+                    ),
+                  ),
+                ],
               ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildEmptyRequestCard(Map<String, dynamic> strings) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: const BoxDecoration(
+              color: Color(0xFFE0F2FE),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.assignment_outlined,
+              color: Color(0xFF1976D2),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              strings['no_active_requests'] ?? 'No active requests yet',
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF334155),
+              ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildMaintenanceChecklist(Map<String, dynamic> strings) {
+    final items = [
+      {
+        'title': strings['maintenance_item_1_title'] ?? 'Clean AC filters',
+        'subtitle':
+            strings['maintenance_item_1_subtitle'] ??
+            'Improve cooling and air quality at home',
+        'trade': 'AC Technician',
+        'tradeLabel': strings['maintenance_item_1_trade'] ?? 'AC Technician',
+        'icon': Icons.ac_unit_rounded,
+        'color': const Color(0xFF0EA5E9),
+      },
+      {
+        'title': strings['maintenance_item_2_title'] ?? 'Check water heater',
+        'subtitle':
+            strings['maintenance_item_2_subtitle'] ??
+            'Prevent leaks and weak heating before they get worse',
+        'trade': 'Plumber',
+        'tradeLabel': strings['maintenance_item_2_trade'] ?? 'Plumber',
+        'icon': Icons.water_drop_outlined,
+        'color': const Color(0xFF2563EB),
+      },
+      {
+        'title':
+            strings['maintenance_item_3_title'] ?? 'Electrical safety check',
+        'subtitle':
+            strings['maintenance_item_3_subtitle'] ??
+            'Inspect sockets, overload risks, and wiring',
+        'trade': 'Electrician',
+        'tradeLabel': strings['maintenance_item_3_trade'] ?? 'Electrician',
+        'icon': Icons.electrical_services_rounded,
+        'color': const Color(0xFFF59E0B),
+      },
+      {
+        'title': strings['maintenance_item_4_title'] ?? 'Deep home cleaning',
+        'subtitle':
+            strings['maintenance_item_4_subtitle'] ??
+            'Great before holidays, moving, or hosting guests',
+        'trade': 'Cleaner',
+        'tradeLabel': strings['maintenance_item_4_trade'] ?? 'Cleaner',
+        'icon': Icons.cleaning_services_rounded,
+        'color': const Color(0xFF10B981),
+      },
+      {
+        'title':
+            strings['maintenance_item_5_title'] ?? 'Seal windows and balconies',
+        'subtitle':
+            strings['maintenance_item_5_subtitle'] ??
+            'Help prevent water and draft issues during season changes',
+        'trade': 'Handyman',
+        'tradeLabel':
+            strings['maintenance_item_5_trade'] ?? 'Sealing specialist',
+        'icon': Icons.water_damage_outlined,
+        'color': const Color(0xFF7C3AED),
+      },
+      {
+        'title':
+            strings['maintenance_item_6_title'] ?? 'Trim and clean the garden',
+        'subtitle':
+            strings['maintenance_item_6_subtitle'] ??
+            'Keep outdoor spaces neat, safe, and easier to maintain',
+        'trade': 'Gardener',
+        'tradeLabel': strings['maintenance_item_6_trade'] ?? 'Gardener',
+        'icon': Icons.yard_rounded,
+        'color': const Color(0xFF16A34A),
+      },
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        strings['maintenance_title'] ??
+                            'Home Maintenance Checklist',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        strings['maintenance_subtitle'] ??
+                            'Simple things to check before they become expensive',
+                        style: const TextStyle(
+                          color: Color(0xFF64748B),
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        strings['maintenance_hint'] ??
+                            '4 quick checks for your home',
+                        style: const TextStyle(
+                          color: Color(0xFF1D4ED8),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    strings['seasonal_pick'] ?? 'Seasonal pick',
+                    style: const TextStyle(
+                      color: Color(0xFF1D4ED8),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 244,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: items.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final item = items[index];
+                final color = item['color'] as Color;
+
+                return GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            SearchPage(initialTrade: item['trade']! as String),
+                      ),
+                    );
+                  },
+                  child: Container(
+                    width: 244,
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [color, color.withValues(alpha: 0.80)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [
+                        BoxShadow(
+                          color: color.withValues(alpha: 0.22),
+                          blurRadius: 18,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 22,
+                              backgroundColor: Colors.white.withValues(
+                                alpha: 0.18,
+                              ),
+                              child: Icon(
+                                item['icon']! as IconData,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const Spacer(),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                item['tradeLabel']! as String,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item['title']! as String,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.15,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                item['subtitle']! as String,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  height: 1.3,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  strings['seasonal_pick'] ?? 'Seasonal pick',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.16),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.check_rounded,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                strings['maintenance_cta'] ?? 'Find a pro',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                            const Icon(
+                              Icons.arrow_forward_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProjectIdeasSection(Map<String, dynamic> strings) {
+    final items = [
+      {
+        'title': strings['project_roof_title'] ?? 'Build or repair a roof',
+        'subtitle':
+            strings['project_roof_subtitle'] ??
+            'Explore roof types before choosing the right pro',
+        'icon': Icons.roofing_rounded,
+        'color': const Color(0xFF7C3AED),
+        'action': 'roof_options',
+        'badge': strings['project_project_badge'] ?? 'Project',
+      },
+      {
+        'title': strings['project_leak_title'] ?? 'Water leakage',
+        'subtitle':
+            strings['project_leak_subtitle'] ??
+            'Need a plumber for fast detection and repair',
+        'icon': Icons.plumbing_rounded,
+        'color': const Color(0xFF0284C7),
+        'trade': 'Plumber',
+        'tradeLabel': strings['project_trade_plumber'] ?? 'Plumber',
+        'badge': strings['project_problem_badge'] ?? 'Problem',
+      },
+      {
+        'title': strings['project_power_title'] ?? 'Power issue',
+        'subtitle':
+            strings['project_power_subtitle'] ??
+            'Sockets, overload, or short circuit? Find an electrician',
+        'icon': Icons.electrical_services_rounded,
+        'color': const Color(0xFFF59E0B),
+        'trade': 'Electrician',
+        'tradeLabel': strings['project_trade_electrician'] ?? 'Electrician',
+        'badge': strings['project_problem_badge'] ?? 'Problem',
+      },
+      {
+        'title': strings['project_drain_title'] ?? 'Blocked drain or bad smell',
+        'subtitle':
+            strings['project_drain_subtitle'] ??
+            'For sinks, showers, and drains that need fast attention',
+        'icon': Icons.water_damage_rounded,
+        'color': const Color(0xFF0F766E),
+        'trade': 'Plumber',
+        'tradeLabel': strings['project_trade_plumber'] ?? 'Plumber',
+        'badge': strings['project_problem_badge'] ?? 'Problem',
+      },
+      {
+        'title': strings['project_ac_title'] ?? 'AC not cooling',
+        'subtitle':
+            strings['project_ac_subtitle'] ??
+            'Check, clean, or repair it before the heat gets worse',
+        'icon': Icons.ac_unit_rounded,
+        'color': const Color(0xFF2563EB),
+        'trade': 'AC Technician',
+        'tradeLabel': strings['project_trade_ac'] ?? 'AC Technician',
+        'badge': strings['project_problem_badge'] ?? 'Problem',
+      },
+      {
+        'title': strings['project_paint_title'] ?? 'Paint my house',
+        'subtitle':
+            strings['project_paint_subtitle'] ??
+            'Interior, exterior, or wall refresh projects',
+        'icon': Icons.format_paint_rounded,
+        'color': const Color(0xFF14B8A6),
+        'trade': 'Painter',
+        'tradeLabel': strings['project_trade_painter'] ?? 'Painter',
+        'badge': strings['project_project_badge'] ?? 'Project',
+      },
+      {
+        'title': strings['project_bathroom_title'] ?? 'Bathroom renovation',
+        'subtitle':
+            strings['project_bathroom_subtitle'] ??
+            'Tiles, fixtures, waterproofing, and full refresh work',
+        'icon': Icons.bathtub_rounded,
+        'color': const Color(0xFFEC4899),
+        'trade': 'Handyman',
+        'tradeLabel': strings['project_trade_handyman'] ?? 'Handyman',
+        'badge': strings['project_project_badge'] ?? 'Project',
+      },
+      {
+        'title': strings['project_garden_title'] ?? 'Garden work',
+        'subtitle':
+            strings['project_garden_subtitle'] ??
+            'Grass, trimming, irrigation, and outdoor improvement',
+        'icon': Icons.yard_rounded,
+        'color': const Color(0xFF16A34A),
+        'trade': 'Gardener',
+        'tradeLabel': strings['project_trade_gardener'] ?? 'Gardener',
+        'badge': strings['project_project_badge'] ?? 'Project',
+      },
+      {
+        'title': strings['project_cracks_title'] ?? 'Wall cracks',
+        'subtitle':
+            strings['project_cracks_subtitle'] ??
+            'Inspection, patching, and plaster work for indoor or outdoor walls',
+        'icon': Icons.home_repair_service_rounded,
+        'color': const Color(0xFF6B7280),
+        'trade': 'Handyman',
+        'tradeLabel': strings['project_trade_handyman'] ?? 'Handyman',
+        'badge': strings['project_problem_badge'] ?? 'Problem',
+      },
+      {
+        'title': strings['project_move_title'] ?? 'Moving to a new place',
+        'subtitle':
+            strings['project_move_subtitle'] ??
+            'Moving, disassembly, and setup for home or office',
+        'icon': Icons.local_shipping_rounded,
+        'color': const Color(0xFFEA580C),
+        'trade': 'Mover',
+        'tradeLabel': strings['project_trade_mover'] ?? 'Mover',
+        'badge': strings['project_project_badge'] ?? 'Project',
+      },
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  strings['project_ideas_title'] ?? 'What work do you need?',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF0F172A),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  strings['project_ideas_subtitle'] ??
+                      'Choose by problem or project type and get started faster',
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  strings['project_ideas_hint'] ??
+                      'Urgent fixes, renovations, and project ideas in one place',
+                  style: const TextStyle(
+                    color: Color(0xFF1D4ED8),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 240,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: items.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final item = items[index];
+                final color = item['color'] as Color;
+
+                return GestureDetector(
+                  onTap: () {
+                    if (item['action'] == 'roof_options') {
+                      _showRoofOptionsSheet(strings);
+                      return;
+                    }
+
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            SearchPage(initialTrade: item['trade']! as String),
+                      ),
+                    );
+                  },
+                  child: Container(
+                    width: 252,
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [color, color.withValues(alpha: 0.82)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [
+                        BoxShadow(
+                          color: color.withValues(alpha: 0.22),
+                          blurRadius: 18,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 23,
+                              backgroundColor: Colors.white.withValues(
+                                alpha: 0.18,
+                              ),
+                              child: Icon(
+                                item['icon']! as IconData,
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                            ),
+                            const Spacer(),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                item['badge']! as String,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+                        Text(
+                          item['title']! as String,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 19,
+                            fontWeight: FontWeight.w800,
+                            height: 1.15,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          item['subtitle']! as String,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            height: 1.35,
+                          ),
+                        ),
+                        if (item['trade'] != null) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              item['tradeLabel']! as String,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                        const Spacer(),
+                        Row(
+                          children: [
+                            Text(
+                              strings['project_ideas_cta'] ?? 'View options',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const Spacer(),
+                            const Icon(
+                              Icons.arrow_forward_rounded,
+                              color: Colors.white,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRoofOptionsSheet(Map<String, dynamic> strings) {
+    final options = [
+      {
+        'title': strings['roof_tile_title'] ?? 'Tiled roof',
+        'subtitle':
+            strings['roof_tile_subtitle'] ??
+            'Classic look with strong insulation for family homes',
+        'image':
+            'https://commons.wikimedia.org/wiki/Special:FilePath/Roof-Tile-3149.jpg',
+      },
+      {
+        'title': strings['roof_wood_title'] ?? 'Wooden roof',
+        'subtitle':
+            strings['roof_wood_subtitle'] ??
+            'Warm natural style for pergolas and custom structures',
+        'image':
+            'https://commons.wikimedia.org/wiki/Special:FilePath/Wood%20Shingle%20Roof%20Installation.jpg',
+      },
+      {
+        'title': strings['roof_panel_title'] ?? 'Panel roof',
+        'subtitle':
+            strings['roof_panel_subtitle'] ??
+            'Fast, clean, modern solution for many building types',
+        'image':
+            'https://commons.wikimedia.org/wiki/Special:FilePath/Sandwichpaneel-Dach07.jpg',
+      },
+      {
+        'title': strings['roof_metal_title'] ?? 'Metal roof',
+        'subtitle':
+            strings['roof_metal_subtitle'] ??
+            'Durable and strong for storage, parking, and industrial use',
+        'image':
+            'https://commons.wikimedia.org/wiki/Special:FilePath/Standing%20seam%20metal%20roof%203.jpg',
+      },
+    ];
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return SafeArea(
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            strings['roof_options_title'] ?? 'Roof options',
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            strings['roof_options_subtitle'] ??
+                                'Choose a style to see examples and continue to pros',
+                            style: const TextStyle(
+                              color: Color(0xFF64748B),
+                              fontSize: 13,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: options.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final option = options[index];
+
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(22),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.05),
+                              blurRadius: 14,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ClipRRect(
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(22),
+                              ),
+                              child: CachedNetworkImage(
+                                imageUrl: option['image']! as String,
+                                height: 160,
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 6,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFEFF6FF),
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          strings['project_example'] ??
+                                              'Examples',
+                                          style: const TextStyle(
+                                            color: Color(0xFF1D4ED8),
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    option['title']! as String,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    option['subtitle']! as String,
+                                    style: const TextStyle(
+                                      color: Color(0xFF475569),
+                                      fontSize: 13,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(
+                                          0xFF1D4ED8,
+                                        ),
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 14,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                        ),
+                                      ),
+                                      onPressed: () {
+                                        Navigator.pop(context);
+                                        Navigator.push(
+                                          this.context,
+                                          MaterialPageRoute(
+                                            builder: (_) => SearchPage(
+                                              initialTrade: 'Roofer',
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      icon: const Icon(Icons.search_rounded),
+                                      label: Text(
+                                        strings['project_find_pros'] ??
+                                            'Find pros',
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _normalizeHomeRequestStatus(String status) {
+    switch (status.toLowerCase()) {
+      case 'declined':
+      case 'rejected':
+        return 'rejected';
+      case 'cancelled':
+        return 'cancelled';
+      case 'accepted':
+        return 'accepted';
+      default:
+        return 'pending';
+    }
   }
 
   Widget _buildCategorySkeleton() {

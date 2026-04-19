@@ -25,6 +25,7 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
   late TimeOfDay _availableFrom;
   late TimeOfDay _availableTo;
   bool _isLoading = false;
+  bool _reviewTrackingStarted = false;
   final _priceController = TextEditingController();
   final _quoteDescController = TextEditingController();
 
@@ -61,6 +62,8 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
     } else {
       _availableTo = const TimeOfDay(hour: 16, minute: 0);
     }
+
+    _markRequestAsSeenAndReviewed();
   }
 
   @override
@@ -516,6 +519,82 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _markRequestAsSeenAndReviewed() async {
+    if (_reviewTrackingStarted) return;
+    _reviewTrackingStarted = true;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final clientId = widget.data['fromId']?.toString();
+    final requestId = widget.data['requestId']?.toString();
+    final firestore = FirebaseFirestore.instance;
+
+    final workerNotificationRef = firestore
+        .collection('users')
+        .doc(user.uid)
+        .collection('notifications')
+        .doc(widget.notificationId);
+
+    DocumentReference<Map<String, dynamic>>? clientRequestRef;
+    if (clientId != null &&
+        clientId.isNotEmpty &&
+        requestId != null &&
+        requestId.isNotEmpty) {
+      clientRequestRef = firestore
+          .collection('users')
+          .doc(clientId)
+          .collection('requests')
+          .doc(requestId);
+    }
+
+    try {
+      await firestore.runTransaction((transaction) async {
+        final workerNotificationSnap = await transaction.get(
+          workerNotificationRef,
+        );
+        if (workerNotificationSnap.exists) {
+          final workerData =
+              workerNotificationSnap.data() ?? <String, dynamic>{};
+          final workerUpdates = <String, dynamic>{};
+          if (workerData['seenAt'] == null) {
+            workerUpdates['seenAt'] = FieldValue.serverTimestamp();
+          }
+          if (workerData['reviewedAt'] == null) {
+            workerUpdates['reviewedAt'] = FieldValue.serverTimestamp();
+          }
+          if (workerUpdates.isNotEmpty) {
+            transaction.update(workerNotificationRef, workerUpdates);
+          }
+        }
+
+        if (clientRequestRef != null) {
+          final clientRequestSnap = await transaction.get(clientRequestRef);
+          if (clientRequestSnap.exists) {
+            final requestData = clientRequestSnap.data() ?? <String, dynamic>{};
+            final requestUpdates = <String, dynamic>{};
+            if (requestData['seenAt'] == null) {
+              requestUpdates['seenAt'] = FieldValue.serverTimestamp();
+            }
+            if (requestData['reviewedAt'] == null) {
+              requestUpdates['reviewedAt'] = FieldValue.serverTimestamp();
+              requestUpdates['reviewedBy'] = user.uid;
+            }
+            if (requestUpdates.isNotEmpty) {
+              transaction.set(
+                clientRequestRef,
+                requestUpdates,
+                SetOptions(merge: true),
+              );
+            }
+          }
+        }
+      });
+    } catch (e) {
+      debugPrint('Request review tracking error: $e');
+    }
   }
 
   Future<void> _processRequest(bool accept) async {

@@ -116,7 +116,8 @@ class SubscriptionAccessService {
     return token;
   }
 
-  static Future<bool> isCurrentGooglePlaySubscriptionLinkedToAnotherAccount() async {
+  static Future<bool>
+  isCurrentGooglePlaySubscriptionLinkedToAnotherAccount() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return false;
 
@@ -260,7 +261,8 @@ class SubscriptionAccessService {
       );
     }
 
-    final ownsStoredToken = storedToken.isNotEmpty && storedToken == purchaseToken;
+    final ownsStoredToken =
+        storedToken.isNotEmpty && storedToken == purchaseToken;
     final canClaimUnownedToken =
         allowClaimUnownedPurchase && ownerQuery.docs.isEmpty;
 
@@ -356,8 +358,9 @@ class SubscriptionAccessService {
     final resolvedStatus = _resolveSubscriptionStatusFromData(data);
 
     if (role == 'worker' && resolvedStatus == 'inactive') {
-      final storedStatus =
-          (data?['subscriptionStatus'] ?? '').toString().toLowerCase();
+      final storedStatus = (data?['subscriptionStatus'] ?? '')
+          .toString()
+          .toLowerCase();
       final isSubscribed = data?['isSubscribed'] == true;
 
       if (storedStatus != 'inactive' || isSubscribed) {

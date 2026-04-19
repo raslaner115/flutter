@@ -20,14 +20,14 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-      apiKey: "AIzaSyBL55dWOh2eIBDooZ0EwzXegyAMEiWMuNE",
-      authDomain: "hire-hub-fe6c4.firebaseapp.com",
-      databaseURL: "https://hire-hub-fe6c4-default-rtdb.firebaseio.com",
-      projectId: "hire-hub-fe6c4",
-      storageBucket: "hire-hub-fe6c4.firebasestorage.app",
-      messagingSenderId: "29257648718",
-      appId: "1:29257648718:web:40cec5d689067d9cb8111f",
-      measurementId: "G-66P0301100"
+    apiKey: "AIzaSyBL55dWOh2eIBDooZ0EwzXegyAMEiWMuNE",
+    authDomain: "hire-hub-fe6c4.firebaseapp.com",
+    databaseURL: "https://hire-hub-fe6c4-default-rtdb.firebaseio.com",
+    projectId: "hire-hub-fe6c4",
+    storageBucket: "hire-hub-fe6c4.firebasestorage.app",
+    messagingSenderId: "29257648718",
+    appId: "1:29257648718:web:40cec5d689067d9cb8111f",
+    measurementId: "G-66P0301100",
   );
 
   static const FirebaseOptions android = FirebaseOptions(
@@ -44,6 +44,6 @@ class DefaultFirebaseOptions {
     messagingSenderId: '29257648718',
     projectId: 'hire-hub-fe6c4',
     storageBucket: 'hire-hub-fe6c4.firebasestorage.app',
-    iosBundleId: 'com.hiro.hire',
+    iosBundleId: 'com.hirehub.app',
   );
 }
