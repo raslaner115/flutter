@@ -6,15 +6,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import 'package:untitled1/services/language_provider.dart';
-import 'package:untitled1/widgets/tour_tip_dialog.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path_provider/path_provider.dart' as path_provider;
 import 'package:video_player/video_player.dart';
 
 class AddProjectPage extends StatefulWidget {
-  final String? tourIntroText;
-
-  const AddProjectPage({super.key, this.tourIntroText});
+  const AddProjectPage({super.key});
 
   @override
   State<AddProjectPage> createState() => _AddProjectPageState();
@@ -26,39 +23,6 @@ class _AddProjectPageState extends State<AddProjectPage> {
   bool _isUploading = false;
   double _uploadProgress = 0;
   final _picker = ImagePicker();
-  bool _tourIntroShown = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showTourIntroIfNeeded();
-    });
-  }
-
-  Future<void> _showTourIntroIfNeeded() async {
-    if (_tourIntroShown) return;
-    final intro = widget.tourIntroText;
-    if (intro == null || intro.isEmpty || !mounted) return;
-    _tourIntroShown = true;
-
-    final strings = _getLocalizedStrings();
-    final locale = Provider.of<LanguageProvider>(
-      context,
-      listen: false,
-    ).locale.languageCode;
-    final isRtl = locale == 'he' || locale == 'ar';
-
-    await showTourTipDialog(
-      context: context,
-      title: strings['title']!,
-      body: intro,
-      stepLabel: isRtl ? 'שלב 1 / 8' : 'Step 1 / 8',
-      icon: Icons.add_photo_alternate_rounded,
-      isRtl: isRtl,
-      confirmLabel: isRtl ? 'הבנתי' : 'Got it',
-    );
-  }
 
   bool _isVideo(String path) {
     final p = path.toLowerCase();

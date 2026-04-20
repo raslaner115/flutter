@@ -45,16 +45,6 @@ class _BlogPageState extends State<BlogPage> {
   int _selectedFilterIndex = 0;
   bool _isGuideExpanded = false;
 
-  Future<bool> _canSeeJobRequests() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return false;
-
-    final userDoc = await _firestore.collection('users').doc(user.uid).get();
-    return SubscriptionAccessService.hasActiveWorkerSubscriptionFromData(
-      userDoc.data(),
-    );
-  }
-
   @override
   void initState() {
     super.initState();
@@ -145,19 +135,20 @@ class _BlogPageState extends State<BlogPage> {
       final rawItems = data?['items'];
       if (rawItems is! List) return;
 
-      final items = rawItems
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .where((item) => _professionCanonicalValue(item).isNotEmpty)
-          .toList()
-        ..sort((a, b) {
-          final aId = (a['id'] as num?)?.toInt() ?? 1 << 30;
-          final bId = (b['id'] as num?)?.toInt() ?? 1 << 30;
-          if (aId != bId) return aId.compareTo(bId);
-          return _professionCanonicalValue(
-            a,
-          ).compareTo(_professionCanonicalValue(b));
-        });
+      final items =
+          rawItems
+              .whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item))
+              .where((item) => _professionCanonicalValue(item).isNotEmpty)
+              .toList()
+            ..sort((a, b) {
+              final aId = (a['id'] as num?)?.toInt() ?? 1 << 30;
+              final bId = (b['id'] as num?)?.toInt() ?? 1 << 30;
+              if (aId != bId) return aId.compareTo(bId);
+              return _professionCanonicalValue(
+                a,
+              ).compareTo(_professionCanonicalValue(b));
+            });
 
       if (!mounted) return;
       setState(() => _professionItems = items);
@@ -184,7 +175,9 @@ class _BlogPageState extends State<BlogPage> {
     for (final item in _professionItems) {
       for (final key in const ['en', 'he', 'ar', 'ru', 'am']) {
         final candidate = item[key]?.toString().trim().toLowerCase();
-        if (candidate != null && candidate.isNotEmpty && candidate == normalized) {
+        if (candidate != null &&
+            candidate.isNotEmpty &&
+            candidate == normalized) {
           return item;
         }
       }
@@ -259,21 +252,10 @@ class _BlogPageState extends State<BlogPage> {
         .listen(
           (snapshot) async {
             List<Map<String, dynamic>> loadedPosts = [];
-            final currentUserId = FirebaseAuth.instance.currentUser?.uid;
-            final canSeeJobRequests = await _canSeeJobRequests();
 
             for (var doc in snapshot.docs) {
               final post = doc.data() as Map<String, dynamic>;
               post['id'] = doc.id;
-
-               final isJobRequest = post['isJobRequest'] == true;
-               final isAuthor = currentUserId != null &&
-                   post['authorUid']?.toString() == currentUserId;
-
-               if (isJobRequest && !isAuthor && !canSeeJobRequests) {
-                 continue;
-               }
-
               loadedPosts.add(post);
             }
 
@@ -370,11 +352,15 @@ class _BlogPageState extends State<BlogPage> {
           'edit_your_bid': 'ניתן לעדכן את ההצעה הקיימת שלכם.',
           'choose_worker': 'בחר בעל מקצוע',
           'confirm_choose_worker_title': 'לבחור בעל מקצוע זה?',
-          'confirm_choose_worker_body': 'הבחירה תסמן את בעל המקצוע כהצעה שנבחרה עבור הבקשה הזו.',
+          'confirm_choose_worker_body':
+              'הבחירה תסמן את בעל המקצוע כהצעה שנבחרה עבור הבקשה הזו.',
           'selected_worker': 'בעל מקצוע נבחר',
           'selected_offer': 'הצעה נבחרה',
           'offer_price': 'מחיר מוצע',
-          'workers_can_offer': 'בעלי מקצוע יכולים להציע מחיר, ואתם יכולים לבחור את המתאים לכם.',
+          'workers_can_offer':
+              'בעלי מקצוע יכולים להציע מחיר, ואתם יכולים לבחור את המתאים לכם.',
+          'job_request_comment_restriction':
+              'רק בעלי מקצוע עם מנוי פעיל יכולים להגיב לבקשות עבודה.',
           'rating': 'דירוג',
           'reviews': 'ביקורות',
           'author': 'מפרסם',
@@ -482,11 +468,15 @@ class _BlogPageState extends State<BlogPage> {
           'edit_your_bid': 'You can update your existing bid.',
           'choose_worker': 'Choose Worker',
           'confirm_choose_worker_title': 'Choose this worker?',
-          'confirm_choose_worker_body': 'This will mark the worker as the selected offer for this job request.',
+          'confirm_choose_worker_body':
+              'This will mark the worker as the selected offer for this job request.',
           'selected_worker': 'Selected Worker',
           'selected_offer': 'Selected Offer',
           'offer_price': 'Offered Price',
-          'workers_can_offer': 'Workers can place bids here, and you can choose the one you want.',
+          'workers_can_offer':
+              'Workers can place bids here, and you can choose the one you want.',
+          'job_request_comment_restriction':
+              'Only workers with an active subscription can comment on job requests.',
           'rating': 'Rating',
           'reviews': 'Reviews',
           'author': 'Author',
@@ -510,11 +500,13 @@ class _BlogPageState extends State<BlogPage> {
           'location_loading': 'Getting location...',
           'date_from': 'From date',
           'date_to': 'To date',
-          'date_anytime': 'If you do not choose dates, the request will be considered anytime',
+          'date_anytime':
+              'If you do not choose dates, the request will be considered anytime',
           'select_date': 'Select date',
           'time_from': 'From hour',
           'time_to': 'To hour',
-          'time_anytime': 'If you do not choose hours, the request will be considered anytime',
+          'time_anytime':
+              'If you do not choose hours, the request will be considered anytime',
           'add_video': 'Add Video',
           'media_limit': 'You can upload up to 5 photos/videos',
           'gallery': 'Gallery',
@@ -618,7 +610,8 @@ class _BlogPageState extends State<BlogPage> {
       listen: false,
     ).locale.languageCode;
     LatLng? selectedJobLocation =
-        existingPost?['locationLat'] != null && existingPost?['locationLng'] != null
+        existingPost?['locationLat'] != null &&
+            existingPost?['locationLng'] != null
         ? LatLng(
             (existingPost!['locationLat'] as num).toDouble(),
             (existingPost['locationLng'] as num).toDouble(),
@@ -628,12 +621,12 @@ class _BlogPageState extends State<BlogPage> {
         existingPost?['category'] ?? (strings['categories'] as List)[1];
     DateTime? selectedDateFrom = _extractDate(existingPost?['requestDateFrom']);
     DateTime? selectedDateTo = _extractDate(existingPost?['requestDateTo']);
-    TimeOfDay? selectedTimeFrom = _extractTime(existingPost?['requestTimeFrom']);
+    TimeOfDay? selectedTimeFrom = _extractTime(
+      existingPost?['requestTimeFrom'],
+    );
     TimeOfDay? selectedTimeTo = _extractTime(existingPost?['requestTimeTo']);
     String? selectedProfession = existingPost?['profession'] != null
-        ? _normalizeStoredProfession(
-            existingPost!['profession'].toString(),
-          )
+        ? _normalizeStoredProfession(existingPost!['profession'].toString())
         : null;
     List<File> selectedMediaFiles = [];
     List<String> existingMediaUrls = existingPost?['imageUrls'] != null
@@ -651,9 +644,9 @@ class _BlogPageState extends State<BlogPage> {
               .toList();
 
     void showMediaLimitMessage() {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(strings['media_limit'])),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(strings['media_limit'])));
     }
 
     Future<void> showSourcePicker({
@@ -706,11 +699,11 @@ class _BlogPageState extends State<BlogPage> {
         );
         if (placemarks.isNotEmpty) {
           final place = placemarks.first;
-          final parts = [
-            place.locality,
-            place.subLocality,
-            place.administrativeArea,
-          ].where((part) => part != null && part!.trim().isNotEmpty).cast<String>().toList();
+          final parts =
+              [place.locality, place.subLocality, place.administrativeArea]
+                  .where((part) => part != null && part!.trim().isNotEmpty)
+                  .cast<String>()
+                  .toList();
           locationController.text = parts.isNotEmpty
               ? parts.toSet().join(', ')
               : '${loc.latitude.toStringAsFixed(5)}, ${loc.longitude.toStringAsFixed(5)}';
@@ -791,8 +784,7 @@ class _BlogPageState extends State<BlogPage> {
       required StateSetter setSheetState,
     }) async {
       final initialDate =
-          (isFrom ? selectedDateFrom : selectedDateTo) ??
-          DateTime.now();
+          (isFrom ? selectedDateFrom : selectedDateTo) ?? DateTime.now();
       final firstDate = isFrom
           ? DateTime.now().subtract(const Duration(days: 1))
           : (selectedDateFrom ?? DateTime.now());
@@ -823,8 +815,8 @@ class _BlogPageState extends State<BlogPage> {
     }) async {
       final picked = await showTimePicker(
         context: context,
-        initialTime: (isFrom ? selectedTimeFrom : selectedTimeTo) ??
-            TimeOfDay.now(),
+        initialTime:
+            (isFrom ? selectedTimeFrom : selectedTimeTo) ?? TimeOfDay.now(),
       );
 
       if (picked == null) return;
@@ -1076,7 +1068,9 @@ class _BlogPageState extends State<BlogPage> {
                               const SizedBox(
                                 width: 18,
                                 height: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               ),
                           ],
                         ),
@@ -1160,7 +1154,8 @@ class _BlogPageState extends State<BlogPage> {
                 ),
                 const SizedBox(height: 16),
 
-                if (selectedMediaFiles.isNotEmpty || existingMediaUrls.isNotEmpty)
+                if (selectedMediaFiles.isNotEmpty ||
+                    existingMediaUrls.isNotEmpty)
                   SizedBox(
                     height: 100,
                     child: ListView.builder(
@@ -1171,7 +1166,9 @@ class _BlogPageState extends State<BlogPage> {
                         final isExisting = index < existingMediaUrls.length;
                         final mediaPath = isExisting
                             ? existingMediaUrls[index]
-                            : selectedMediaFiles[index - existingMediaUrls.length].path;
+                            : selectedMediaFiles[index -
+                                      existingMediaUrls.length]
+                                  .path;
                         final isVideo = _isVideoPath(mediaPath);
                         return Stack(
                           children: [
@@ -1219,7 +1216,8 @@ class _BlogPageState extends State<BlogPage> {
                                       fit: BoxFit.cover,
                                     )
                                   : Image.file(
-                                      selectedMediaFiles[index - existingMediaUrls.length],
+                                      selectedMediaFiles[index -
+                                          existingMediaUrls.length],
                                       fit: BoxFit.cover,
                                     ),
                             ),
@@ -1263,7 +1261,8 @@ class _BlogPageState extends State<BlogPage> {
                             title: strings['upload_photo'],
                             onSelect: (source) async {
                               final currentCount =
-                                  selectedMediaFiles.length + existingMediaUrls.length;
+                                  selectedMediaFiles.length +
+                                  existingMediaUrls.length;
                               if (currentCount >= maxMediaCount) {
                                 showMediaLimitMessage();
                                 return;
@@ -1277,7 +1276,8 @@ class _BlogPageState extends State<BlogPage> {
                                 );
                                 if (picked == null) return;
                                 setSheetState(
-                                  () => selectedMediaFiles.add(File(picked.path)),
+                                  () =>
+                                      selectedMediaFiles.add(File(picked.path)),
                                 );
                                 return;
                               }
@@ -1319,7 +1319,8 @@ class _BlogPageState extends State<BlogPage> {
                             title: strings['add_video'],
                             onSelect: (source) async {
                               final currentCount =
-                                  selectedMediaFiles.length + existingMediaUrls.length;
+                                  selectedMediaFiles.length +
+                                  existingMediaUrls.length;
                               if (currentCount >= maxMediaCount) {
                                 showMediaLimitMessage();
                                 return;
@@ -1409,7 +1410,11 @@ class _BlogPageState extends State<BlogPage> {
                             List<String> mediaUrls = List.from(
                               existingMediaUrls,
                             );
-                            for (var i = 0; i < selectedMediaFiles.length; i++) {
+                            for (
+                              var i = 0;
+                              i < selectedMediaFiles.length;
+                              i++
+                            ) {
                               final file = selectedMediaFiles[i];
                               final isVideo = _isVideoPath(file.path);
                               final storageRef = FirebaseStorage.instance
@@ -1420,7 +1425,9 @@ class _BlogPageState extends State<BlogPage> {
                               await storageRef.putFile(
                                 file,
                                 SettableMetadata(
-                                  contentType: isVideo ? 'video/mp4' : 'image/jpeg',
+                                  contentType: isVideo
+                                      ? 'video/mp4'
+                                      : 'image/jpeg',
                                 ),
                               );
                               String url = await storageRef.getDownloadURL();
@@ -1458,7 +1465,10 @@ class _BlogPageState extends State<BlogPage> {
                                   ? mediaUrls[0]
                                   : null,
                               'mediaTypes': mediaUrls
-                                  .map((url) => _isVideoPath(url) ? 'video' : 'image')
+                                  .map(
+                                    (url) =>
+                                        _isVideoPath(url) ? 'video' : 'image',
+                                  )
                                   .toList(),
                               'authorUid': user.uid,
                               'authorName': authorName,
@@ -1834,13 +1844,17 @@ class _BlogPageState extends State<BlogPage> {
               backgroundColor: Colors.white,
               checkmarkColor: const Color(0xFF1976D2),
               labelStyle: TextStyle(
-                color: isSelected ? const Color(0xFF1976D2) : const Color(0xFF64748B),
+                color: isSelected
+                    ? const Color(0xFF1976D2)
+                    : const Color(0xFF64748B),
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
               ),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
                 side: BorderSide(
-                  color: isSelected ? const Color(0xFF1976D2) : const Color(0xFFE2E8F0),
+                  color: isSelected
+                      ? const Color(0xFF1976D2)
+                      : const Color(0xFFE2E8F0),
                 ),
               ),
             ),
@@ -2079,8 +2093,10 @@ class _BlogCard extends StatelessWidget {
     final postedAt = _blogCardDate(post['timestamp']);
     final dateLabel = requestDateFrom != null || requestDateTo != null
         ? requestDateFrom != null && requestDateTo != null
-            ? "${intl.DateFormat('dd/MM').format(requestDateFrom)} - ${intl.DateFormat('dd/MM').format(requestDateTo)}"
-            : intl.DateFormat('dd/MM').format(requestDateFrom ?? requestDateTo!)
+              ? "${intl.DateFormat('dd/MM').format(requestDateFrom)} - ${intl.DateFormat('dd/MM').format(requestDateTo)}"
+              : intl.DateFormat(
+                  'dd/MM',
+                ).format(requestDateFrom ?? requestDateTo!)
         : postedAt != null
         ? intl.DateFormat('dd/MM/yyyy').format(postedAt)
         : null;
@@ -2414,6 +2430,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
   StreamSubscription? _commentsSubscription;
   final Map<String, Map<String, dynamic>> _workerPreviewCache = {};
   String? _currentUserRole;
+  bool _currentUserHasActiveWorkerSubscription = false;
   String? _loadedBidDraftId;
   bool _isSubmittingComment = false;
 
@@ -2437,9 +2454,14 @@ class _PostDetailPageState extends State<PostDetailPage> {
     if (user == null) return;
     try {
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      final userData = userDoc.data();
       if (!mounted) return;
       setState(() {
-        _currentUserRole = userDoc.data()?['role']?.toString();
+        _currentUserRole = userData?['role']?.toString();
+        _currentUserHasActiveWorkerSubscription =
+            SubscriptionAccessService.hasActiveWorkerSubscriptionFromData(
+              userData,
+            );
       });
     } catch (_) {}
   }
@@ -2496,7 +2518,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
             comment['id'] = doc.id;
             loadedComments.add(comment);
             final authorUid = comment['authorUid']?.toString() ?? '';
-            final isBid = comment['isBid'] == true || (comment['bidPrice'] != null);
+            final isBid =
+                comment['isBid'] == true || (comment['bidPrice'] != null);
             if (authorUid.isNotEmpty && isBid) {
               _ensureWorkerPreview(authorUid);
             }
@@ -2516,9 +2539,21 @@ class _PostDetailPageState extends State<PostDetailPage> {
     }
     final isJobRequest = widget.post['isJobRequest'] == true;
     final isAuthor = widget.post['authorUid'] == user.uid;
-    final bidPrice = _bidPriceController.text.trim();
     final text = _commentController.text.trim();
-    final isWorkerBid = isJobRequest && !isAuthor && _currentUserRole == 'worker';
+    final canCommentOnJobRequest =
+        !isJobRequest ||
+        (!isAuthor &&
+            _currentUserRole == 'worker' &&
+            _currentUserHasActiveWorkerSubscription);
+
+    if (!canCommentOnJobRequest) return;
+
+    final bidPrice = _bidPriceController.text.trim();
+    final isWorkerBid =
+        isJobRequest &&
+        !isAuthor &&
+        _currentUserRole == 'worker' &&
+        _currentUserHasActiveWorkerSubscription;
     final existingBid = isWorkerBid
         ? _comments.cast<Map<String, dynamic>?>().firstWhere(
             (comment) =>
@@ -2557,7 +2592,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
       }
       _commentController.clear();
       _bidPriceController.clear();
-    } catch (_) {} finally {
+    } catch (_) {
+    } finally {
       if (mounted) {
         setState(() => _isSubmittingComment = false);
       }
@@ -2693,7 +2729,13 @@ class _PostDetailPageState extends State<PostDetailPage> {
     final user = FirebaseAuth.instance.currentUser;
     final isJobRequest = widget.post['isJobRequest'] == true;
     final isAuthor = user != null && widget.post['authorUid'] == user.uid;
-    final canBid = isJobRequest && !isAuthor && _currentUserRole == 'worker';
+    final canCommentOnJobRequest =
+        isJobRequest &&
+        !isAuthor &&
+        _currentUserRole == 'worker' &&
+        _currentUserHasActiveWorkerSubscription;
+    final canComment = !isJobRequest || canCommentOnJobRequest;
+    final canBid = canCommentOnJobRequest;
     final myExistingBid = user == null
         ? null
         : _comments.cast<Map<String, dynamic>?>().firstWhere(
@@ -2709,11 +2751,10 @@ class _PostDetailPageState extends State<PostDetailPage> {
     final selectedBidPrice =
         widget.post['selectedBidPrice']?.toString().trim() ?? '';
     final location = widget.post['location']?.toString().trim() ?? '';
-    final profession = (widget.post['professionLabel'] ??
-            widget.post['profession'] ??
-            '')
-        .toString()
-        .trim();
+    final profession =
+        (widget.post['professionLabel'] ?? widget.post['profession'] ?? '')
+            .toString()
+            .trim();
     final requestDateFrom = _postDate(widget.post['requestDateFrom']);
     final requestDateTo = _postDate(widget.post['requestDateTo']);
     final requestTimeFrom =
@@ -2884,7 +2925,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
                             icon: Icons.location_on_outlined,
                             label: widget.localizedStrings['location'],
                             value: location,
-                            onTap: (widget.post['locationLat'] != null &&
+                            onTap:
+                                (widget.post['locationLat'] != null &&
                                     widget.post['locationLng'] != null)
                                 ? _openPostLocation
                                 : null,
@@ -2893,21 +2935,24 @@ class _PostDetailPageState extends State<PostDetailPage> {
                           _buildInfoCard(
                             icon: Icons.date_range_rounded,
                             label: widget.localizedStrings['date_from'],
-                            value: requestDateFrom != null && requestDateTo != null
+                            value:
+                                requestDateFrom != null && requestDateTo != null
                                 ? "${intl.DateFormat('dd/MM/yyyy').format(requestDateFrom)} - ${intl.DateFormat('dd/MM/yyyy').format(requestDateTo)}"
                                 : requestDateFrom != null
-                                ? intl.DateFormat('dd/MM/yyyy').format(
-                                    requestDateFrom,
-                                  )
-                                : intl.DateFormat('dd/MM/yyyy').format(
-                                    requestDateTo!,
-                                  ),
+                                ? intl.DateFormat(
+                                    'dd/MM/yyyy',
+                                  ).format(requestDateFrom)
+                                : intl.DateFormat(
+                                    'dd/MM/yyyy',
+                                  ).format(requestDateTo!),
                           ),
-                        if (requestTimeFrom.isNotEmpty || requestTimeTo.isNotEmpty)
+                        if (requestTimeFrom.isNotEmpty ||
+                            requestTimeTo.isNotEmpty)
                           _buildInfoCard(
                             icon: Icons.access_time_rounded,
                             label: widget.localizedStrings['time_from'],
-                            value: requestTimeFrom.isNotEmpty &&
+                            value:
+                                requestTimeFrom.isNotEmpty &&
                                     requestTimeTo.isNotEmpty
                                 ? "$requestTimeFrom - $requestTimeTo"
                                 : (requestTimeFrom.isNotEmpty
@@ -2922,7 +2967,9 @@ class _PostDetailPageState extends State<PostDetailPage> {
                             decoration: BoxDecoration(
                               color: const Color(0xFFFFF7ED),
                               borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: const Color(0xFFFED7AA)),
+                              border: Border.all(
+                                color: const Color(0xFFFED7AA),
+                              ),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2969,6 +3016,18 @@ class _PostDetailPageState extends State<PostDetailPage> {
                                     ),
                                   ),
                                 ],
+                                if (!canCommentOnJobRequest) ...[
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    widget
+                                        .localizedStrings['job_request_comment_restriction'],
+                                    style: const TextStyle(
+                                      color: Color(0xFF9A3412),
+                                      fontWeight: FontWeight.w500,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -2985,186 +3044,195 @@ class _PostDetailPageState extends State<PostDetailPage> {
                           ),
                         ),
                         const SizedBox(height: 16),
-                        ..._comments.map(
-                          (comment) {
-                            final isSelectedBid =
-                                selectedBidId != null &&
-                                selectedBidId == comment['id']?.toString();
-                            final workerUid =
-                                comment['authorUid']?.toString().trim() ?? '';
-                            final workerPreview = _workerPreviewCache[workerUid];
-                            final bidPrice =
-                                comment['bidPrice']?.toString().trim() ?? '';
-                            final hasBid = bidPrice.isNotEmpty;
+                        ..._comments.map((comment) {
+                          final isSelectedBid =
+                              selectedBidId != null &&
+                              selectedBidId == comment['id']?.toString();
+                          final workerUid =
+                              comment['authorUid']?.toString().trim() ?? '';
+                          final workerPreview = _workerPreviewCache[workerUid];
+                          final bidPrice =
+                              comment['bidPrice']?.toString().trim() ?? '';
+                          final hasBid = bidPrice.isNotEmpty;
 
-                            return InkWell(
-                              onTap: workerUid.isEmpty
-                                  ? null
-                                  : () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) =>
-                                              Profile(userId: workerUid),
-                                        ),
-                                      );
-                                    },
-                              borderRadius: BorderRadius.circular(12),
-                              child: Container(
-                                margin: const EdgeInsets.only(bottom: 12),
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: isSelectedBid
-                                      ? const Color(0xFFF0FDF4)
-                                      : const Color(0xFFF1F5F9),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: isSelectedBid
-                                      ? Border.all(color: const Color(0xFF86EFAC))
-                                      : null,
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        CircleAvatar(
-                                          radius: 18,
-                                          backgroundImage:
-                                              (workerPreview?['profileImageUrl'] ??
-                                                          '')
-                                                      .toString()
-                                                      .isNotEmpty
-                                                  ? CachedNetworkImageProvider(
-                                                      workerPreview!['profileImageUrl'],
-                                                    )
-                                                  : null,
-                                          child:
-                                              (workerPreview?['profileImageUrl'] ??
-                                                          '')
-                                                      .toString()
-                                                      .isEmpty
-                                                  ? const Icon(
-                                                      Icons.person,
-                                                      size: 18,
-                                                    )
-                                                  : null,
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                comment['authorName'] ?? 'Anonymous',
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 13,
-                                                ),
-                                              ),
-                                              if (hasBid && workerPreview != null)
-                                                Padding(
-                                                  padding: const EdgeInsets.only(top: 4),
-                                                  child: Row(
-                                                    children: [
-                                                      const Icon(
-                                                        Icons.star_rounded,
-                                                        size: 16,
-                                                        color: Color(0xFFF59E0B),
-                                                      ),
-                                                      const SizedBox(width: 4),
-                                                      Text(
-                                                        "${(workerPreview['avgRating'] as double).toStringAsFixed(1)}",
-                                                        style: const TextStyle(
-                                                          fontWeight: FontWeight.w700,
-                                                          color: Color(0xFF334155),
-                                                        ),
-                                                      ),
-                                                      const SizedBox(width: 6),
-                                                      Text(
-                                                        "(${workerPreview['reviewCount']})",
-                                                        style: const TextStyle(
-                                                          fontSize: 12,
-                                                          color: Color(0xFF64748B),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                            ],
-                                          ),
-                                        ),
-                                        if (hasBid)
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white,
-                                              borderRadius: BorderRadius.circular(
-                                                999,
-                                              ),
-                                            ),
-                                            child: Text(
-                                              "$bidPrice ₪",
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.w800,
-                                                color: Color(0xFF1976D2),
-                                              ),
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                    if (hasBid) ...[
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        widget.localizedStrings['offer_price'],
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Color(0xFF64748B),
-                                        ),
+                          return InkWell(
+                            onTap: workerUid.isEmpty
+                                ? null
+                                : () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            Profile(userId: workerUid),
                                       ),
-                                    ],
-                                    if ((comment['text'] ?? '')
-                                        .toString()
-                                        .trim()
-                                        .isNotEmpty) ...[
-                                      const SizedBox(height: 6),
-                                      Text(comment['text'] ?? ''),
-                                    ],
-                                    if (isSelectedBid) ...[
-                                      const SizedBox(height: 10),
-                                      Text(
-                                        widget.localizedStrings['selected_offer'],
-                                        style: const TextStyle(
-                                          color: Color(0xFF15803D),
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                    ] else if (isJobRequest && isAuthor && hasBid) ...[
-                                      const SizedBox(height: 10),
-                                      TextButton.icon(
-                                        onPressed: () => _selectWorkerOffer(comment),
-                                        icon: const Icon(
-                                          Icons.check_circle_outline_rounded,
-                                          size: 18,
-                                        ),
-                                        label: Text(
-                                          widget.localizedStrings['choose_worker'],
-                                        ),
-                                        style: TextButton.styleFrom(
-                                          foregroundColor: const Color(0xFF1976D2),
-                                          padding: EdgeInsets.zero,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
+                                    );
+                                  },
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: isSelectedBid
+                                    ? const Color(0xFFF0FDF4)
+                                    : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(12),
+                                border: isSelectedBid
+                                    ? Border.all(color: const Color(0xFF86EFAC))
+                                    : null,
                               ),
-                            );
-                          },
-                        ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 18,
+                                        backgroundImage:
+                                            (workerPreview?['profileImageUrl'] ??
+                                                    '')
+                                                .toString()
+                                                .isNotEmpty
+                                            ? CachedNetworkImageProvider(
+                                                workerPreview!['profileImageUrl'],
+                                              )
+                                            : null,
+                                        child:
+                                            (workerPreview?['profileImageUrl'] ??
+                                                    '')
+                                                .toString()
+                                                .isEmpty
+                                            ? const Icon(Icons.person, size: 18)
+                                            : null,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              comment['authorName'] ??
+                                                  'Anonymous',
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                            if (hasBid && workerPreview != null)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                  top: 4,
+                                                ),
+                                                child: Row(
+                                                  children: [
+                                                    const Icon(
+                                                      Icons.star_rounded,
+                                                      size: 16,
+                                                      color: Color(0xFFF59E0B),
+                                                    ),
+                                                    const SizedBox(width: 4),
+                                                    Text(
+                                                      "${(workerPreview['avgRating'] as double).toStringAsFixed(1)}",
+                                                      style: const TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                        color: Color(
+                                                          0xFF334155,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 6),
+                                                    Text(
+                                                      "(${workerPreview['reviewCount']})",
+                                                      style: const TextStyle(
+                                                        fontSize: 12,
+                                                        color: Color(
+                                                          0xFF64748B,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (hasBid)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 6,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius: BorderRadius.circular(
+                                              999,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            "$bidPrice ₪",
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w800,
+                                              color: Color(0xFF1976D2),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  if (hasBid) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      widget.localizedStrings['offer_price'],
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF64748B),
+                                      ),
+                                    ),
+                                  ],
+                                  if ((comment['text'] ?? '')
+                                      .toString()
+                                      .trim()
+                                      .isNotEmpty) ...[
+                                    const SizedBox(height: 6),
+                                    Text(comment['text'] ?? ''),
+                                  ],
+                                  if (isSelectedBid) ...[
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      widget.localizedStrings['selected_offer'],
+                                      style: const TextStyle(
+                                        color: Color(0xFF15803D),
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ] else if (isJobRequest &&
+                                      isAuthor &&
+                                      hasBid) ...[
+                                    const SizedBox(height: 10),
+                                    TextButton.icon(
+                                      onPressed: () =>
+                                          _selectWorkerOffer(comment),
+                                      icon: const Icon(
+                                        Icons.check_circle_outline_rounded,
+                                        size: 18,
+                                      ),
+                                      label: Text(
+                                        widget
+                                            .localizedStrings['choose_worker'],
+                                      ),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: const Color(
+                                          0xFF1976D2,
+                                        ),
+                                        padding: EdgeInsets.zero,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
                       ],
                     ),
                   ),
@@ -3212,8 +3280,12 @@ class _PostDetailPageState extends State<PostDetailPage> {
                     Expanded(
                       child: TextField(
                         controller: _commentController,
+                        enabled: canComment,
                         decoration: InputDecoration(
-                          hintText: widget.localizedStrings['add_comment'],
+                          hintText: canComment
+                              ? widget.localizedStrings['add_comment']
+                              : widget
+                                    .localizedStrings['job_request_comment_restriction'],
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(24),
                           ),
@@ -3225,7 +3297,9 @@ class _PostDetailPageState extends State<PostDetailPage> {
                     ),
                     const SizedBox(width: 8),
                     IconButton(
-                      onPressed: _isSubmittingComment ? null : _addComment,
+                      onPressed: _isSubmittingComment || !canComment
+                          ? null
+                          : _addComment,
                       icon: Icon(
                         canBid ? Icons.local_offer_outlined : Icons.send,
                         color: const Color(0xFF1976D2),
@@ -3234,7 +3308,10 @@ class _PostDetailPageState extends State<PostDetailPage> {
                           ? (myExistingBid != null
                                 ? widget.localizedStrings['update_bid']
                                 : widget.localizedStrings['send_bid'])
-                          : null,
+                          : (!canComment
+                                ? widget
+                                      .localizedStrings['job_request_comment_restriction']
+                                : null),
                     ),
                   ],
                 ),

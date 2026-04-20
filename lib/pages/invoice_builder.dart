@@ -12,7 +12,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart' as firebase_storage;
 import 'package:untitled1/services/subscription_access_service.dart';
-import 'package:untitled1/widgets/tour_tip_dialog.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:untitled1/services/bkmv_export_service.dart';
@@ -50,7 +49,6 @@ class InvoiceBuilderPage extends StatefulWidget {
   final String? receiverName;
   final String? receiverPhone;
   final String? receiverAddress;
-  final String? tourIntroText;
   final String? initialDocType;
   final List<Map<String, dynamic>>? initialItems;
   final String? initialNotes;
@@ -72,7 +70,6 @@ class InvoiceBuilderPage extends StatefulWidget {
     this.receiverName,
     this.receiverPhone,
     this.receiverAddress,
-    this.tourIntroText,
     this.initialDocType,
     this.initialItems,
     this.initialNotes,
@@ -450,9 +447,6 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     _bindInvoiceCounterLiveSync();
     _fetchWorkerInfo();
     _loadAssets();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showTourIntroIfNeeded();
-    });
   }
 
   void _applyInitialTemplate() {
@@ -511,27 +505,6 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
         }),
       );
     _totalAmount = _items.fold<double>(0, (sum, item) => sum + item.total);
-  }
-
-  Future<void> _showTourIntroIfNeeded() async {
-    final intro = widget.tourIntroText;
-    if (intro == null || intro.isEmpty || !mounted) return;
-
-    final locale = Provider.of<LanguageProvider>(
-      context,
-      listen: false,
-    ).locale.languageCode;
-    final isRtl = locale == 'he' || locale == 'ar';
-
-    await showTourTipDialog(
-      context: context,
-      title: isRtl ? 'יוצר חשבוניות' : 'Invoice Builder',
-      body: intro,
-      stepLabel: isRtl ? 'שלב 6 / 8' : 'Step 6 / 8',
-      icon: Icons.description_outlined,
-      isRtl: isRtl,
-      confirmLabel: isRtl ? 'הבנתי' : 'Got it',
-    );
   }
 
   void _bindInvoiceCounterLiveSync() {

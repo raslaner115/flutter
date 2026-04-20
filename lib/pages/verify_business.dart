@@ -6,12 +6,9 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:untitled1/services/language_provider.dart';
-import 'package:untitled1/widgets/tour_tip_dialog.dart';
 
 class VerifyBusinessPage extends StatefulWidget {
-  final String? tourIntroText;
-
-  const VerifyBusinessPage({super.key, this.tourIntroText});
+  const VerifyBusinessPage({super.key});
 
   @override
   State<VerifyBusinessPage> createState() => _VerifyBusinessPageState();
@@ -45,30 +42,6 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
   void initState() {
     super.initState();
     _checkCurrentStatus();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showTourIntroIfNeeded();
-    });
-  }
-
-  Future<void> _showTourIntroIfNeeded() async {
-    final intro = widget.tourIntroText;
-    if (intro == null || intro.isEmpty || !mounted) return;
-
-    final locale = Provider.of<LanguageProvider>(
-      context,
-      listen: false,
-    ).locale.languageCode;
-    final isRtl = locale == 'he' || locale == 'ar';
-
-    await showTourTipDialog(
-      context: context,
-      title: isRtl ? 'אימות עסק' : 'Verify Business',
-      body: intro,
-      stepLabel: isRtl ? 'שלב 8 / 8' : 'Step 8 / 8',
-      icon: Icons.verified_outlined,
-      isRtl: isRtl,
-      confirmLabel: isRtl ? 'הבנתי' : 'Got it',
-    );
   }
 
   Future<void> _checkCurrentStatus() async {
@@ -534,10 +507,8 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
                                           right: 4,
                                           child: CircleAvatar(
                                             radius: 14,
-                                            backgroundColor:
-                                                Colors.black.withValues(
-                                                  alpha: 0.55,
-                                                ),
+                                            backgroundColor: Colors.black
+                                                .withValues(alpha: 0.55),
                                             child: IconButton(
                                               padding: EdgeInsets.zero,
                                               iconSize: 16,
@@ -582,9 +553,7 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
                       const SizedBox(height: 24),
                       _buildStepHeader(
                         4,
-                        isHe
-                            ? '2-5 חשבוניות אחרונות'
-                            : '2-5 Latest Invoices',
+                        isHe ? '2-5 חשבוניות אחרונות' : '2-5 Latest Invoices',
                       ),
                       const SizedBox(height: 8),
                       Container(
@@ -644,9 +613,7 @@ class _VerifyBusinessPageState extends State<VerifyBusinessPage> {
                       OutlinedButton.icon(
                         onPressed: _pickLatestInvoices,
                         icon: const Icon(Icons.receipt_long_outlined),
-                        label: Text(
-                          isHe ? 'בחר חשבוניות' : 'Choose Invoices',
-                        ),
+                        label: Text(isHe ? 'בחר חשבוניות' : 'Choose Invoices'),
                       ),
                       if (_latestInvoiceImages.isNotEmpty) ...[
                         const SizedBox(height: 12),

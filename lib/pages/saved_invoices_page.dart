@@ -9,12 +9,9 @@ import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:untitled1/pages/invoice_builder.dart';
 import 'package:untitled1/services/language_provider.dart';
-import 'package:untitled1/widgets/tour_tip_dialog.dart';
 
 class SavedInvoicesPage extends StatefulWidget {
-  final String? tourIntroText;
-
-  const SavedInvoicesPage({super.key, this.tourIntroText});
+  const SavedInvoicesPage({super.key});
 
   @override
   State<SavedInvoicesPage> createState() => _SavedInvoicesPageState();
@@ -41,9 +38,6 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
           .snapshots();
     }
     _searchController.addListener(_handleSearchChanged);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showTourIntroIfNeeded();
-    });
   }
 
   void _handleSearchChanged() {
@@ -60,33 +54,6 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
-  }
-
-  Future<void> _showTourIntroIfNeeded() async {
-    final intro = widget.tourIntroText;
-    if (intro == null || intro.isEmpty || !mounted) return;
-
-    final isRtl =
-        Provider.of<LanguageProvider>(
-              context,
-              listen: false,
-            ).locale.languageCode ==
-            'he' ||
-        Provider.of<LanguageProvider>(
-              context,
-              listen: false,
-            ).locale.languageCode ==
-            'ar';
-
-    await showTourTipDialog(
-      context: context,
-      title: isRtl ? 'חשבוניות שמורות' : 'Saved Invoices',
-      body: intro,
-      stepLabel: isRtl ? 'שלב 7 / 8' : 'Step 7 / 8',
-      icon: Icons.folder_copy_outlined,
-      isRtl: isRtl,
-      confirmLabel: isRtl ? 'הבנתי' : 'Got it',
-    );
   }
 
   String _docTypeLabel(String? docType, bool isRtl) {
@@ -123,10 +90,7 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
     final now = DateTime.now();
     final initialRange =
         _selectedDateRange ??
-        DateTimeRange(
-          start: DateTime(now.year, now.month, 1),
-          end: now,
-        );
+        DateTimeRange(start: DateTime(now.year, now.month, 1), end: now);
 
     final picked = await showDateRangePicker(
       context: context,
@@ -196,16 +160,16 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
       final originalDocType = (savedData['docType'] ?? '').toString();
       final sourceDate = (detailData['date'] ?? savedData['date'] ?? '')
           .toString();
-      final clientName = (detailData['clientName'] ?? savedData['clientName'] ?? '')
-          .toString();
+      final clientName =
+          (detailData['clientName'] ?? savedData['clientName'] ?? '')
+              .toString();
       final clientPhone = (detailData['clientPhone'] ?? '').toString();
       final clientAddress = (detailData['clientAddress'] ?? '').toString();
       final items = ((detailData['items'] as List?) ?? const [])
           .map((e) => Map<String, dynamic>.from((e as Map)))
           .toList();
       final workerName =
-          (userData['name'] ?? currentUser.displayName ?? 'Worker')
-              .toString();
+          (userData['name'] ?? currentUser.displayName ?? 'Worker').toString();
       final workerPhone = (userData['phone'] ?? userData['phoneNumber'] ?? '')
           .toString();
       final workerEmail = (userData['email'] ?? currentUser.email ?? '')
@@ -233,10 +197,11 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
             initialDocType: 'credit_note',
             initialItems: items,
             initialNotes: (detailData['notes'] ?? '').toString(),
-            initialPaymentMethod: (detailData['paymentMethod'] ?? '').toString(),
+            initialPaymentMethod: (detailData['paymentMethod'] ?? '')
+                .toString(),
             initialCheckNumber: (detailData['checkNumber'] ?? '').toString(),
-            initialTransferDetails:
-                (detailData['transferDetails'] ?? '').toString(),
+            initialTransferDetails: (detailData['transferDetails'] ?? '')
+                .toString(),
             initialCreditOriginalInvoiceNumber: invoiceNumber,
             initialCreditOriginalInvoiceDate: originalDateFormatted,
             initialCreditReason: autoReason,
@@ -305,8 +270,10 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
       data['docType'],
       data['amount'],
       _docTypeLabel((data['docType'] ?? '').toString(), isRtl),
-      if (createdDate != null) intl.DateFormat('dd/MM/yyyy').format(createdDate),
-      if (createdDate != null) intl.DateFormat('dd/MM/yyyy HH:mm').format(createdDate),
+      if (createdDate != null)
+        intl.DateFormat('dd/MM/yyyy').format(createdDate),
+      if (createdDate != null)
+        intl.DateFormat('dd/MM/yyyy HH:mm').format(createdDate),
     ];
 
     final haystack = _normalizeSearchText(
@@ -451,7 +418,9 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
                               onPressed: () => _pickDateRange(isRtl),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: const Color(0xFF1976D2),
-                                side: const BorderSide(color: Color(0xFFD6E4F5)),
+                                side: const BorderSide(
+                                  color: Color(0xFFD6E4F5),
+                                ),
                                 backgroundColor: const Color(0xFFF8FAFC),
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 14,
@@ -461,7 +430,10 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
                                   borderRadius: BorderRadius.circular(14),
                                 ),
                               ),
-                              icon: const Icon(Icons.date_range_rounded, size: 18),
+                              icon: const Icon(
+                                Icons.date_range_rounded,
+                                size: 18,
+                              ),
                               label: Align(
                                 alignment: AlignmentDirectional.centerStart,
                                 child: Text(
@@ -475,7 +447,9 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
                           if (_selectedDateRange != null) ...[
                             const SizedBox(width: 8),
                             IconButton(
-                              tooltip: isRtl ? 'נקה תאריך' : 'Clear date filter',
+                              tooltip: isRtl
+                                  ? 'נקה תאריך'
+                                  : 'Clear date filter',
                               onPressed: _clearDateRange,
                               style: IconButton.styleFrom(
                                 backgroundColor: const Color(0xFFF1F5F9),
@@ -607,7 +581,9 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
                                             color: accent.withValues(
                                               alpha: 0.12,
                                             ),
-                                            borderRadius: BorderRadius.circular(14),
+                                            borderRadius: BorderRadius.circular(
+                                              14,
+                                            ),
                                           ),
                                           child: Icon(
                                             Icons.picture_as_pdf_rounded,
@@ -660,7 +636,9 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
                                                             vertical: 5,
                                                           ),
                                                       decoration: BoxDecoration(
-                                                        color: const Color(0xFFF8FAFC),
+                                                        color: const Color(
+                                                          0xFFF8FAFC,
+                                                        ),
                                                         borderRadius:
                                                             BorderRadius.circular(
                                                               999,
@@ -672,7 +650,9 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
                                                           fontSize: 11,
                                                           fontWeight:
                                                               FontWeight.w700,
-                                                          color: Color(0xFF475569),
+                                                          color: Color(
+                                                            0xFF475569,
+                                                          ),
                                                         ),
                                                       ),
                                                     ),
@@ -749,7 +729,8 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
                                     if (canCreateCreditNote) ...[
                                       const SizedBox(height: 12),
                                       Align(
-                                        alignment: AlignmentDirectional.centerStart,
+                                        alignment:
+                                            AlignmentDirectional.centerStart,
                                         child: TextButton.icon(
                                           onPressed: () =>
                                               _openCreditNoteFromDocument(
@@ -858,10 +839,7 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
     );
   }
 
-  Widget _buildMetaRow({
-    required IconData icon,
-    required String text,
-  }) {
+  Widget _buildMetaRow({required IconData icon, required String text}) {
     return Row(
       children: [
         Icon(icon, size: 14, color: const Color(0xFF64748B)),
@@ -964,10 +942,7 @@ class _SavedInvoicesPageState extends State<SavedInvoicesPage> {
                         ? 'שנו את טווח התאריכים או המסנן כדי לראות מסמכים נוספים.'
                         : 'Adjust the date range or filter to see more documents.'),
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Color(0xFF64748B),
-                height: 1.5,
-              ),
+              style: const TextStyle(color: Color(0xFF64748B), height: 1.5),
             ),
           ],
         ),
