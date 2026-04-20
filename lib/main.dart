@@ -9,7 +9,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/home.dart';
 import 'package:untitled1/search.dart';
@@ -151,10 +150,10 @@ class _MyAppState extends State<MyApp> {
 
   void _attachNotificationTapListener() {
     _notificationTapSubscription?.cancel();
-    _notificationTapSubscription =
-        NotificationService.selectNotificationStream.stream.listen((
-          String? payload,
-        ) {
+    _notificationTapSubscription = NotificationService
+        .selectNotificationStream
+        .stream
+        .listen((String? payload) {
           if (payload != null && payload.isNotEmpty) {
             try {
               final data = jsonDecode(payload);
@@ -319,9 +318,6 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   int pagenumber = 0;
   bool _isAdminProfile = false;
-  bool _showWorkerTourInProfile = false;
-  String? _workerTourKey;
-  bool _tourCheckStarted = false;
 
   final List<Widget> _basePages = [
     const HomePage(),
@@ -334,9 +330,6 @@ class _MyHomePageState extends State<MyHomePage> {
   void initState() {
     super.initState();
     _checkAdminStatus();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _maybeStartWorkerToolsTour();
-    });
     _logCurrentTab();
     NotificationService.selectNotificationStream.stream.listen((
       String? payload,
@@ -374,103 +367,6 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  Future<void> _maybeStartWorkerToolsTour() async {
-    if (_tourCheckStarted) return;
-    _tourCheckStarted = true;
-
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      if (!doc.exists) return;
-
-      final data = doc.data() ?? <String, dynamic>{};
-      if (!SubscriptionAccessService.hasActiveWorkerSubscriptionFromData(data)) {
-        return;
-      }
-
-      final prefs = await SharedPreferences.getInstance();
-      final key = 'worker_tools_tour_done_v3_${user.uid}';
-      if (prefs.getBool(key) == true) return;
-
-      if (!mounted) return;
-      final start = await _showWorkerTourWelcomeDialog();
-      if (!mounted) return;
-
-      if (!start) {
-        return;
-      }
-
-      setState(() {
-        _workerTourKey = key;
-        pagenumber = 4;
-        _showWorkerTourInProfile = true;
-      });
-      await _logCurrentTab();
-    } catch (e) {
-      debugPrint('Worker tools tour init error: $e');
-    }
-  }
-
-  Future<bool> _showWorkerTourWelcomeDialog() async {
-    final locale = Provider.of<LanguageProvider>(
-      context,
-      listen: false,
-    ).locale.languageCode;
-    final isRtl = locale == 'he' || locale == 'ar';
-
-    final shouldStart = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          isRtl ? 'ברוך הבא ל-הירו' : 'Welcome to Hiro',
-          textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
-        ),
-        content: Text(
-          isRtl
-              ? 'ברוך הבא כבעל מקצוע. נתחיל סיור קצר שיראה לך בדיוק על מה ללחוץ ואיך להשתמש בכלי העבודה בפרופיל.'
-              : 'Welcome as a worker. Let us start a short tour that shows exactly what to press and how to use your profile tools.',
-          textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(isRtl ? 'לא עכשיו' : 'Not now'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1976D2),
-              foregroundColor: Colors.white,
-            ),
-            child: Text(isRtl ? 'התחל סיור' : 'Start Tour'),
-          ),
-        ],
-      ),
-    );
-
-    return shouldStart == true;
-  }
-
-  Future<void> _completeWorkerToolsTour() async {
-    final key = _workerTourKey;
-    if (key != null) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(key, true);
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _showWorkerTourInProfile = false;
-    });
-  }
-
   Widget _buildCurrentPage() {
     if (pagenumber < 4) {
       return _basePages[pagenumber];
@@ -480,10 +376,7 @@ class _MyHomePageState extends State<MyHomePage> {
       return const AdminProfile();
     }
 
-    return Profile(
-      showWorkerToolsGuide: _showWorkerTourInProfile,
-      onDismissWorkerToolsGuide: _completeWorkerToolsTour,
-    );
+    return const Profile();
   }
 
   Future<void> _logCurrentTab() async {
@@ -504,12 +397,6 @@ class _MyHomePageState extends State<MyHomePage> {
       pagenumber = index;
     });
     _logCurrentTab();
-
-    // Re-check in case user has just upgraded to worker in the current session.
-    if (index == 4 && !_showWorkerTourInProfile) {
-      _tourCheckStarted = false;
-      _maybeStartWorkerToolsTour();
-    }
   }
 
   void _handleDeepLink(Map<String, dynamic> data) {
