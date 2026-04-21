@@ -88,10 +88,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
     final price = _toDouble(review['priceRating'], fallback: overall);
     final service = _toDouble(
       review['serviceRating'],
-      fallback: _toDouble(
-        review['professionalismRating'],
-        fallback: overall,
-      ),
+      fallback: _toDouble(review['professionalismRating'], fallback: overall),
     );
     final timing = _toDouble(review['timingRating'], fallback: overall);
     final workQuality = _toDouble(
@@ -154,10 +151,12 @@ class _AddReviewPageState extends State<AddReviewPage> {
       final reviewSnap = await tx.get(reviewRef);
 
       final existingReview = reviewSnap.data();
-      final oldProfession =
-          (existingReview?['profession'] ?? '').toString().trim();
-      final newProfession =
-          (newReviewData['profession'] ?? '').toString().trim();
+      final oldProfession = (existingReview?['profession'] ?? '')
+          .toString()
+          .trim();
+      final newProfession = (newReviewData['profession'] ?? '')
+          .toString()
+          .trim();
       if (newProfession.isEmpty) {
         throw StateError('Review profession is required.');
       }
@@ -181,9 +180,12 @@ class _AddReviewPageState extends State<AddReviewPage> {
           : await tx.get(newProRef);
 
       final workerData = workerSnap.data() ?? <String, dynamic>{};
-      final currentReviewCount = (workerData['reviewCount'] as num?)?.toInt() ?? 0;
-      final currentTotalStars =
-          _toDouble(workerData['totalStars'], fallback: 0.0);
+      final currentReviewCount =
+          (workerData['reviewCount'] as num?)?.toInt() ?? 0;
+      final currentTotalStars = _toDouble(
+        workerData['totalStars'],
+        fallback: 0.0,
+      );
 
       int nextReviewCount = currentReviewCount;
       double nextTotalStars = currentTotalStars;
@@ -390,6 +392,15 @@ class _AddReviewPageState extends State<AddReviewPage> {
         reviewRef: reviewRef,
         newReviewData: reviewData,
       );
+
+      if (widget.existingReview == null) {
+        await FirebaseFirestore.instance
+            .collection('metadata')
+            .doc('system')
+            .set({
+              'reviewsCount': FieldValue.increment(1),
+            }, SetOptions(merge: true));
+      }
 
       if (mounted) {
         Navigator.pop(context, true);

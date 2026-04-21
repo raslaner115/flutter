@@ -9,6 +9,7 @@ import 'package:untitled1/services/subscription_access_service.dart';
 import 'package:untitled1/ptofile.dart';
 import 'package:untitled1/pages/location_manager_page.dart';
 import 'package:untitled1/utils/booking_mode.dart';
+import 'package:untitled1/widgets/skeleton.dart';
 
 class SearchPage extends StatefulWidget {
   final String? initialTrade;
@@ -784,11 +785,88 @@ class _SearchPageState extends State<SearchPage> {
       ),
       body: _showWorkerList
           ? (_isLoadingWorkers
-                ? const Center(child: CircularProgressIndicator())
+                ? _buildWorkerListSkeleton()
                 : _buildWorkerList(locale, themeColor))
           : (_isLoadingProfessions
-                ? const Center(child: CircularProgressIndicator())
+                ? _buildProfessionGridSkeleton()
                 : _buildProfessionGrid(locale)),
+    );
+  }
+
+  Widget _buildProfessionGridSkeleton() {
+    return GridView.builder(
+      padding: const EdgeInsets.all(20),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+        childAspectRatio: 1.0,
+      ),
+      itemCount: 6,
+      itemBuilder: (context, index) {
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: const Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Skeleton(height: 64, width: 64, borderRadius: 32),
+              SizedBox(height: 12),
+              Skeleton(height: 12, width: 90),
+              SizedBox(height: 8),
+              Skeleton(height: 12, width: 70),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildWorkerListSkeleton() {
+    return ListView.separated(
+      padding: const EdgeInsets.all(16),
+      itemCount: 5,
+      separatorBuilder: (context, index) => const SizedBox(height: 16),
+      itemBuilder: (context, index) {
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Skeleton(height: 54, width: 54, borderRadius: 27),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Skeleton(height: 14, width: 140),
+                        SizedBox(height: 8),
+                        Skeleton(height: 12, width: 90),
+                      ],
+                    ),
+                  ),
+                  Skeleton(height: 24, width: 60, borderRadius: 12),
+                ],
+              ),
+              SizedBox(height: 14),
+              Skeleton(height: 12, width: double.infinity),
+              SizedBox(height: 8),
+              Skeleton(height: 12, width: 180),
+            ],
+          ),
+        );
+      },
     );
   }
 

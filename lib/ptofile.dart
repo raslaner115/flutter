@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -10,6 +11,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:video_player/video_player.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'package:untitled1/services/language_provider.dart';
 import 'package:untitled1/sign_in.dart';
@@ -30,6 +32,7 @@ import 'package:untitled1/pages/liked_pros_page.dart';
 import 'package:untitled1/services/location_context_service.dart';
 import 'package:untitled1/services/subscription_access_service.dart';
 import 'package:untitled1/utils/booking_mode.dart';
+import 'package:untitled1/widgets/skeleton.dart';
 
 class Profile extends StatefulWidget {
   final String? userId;
@@ -649,36 +652,389 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
   }
 
   Future<void> _reportUser(Map<String, String> strings) async {
-    // Basic report logic
-    showDialog(
+    final reasonController = TextEditingController();
+    final detailsController = TextEditingController();
+    final picker = ImagePicker();
+    const maxAttachments = 5;
+    final attachments = <_ProfileReportAttachment>[];
+    final subjectOptions = [
+      strings['report_subject_harassment'] ?? 'Harassment or hate speech',
+      strings['report_subject_spam'] ?? 'Spam or unwanted messages',
+      strings['report_subject_impersonation'] ?? 'Impersonation',
+      strings['report_subject_scam'] ?? 'Scam or fraud',
+      strings['report_subject_inappropriate'] ?? 'Inappropriate content',
+      strings['report_subject_abuse'] ?? 'Abusive behavior',
+      strings['report_subject_fake_profile'] ?? 'Fake profile',
+      strings['report_subject_other'] ?? 'Other',
+    ];
+    String selectedSubject = subjectOptions.first;
+
+    Future<void> pickImages(StateSetter setDialogState) async {
+      if (attachments.length >= maxAttachments) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You can attach up to 5 files only.')),
+        );
+        return;
+      }
+
+      final pickedFiles = await picker.pickMultiImage(
+        imageQuality: 85,
+        maxWidth: 1920,
+      );
+      if (pickedFiles.isEmpty) return;
+
+      final remainingSlots = maxAttachments - attachments.length;
+      final filesToAdd = pickedFiles.take(remainingSlots).toList();
+      setDialogState(() {
+        attachments.addAll(
+          filesToAdd.map(
+            (f) => _ProfileReportAttachment(type: 'image', file: f),
+          ),
+        );
+      });
+
+      if (pickedFiles.length > remainingSlots && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Only 5 total attachments are allowed.'),
+          ),
+        );
+      }
+    }
+
+    Future<void> pickVideo(StateSetter setDialogState) async {
+      if (attachments.length >= maxAttachments) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You can attach up to 5 files only.')),
+        );
+        return;
+      }
+
+      final picked = await picker.pickVideo(source: ImageSource.gallery);
+      if (picked == null) return;
+      setDialogState(() {
+        attachments.add(_ProfileReportAttachment(type: 'video', file: picked));
+      });
+    }
+
+    final bool? submit = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Report User"),
-        content: const Text(
-          "Are you sure you want to report this user for inappropriate content or behavior?",
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(strings['report_user_title'] ?? "Report User"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: selectedSubject,
+                  decoration: InputDecoration(
+                    labelText: strings['report_subject'] ?? "Subject",
+                    border: const OutlineInputBorder(),
+                  ),
+                  items: subjectOptions
+                      .map(
+                        (subject) => DropdownMenuItem<String>(
+                          value: subject,
+                          child: Text(subject),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setDialogState(() => selectedSubject = value);
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: reasonController,
+                  maxLength: 80,
+                  decoration: InputDecoration(
+                    labelText: strings['report_reason'] ?? "Reason",
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: detailsController,
+                  maxLines: 4,
+                  maxLength: 600,
+                  decoration: InputDecoration(
+                    labelText: strings['report_details'] ?? "Details",
+                    hintText:
+                        strings['report_hint'] ??
+                        "Describe what happened and why you're reporting.",
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Attachments (images/videos)',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${attachments.length}/$maxAttachments selected',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () => pickImages(setDialogState),
+                      icon: const Icon(Icons.photo_library_outlined),
+                      label: const Text('Add Images'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => pickVideo(setDialogState),
+                      icon: const Icon(Icons.video_library_outlined),
+                      label: const Text('Add Video'),
+                    ),
+                  ],
+                ),
+                if (attachments.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 90,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: List.generate(attachments.length, (index) {
+                          final item = attachments[index];
+                          return Padding(
+                            padding: EdgeInsets.only(
+                              right: index == attachments.length - 1 ? 0 : 8,
+                            ),
+                            child: Stack(
+                              children: [
+                                Container(
+                                  width: 120,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: Colors.black12),
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: item.type == 'image'
+                                      ? Image.file(
+                                          File(item.file.path),
+                                          fit: BoxFit.cover,
+                                        )
+                                      : Container(
+                                          color: Colors.black87,
+                                          child: Column(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                              const Icon(
+                                                Icons.videocam_rounded,
+                                                color: Colors.white70,
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                item.file.name,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  color: Colors.white70,
+                                                  fontSize: 11,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                ),
+                                Positioned(
+                                  right: 4,
+                                  top: 4,
+                                  child: InkWell(
+                                    onTap: () {
+                                      setDialogState(() {
+                                        attachments.removeAt(index);
+                                      });
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.all(2),
+                                      decoration: const BoxDecoration(
+                                        color: Colors.black54,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(
+                                        Icons.close,
+                                        color: Colors.white,
+                                        size: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(strings['cancel'] ?? "Cancel"),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(context, true),
+              icon: const Icon(Icons.flag_outlined),
+              label: Text(strings['report'] ?? "Report"),
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.red.shade600,
+              ),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
-          TextButton(
-            onPressed: () async {
-              await _firestore.collection('reports').add({
-                'reporterId': FirebaseAuth.instance.currentUser?.uid,
-                'reportedId': widget.userId,
-                'timestamp': FieldValue.serverTimestamp(),
-              });
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Report submitted successfully.")),
-              );
-            },
-            child: const Text("Report", style: TextStyle(color: Colors.red)),
-          ),
-        ],
       ),
     );
+
+    if (submit != true) return;
+
+    final reason = reasonController.text.trim();
+    final details = detailsController.text.trim();
+    if (reason.isEmpty && details.isEmpty) return;
+    final progress = ValueNotifier<double>(attachments.isEmpty ? 0.8 : 0.0);
+
+    try {
+      final reporterId = FirebaseAuth.instance.currentUser?.uid;
+      if (reporterId == null || reporterId.isEmpty) return;
+
+      var progressDialogShown = false;
+      if (mounted) {
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) {
+            return PopScope(
+              canPop: false,
+              child: AlertDialog(
+                title: Text(strings['report'] ?? 'Sending report'),
+                content: ValueListenableBuilder<double>(
+                  valueListenable: progress,
+                  builder: (context, value, _) {
+                    final clamped = value.clamp(0.0, 1.0);
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        LinearProgressIndicator(value: clamped),
+                        const SizedBox(height: 10),
+                        Text('${(clamped * 100).toStringAsFixed(0)}%'),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            );
+          },
+        );
+        progressDialogShown = true;
+      }
+
+      List<Map<String, String>> uploadedAttachments = [];
+      if (attachments.isNotEmpty) {
+        uploadedAttachments = await _uploadProfileReportAttachments(
+          reporterId: reporterId,
+          attachments: attachments,
+          onProgress: (value) {
+            progress.value = value * 0.85;
+          },
+        );
+      }
+
+      progress.value = 0.9;
+      await _firestore.collection('reports').add({
+        'reporterId': reporterId,
+        'reportedId': widget.userId,
+        'subject': selectedSubject,
+        'reason': reason.isEmpty ? 'General issue' : reason,
+        'details': details,
+        'attachments': uploadedAttachments,
+        'status': 'open',
+        'reportType': 'user_report',
+        'source': 'profile',
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      progress.value = 0.98;
+      await _firestore.collection('metadata').doc('system').set({
+        'reportsCount': FieldValue.increment(1),
+      }, SetOptions(merge: true));
+      progress.value = 1.0;
+
+      if (!mounted) return;
+      if (progressDialogShown &&
+          Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            strings['report_sent'] ?? "Report submitted successfully.",
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      if (Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(strings['report_failed'] ?? "Failed to submit report."),
+        ),
+      );
+    } finally {
+      progress.dispose();
+    }
+  }
+
+  Future<List<Map<String, String>>> _uploadProfileReportAttachments({
+    required String reporterId,
+    required List<_ProfileReportAttachment> attachments,
+    void Function(double progress)? onProgress,
+  }) async {
+    final uploaded = <Map<String, String>>[];
+    for (var i = 0; i < attachments.length; i++) {
+      final item = attachments[i];
+      final ext = item.file.name.contains('.')
+          ? item.file.name.split('.').last
+          : (item.type == 'image' ? 'jpg' : 'mp4');
+      final path =
+          'reports/$reporterId/${DateTime.now().millisecondsSinceEpoch}_profile_$i.$ext';
+      final ref = FirebaseStorage.instance.ref().child(path);
+      final task = ref.putFile(
+        File(item.file.path),
+        SettableMetadata(
+          contentType: item.type == 'image' ? 'image/jpeg' : 'video/mp4',
+        ),
+      );
+      final subscription = task.snapshotEvents.listen((snapshot) {
+        final total = snapshot.totalBytes;
+        final current = snapshot.bytesTransferred;
+        final fileProgress = total > 0 ? current / total : 0.0;
+        final overall = (i + fileProgress) / attachments.length;
+        onProgress?.call(overall);
+      });
+      await task;
+      await subscription.cancel();
+      onProgress?.call((i + 1) / attachments.length);
+      final url = await ref.getDownloadURL();
+      uploaded.add({'type': item.type, 'url': url, 'fileName': item.file.name});
+    }
+    return uploaded;
   }
 
   Future<void> _addProject() async {
@@ -759,8 +1115,29 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
     if (confirmed == true) {
       setState(() => _isLoading = true);
       try {
-        await _firestore.collection('users').doc(user.uid).update({
-          'role': 'worker',
+        final userRef = _firestore.collection('users').doc(user.uid);
+        final statsRef = _firestore.collection('metadata').doc('stats');
+
+        await _firestore.runTransaction((tx) async {
+          final userSnap = await tx.get(userRef);
+          final currentRole = (userSnap.data()?['role'] ?? 'customer')
+              .toString()
+              .toLowerCase();
+
+          tx.set(userRef, {'role': 'worker'}, SetOptions(merge: true));
+
+          final statsUpdates = <String, dynamic>{};
+          if (currentRole == 'customer') {
+            statsUpdates['totalCustomers'] = FieldValue.increment(-1);
+            statsUpdates['totalWorkers'] = FieldValue.increment(1);
+          } else if (currentRole != 'worker') {
+            statsUpdates['totalWorkers'] = FieldValue.increment(1);
+          }
+
+          if (statsUpdates.isNotEmpty) {
+            statsUpdates['updatedAt'] = FieldValue.serverTimestamp();
+            tx.set(statsRef, statsUpdates, SetOptions(merge: true));
+          }
         });
 
         final upgradedUserDoc = await _firestore
@@ -853,6 +1230,92 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
     await Share.share("${strings['share_profile']} - $_userName: $profileUrl");
   }
 
+  Widget _buildProfileSkeleton() {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Skeleton(height: 44, width: 44, borderRadius: 22),
+                  SizedBox(width: 12),
+                  Expanded(child: Skeleton(height: 20, width: 180)),
+                  Skeleton(height: 36, width: 92, borderRadius: 12),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Center(
+                child: Column(
+                  children: const [
+                    Skeleton(height: 104, width: 104, borderRadius: 52),
+                    SizedBox(height: 14),
+                    Skeleton(height: 18, width: 160),
+                    SizedBox(height: 8),
+                    Skeleton(height: 14, width: 210),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 22),
+              const Row(
+                children: [
+                  Expanded(
+                    child: Skeleton(
+                      height: 72,
+                      width: double.infinity,
+                      borderRadius: 16,
+                    ),
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Skeleton(
+                      height: 72,
+                      width: double.infinity,
+                      borderRadius: 16,
+                    ),
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Skeleton(
+                      height: 72,
+                      width: double.infinity,
+                      borderRadius: 16,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              const Skeleton(height: 16, width: 150),
+              const SizedBox(height: 10),
+              const Skeleton(
+                height: 90,
+                width: double.infinity,
+                borderRadius: 16,
+              ),
+              const SizedBox(height: 18),
+              const Skeleton(height: 16, width: 130),
+              const SizedBox(height: 10),
+              const Skeleton(
+                height: 120,
+                width: double.infinity,
+                borderRadius: 16,
+              ),
+              const SizedBox(height: 14),
+              const Skeleton(
+                height: 120,
+                width: double.infinity,
+                borderRadius: 16,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final strings = _getLocalizedStrings(context);
@@ -862,11 +1325,7 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
     final isRtl = localeCode == 'he' || localeCode == 'ar';
 
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(color: Color(0xFF1976D2)),
-        ),
-      );
+      return _buildProfileSkeleton();
     }
 
     if (widget.userId == null && _isGuest()) {
@@ -976,9 +1435,14 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
                         ),
                       if (!_isOwnProfile)
                         IconButton(
+                          tooltip:
+                              strings['report_user_title'] ?? "Report User",
+                          style: IconButton.styleFrom(
+                            backgroundColor: Colors.red.withValues(alpha: 0.18),
+                          ),
                           icon: const Icon(
-                            Icons.report_problem_outlined,
-                            color: Colors.white70,
+                            Icons.flag_outlined,
+                            color: Colors.white,
                           ),
                           onPressed: () => _reportUser(strings),
                         ),
@@ -1569,6 +2033,10 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
             .collection('projects')
             .doc(project['id'])
             .delete();
+
+        await _firestore.collection('metadata').doc('system').set({
+          'projectsCount': FieldValue.increment(-1),
+        }, SetOptions(merge: true));
 
         _fetchUserData();
       } catch (e) {
@@ -2466,6 +2934,22 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
               'האם ברצונך להפוך לבעל מקצוע? תוכל להציג את העבודות שלך ולקבל פניות מלקוחות.',
           'confirm': 'אשר',
           'cancel': 'ביטול',
+          'report': 'דווח',
+          'report_user_title': 'דיווח על משתמש',
+          'report_subject': 'נושא',
+          'report_subject_harassment': 'הטרדה או דברי שנאה',
+          'report_subject_spam': 'ספאם או הודעות לא רצויות',
+          'report_subject_impersonation': 'התחזות',
+          'report_subject_scam': 'הונאה או תרמית',
+          'report_subject_inappropriate': 'תוכן לא הולם',
+          'report_subject_abuse': 'התנהגות פוגענית',
+          'report_subject_fake_profile': 'פרופיל מזויף',
+          'report_subject_other': 'אחר',
+          'report_reason': 'סיבה',
+          'report_details': 'פרטים',
+          'report_hint': 'תאר מה קרה ולמה אתה מדווח...',
+          'report_sent': 'הדיווח נשלח בהצלחה',
+          'report_failed': 'שליחת הדיווח נכשלה',
           'business_tools': 'כלי עבודה',
           'analytics': 'אנליטיקה',
           'invoice_builder': 'יוצר חשבוניות',
@@ -2519,6 +3003,22 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
               'هل تريد الترقية إلى حساب عامل؟ ستتمكن من عرض مشاريعك واستقبال طلبات العملاء.',
           'confirm': 'تأكيد',
           'cancel': 'إلغاء',
+          'report': 'إبلاغ',
+          'report_user_title': 'الإبلاغ عن مستخدم',
+          'report_subject': 'الموضوع',
+          'report_subject_harassment': 'تحرش أو خطاب كراهية',
+          'report_subject_spam': 'رسائل مزعجة أو غير مرغوب بها',
+          'report_subject_impersonation': 'انتحال شخصية',
+          'report_subject_scam': 'احتيال أو خداع',
+          'report_subject_inappropriate': 'محتوى غير لائق',
+          'report_subject_abuse': 'سلوك مسيء',
+          'report_subject_fake_profile': 'حساب مزيف',
+          'report_subject_other': 'أخرى',
+          'report_reason': 'السبب',
+          'report_details': 'التفاصيل',
+          'report_hint': 'اشرح ما حدث ولماذا تقوم بالإبلاغ...',
+          'report_sent': 'تم إرسال البلاغ بنجاح',
+          'report_failed': 'فشل إرسال البلاغ',
           'business_tools': 'أدوات العمل',
           'analytics': 'التحليلات',
           'invoice_builder': 'منشئ الفواتير',
@@ -2573,6 +3073,22 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
               'Would you like to become a worker? You will be able to showcase your work and receive inquiries.',
           'confirm': 'Confirm',
           'cancel': 'Cancel',
+          'report': 'Report',
+          'report_user_title': 'Report User',
+          'report_subject': 'Subject',
+          'report_subject_harassment': 'Harassment or hate speech',
+          'report_subject_spam': 'Spam or unwanted messages',
+          'report_subject_impersonation': 'Impersonation',
+          'report_subject_scam': 'Scam or fraud',
+          'report_subject_inappropriate': 'Inappropriate content',
+          'report_subject_abuse': 'Abusive behavior',
+          'report_subject_fake_profile': 'Fake profile',
+          'report_subject_other': 'Other',
+          'report_reason': 'Reason',
+          'report_details': 'Details',
+          'report_hint': 'Describe what happened and why you are reporting.',
+          'report_sent': 'Report submitted successfully.',
+          'report_failed': 'Failed to submit report.',
           'business_tools': 'Business Tools',
           'analytics': 'Analytics',
           'invoice_builder': 'Invoice Builder',
@@ -2607,6 +3123,13 @@ class _ProjectVideoThumbnail extends StatefulWidget {
 
   @override
   State<_ProjectVideoThumbnail> createState() => _ProjectVideoThumbnailState();
+}
+
+class _ProfileReportAttachment {
+  final String type;
+  final XFile file;
+
+  const _ProfileReportAttachment({required this.type, required this.file});
 }
 
 class _ProjectVideoThumbnailState extends State<_ProjectVideoThumbnail> {

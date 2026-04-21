@@ -750,7 +750,55 @@ class _SignUpPageState extends State<SignUpPage> {
         });
       }
 
-      await firestore.collection('users').doc(user.uid).set(userData);
+      final userRef = firestore.collection('users').doc(user.uid);
+      final statsRef = firestore.collection('metadata').doc('stats');
+      final systemRef = firestore.collection('metadata').doc('system');
+      final targetRole = (userData['role'] ?? 'customer')
+          .toString()
+          .toLowerCase();
+
+      await firestore.runTransaction((tx) async {
+        final existingUserSnap = await tx.get(userRef);
+        final existingRole = (existingUserSnap.data()?['role'] ?? '')
+            .toString()
+            .toLowerCase();
+
+        tx.set(userRef, userData, SetOptions(merge: true));
+
+        final statsUpdates = <String, dynamic>{};
+        final systemUpdates = <String, dynamic>{};
+        if (!existingUserSnap.exists || existingRole.isEmpty) {
+          if (targetRole == 'worker') {
+            statsUpdates['totalWorkers'] = FieldValue.increment(1);
+            systemUpdates['workersCount'] = FieldValue.increment(1);
+          } else if (targetRole == 'customer') {
+            statsUpdates['totalCustomers'] = FieldValue.increment(1);
+          }
+        } else if (existingRole != targetRole) {
+          if (existingRole == 'worker') {
+            statsUpdates['totalWorkers'] = FieldValue.increment(-1);
+            systemUpdates['workersCount'] = FieldValue.increment(-1);
+          } else if (existingRole == 'customer') {
+            statsUpdates['totalCustomers'] = FieldValue.increment(-1);
+          }
+
+          if (targetRole == 'worker') {
+            statsUpdates['totalWorkers'] = FieldValue.increment(1);
+            systemUpdates['workersCount'] = FieldValue.increment(1);
+          } else if (targetRole == 'customer') {
+            statsUpdates['totalCustomers'] = FieldValue.increment(1);
+          }
+        }
+
+        if (statsUpdates.isNotEmpty) {
+          statsUpdates['updatedAt'] = FieldValue.serverTimestamp();
+          tx.set(statsRef, statsUpdates, SetOptions(merge: true));
+        }
+        if (systemUpdates.isNotEmpty) {
+          systemUpdates['updatedAt'] = FieldValue.serverTimestamp();
+          tx.set(systemRef, systemUpdates, SetOptions(merge: true));
+        }
+      });
       if (_userType == UserType.worker) {
         await firestore
             .collection('users')
@@ -772,14 +820,6 @@ class _SignUpPageState extends State<SignUpPage> {
         userType: _userType == UserType.worker ? 'worker' : 'customer',
         hasEmail: _emailController.text.trim().isNotEmpty,
       );
-
-      if (_userType == UserType.worker) {
-        try {
-          await firestore.collection('metadata').doc('stats').set({
-            'totalWorkers': FieldValue.increment(1),
-          }, SetOptions(merge: true));
-        } catch (_) {}
-      }
 
       if (mounted && navigateToHome) {
         Navigator.pushAndRemoveUntil(

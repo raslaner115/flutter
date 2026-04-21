@@ -26,11 +26,13 @@ import '../widgets/zoomable_image_viewer.dart';
 class ChatPage extends StatefulWidget {
   final String receiverId;
   final String receiverName;
+  final String? reportContextId;
 
   const ChatPage({
     super.key,
     required this.receiverId,
     required this.receiverName,
+    this.reportContextId,
   });
 
   @override
@@ -163,17 +165,22 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _wireAudioPlayer() {
-    _audioPositionSubscription = _audioPlayer.onPositionChanged.listen((position) {
+    _audioPositionSubscription = _audioPlayer.onPositionChanged.listen((
+      position,
+    ) {
       if (!mounted) return;
       if (_activeAudioDuration > Duration.zero &&
-          position >= _activeAudioDuration - const Duration(milliseconds: 250)) {
+          position >=
+              _activeAudioDuration - const Duration(milliseconds: 250)) {
         _resetActiveAudioToStart();
         return;
       }
       setState(() => _activeAudioPosition = position);
     });
 
-    _audioDurationSubscription = _audioPlayer.onDurationChanged.listen((duration) {
+    _audioDurationSubscription = _audioPlayer.onDurationChanged.listen((
+      duration,
+    ) {
       if (!mounted) return;
       setState(() => _activeAudioDuration = duration);
     });
@@ -274,6 +281,44 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  Future<void> _notifyReportAnsweredIfNeeded({
+    required String senderId,
+    required String receiverId,
+  }) async {
+    final reportId = widget.reportContextId?.trim() ?? '';
+    if (reportId.isEmpty) return;
+
+    try {
+      final existing = await _firestore
+          .collection('users')
+          .doc(receiverId)
+          .collection('notifications')
+          .where('type', isEqualTo: 'report_answered')
+          .where('reportId', isEqualTo: reportId)
+          .where('fromId', isEqualTo: senderId)
+          .limit(1)
+          .get();
+
+      if (existing.docs.isNotEmpty) return;
+
+      await _firestore
+          .collection('users')
+          .doc(receiverId)
+          .collection('notifications')
+          .add({
+            'type': 'report_answered',
+            'title': 'עדכון על הדיווח שלך',
+            'body': 'ענינו על הדיווח שלך. לחץ כדי לראות את הפרטים.',
+            'reportId': reportId,
+            'fromId': senderId,
+            'isRead': false,
+            'timestamp': FieldValue.serverTimestamp(),
+          });
+    } catch (e) {
+      debugPrint("Error creating report_answered notification: $e");
+    }
+  }
+
   String _getChatRoomId(String user1, String user2) {
     List<String> ids = [user1, user2];
     ids.sort();
@@ -345,6 +390,10 @@ class _ChatPageState extends State<ChatPage> {
       await _notifyReceiverIfNotInChat(
         senderId: currentUserId,
         preview: lastMsgDisplay,
+      );
+      await _notifyReportAnsweredIfNeeded(
+        senderId: currentUserId,
+        receiverId: widget.receiverId,
       );
 
       _messageController.clear();
@@ -426,120 +475,119 @@ class _ChatPageState extends State<ChatPage> {
         Provider.of<LanguageProvider>(context).locale.languageCode == 'ar';
 
     return Scaffold(
-          appBar: AppBar(
-            title: _buildChatHeaderTitle(isRtl),
-            centerTitle: true,
-            backgroundColor: Colors.white,
-            foregroundColor: const Color(0xFF1976D2),
-            elevation: 0,
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-              onPressed: () => Navigator.pop(context),
+      appBar: AppBar(
+        title: _buildChatHeaderTitle(isRtl),
+        centerTitle: true,
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1976D2),
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          if (_canCreateInvoices)
+            IconButton(
+              tooltip: isRtl ? "הפק חשבונית" : "Create Invoice",
+              icon: const Icon(Icons.receipt_long_rounded, size: 22),
+              onPressed: () async {
+                final receiverDoc = await _getUserDoc(widget.receiverId);
+                String? phone;
+                String? address;
+                if (receiverDoc != null && receiverDoc.exists) {
+                  final data = receiverDoc.data() as Map<String, dynamic>;
+                  phone = data['phone'];
+                  address = data['address'] ?? data['town'];
+                }
+
+                if (!mounted) return;
+
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => InvoiceBuilderPage(
+                      workerName: _currentUserName ?? "Worker",
+                      workerPhone: _currentUserPhone,
+                      workerEmail: _currentUserEmail,
+                      receiverId: widget.receiverId,
+                      receiverName: widget.receiverName,
+                      receiverPhone: phone,
+                      receiverAddress: address,
+                    ),
+                  ),
+                );
+              },
             ),
-            actions: [
-              if (_canCreateInvoices)
-                IconButton(
-                  tooltip: isRtl ? "הפק חשבונית" : "Create Invoice",
-                  icon: const Icon(Icons.receipt_long_rounded, size: 22),
-                  onPressed: () async {
-                    final receiverDoc = await _getUserDoc(widget.receiverId);
-                    String? phone;
-                    String? address;
-                    if (receiverDoc != null && receiverDoc.exists) {
-                      final data = receiverDoc.data() as Map<String, dynamic>;
-                      phone = data['phone'];
-                      address = data['address'] ?? data['town'];
-                    }
-
-                    if (!mounted) return;
-
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => InvoiceBuilderPage(
-                          workerName: _currentUserName ?? "Worker",
-                          workerPhone: _currentUserPhone,
-                          workerEmail: _currentUserEmail,
-                          receiverId: widget.receiverId,
-                          receiverName: widget.receiverName,
-                          receiverPhone: phone,
-                          receiverAddress: address,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              IconButton(
-                icon: const Icon(Icons.call_rounded, size: 22),
-                onPressed: () async {
-                  final userDoc = await _getUserDoc(widget.receiverId);
-                  if (userDoc != null && userDoc.exists) {
-                    final data = userDoc.data() as Map<String, dynamic>;
-                    final phone = data['phone'];
-                    if (phone != null) {
-                      final Uri url = Uri.parse("tel:$phone");
-                      if (await canLaunchUrl(url)) {
-                        await launchUrl(url);
-                      }
-                    }
+          IconButton(
+            icon: const Icon(Icons.call_rounded, size: 22),
+            onPressed: () async {
+              final userDoc = await _getUserDoc(widget.receiverId);
+              if (userDoc != null && userDoc.exists) {
+                final data = userDoc.data() as Map<String, dynamic>;
+                final phone = data['phone'];
+                if (phone != null) {
+                  final Uri url = Uri.parse("tel:$phone");
+                  if (await canLaunchUrl(url)) {
+                    await launchUrl(url);
                   }
-                },
-              ),
-            ],
+                }
+              }
+            },
           ),
-          body: Column(
-            children: [
-              Expanded(
-                child: StreamBuilder<QuerySnapshot>(
-                  stream: _messageStream,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                      return Center(
-                        child: Text(
-                          isRtl ? "אין הודעות עדיין" : "No messages yet",
-                          style: TextStyle(color: Colors.grey[400]),
-                        ),
-                      );
-                    }
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _messageStream,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return Center(
+                    child: Text(
+                      isRtl ? "אין הודעות עדיין" : "No messages yet",
+                      style: TextStyle(color: Colors.grey[400]),
+                    ),
+                  );
+                }
 
-                    final messages = snapshot.data!.docs;
-                    final pendingUploads = _pendingMediaUploads
-                        .where((upload) => upload.receiverId == widget.receiverId)
-                        .toList();
-                    return ListView.builder(
-                      controller: _scrollController,
-                      reverse: true,
-                      padding: const EdgeInsets.all(16),
-                      itemCount: pendingUploads.length + messages.length,
-                      itemBuilder: (context, index) {
-                        if (index < pendingUploads.length) {
-                          return _buildPendingUploadBubble(pendingUploads[index]);
-                        }
-                        final message =
-                            messages[index - pendingUploads.length].data()
-                                as Map<String, dynamic>;
-                        final isMe =
-                            message['senderId'] == _auth.currentUser!.uid;
-                        return _buildMessageBubble(
-                          message,
-                          isMe,
-                          messages[index - pendingUploads.length].id,
-                        );
-                      },
+                final messages = snapshot.data!.docs;
+                final pendingUploads = _pendingMediaUploads
+                    .where((upload) => upload.receiverId == widget.receiverId)
+                    .toList();
+                return ListView.builder(
+                  controller: _scrollController,
+                  reverse: true,
+                  padding: const EdgeInsets.all(16),
+                  itemCount: pendingUploads.length + messages.length,
+                  itemBuilder: (context, index) {
+                    if (index < pendingUploads.length) {
+                      return _buildPendingUploadBubble(pendingUploads[index]);
+                    }
+                    final message =
+                        messages[index - pendingUploads.length].data()
+                            as Map<String, dynamic>;
+                    final isMe = message['senderId'] == _auth.currentUser!.uid;
+                    return _buildMessageBubble(
+                      message,
+                      isMe,
+                      messages[index - pendingUploads.length].id,
                     );
                   },
-                ),
-              ),
-              if (_isSelectionMode)
-                _buildSelectionActionBar()
-              else
-                _buildInputArea(isRtl),
-            ],
+                );
+              },
+            ),
           ),
-        );
+          if (_isSelectionMode)
+            _buildSelectionActionBar()
+          else
+            _buildInputArea(isRtl),
+        ],
+      ),
+    );
   }
 
   Widget _buildMessageBubble(
@@ -579,6 +627,10 @@ class _ChatPageState extends State<ChatPage> {
           _openImageFullscreen(url, fileName: fileName);
         } else if (type == 'video') {
           _openVideoFullscreen(url, fileName: fileName);
+        } else if (type == 'report_reference') {
+          _openReportFromMessage(message);
+        } else if (type == 'report_resolved') {
+          _openReportFromMessage(message);
         }
       },
       child: Container(
@@ -615,6 +667,10 @@ class _ChatPageState extends State<ChatPage> {
                   _resolveMessageText(message),
                   style: TextStyle(color: isMe ? Colors.white : Colors.black87),
                 )
+              else if (type == 'report_reference')
+                _buildReportReferenceBubble(message, isMe)
+              else if (type == 'report_resolved')
+                _buildReportResolvedBubble(message, isMe)
               else if (type == 'image')
                 _buildImageAttachment(url, fileName)
               else if (type == 'video')
@@ -632,7 +688,8 @@ class _ChatPageState extends State<ChatPage> {
                   url,
                   isMe: isMe,
                   fileName: fileName,
-                  durationSeconds: (message['durationSeconds'] as num?)?.toInt(),
+                  durationSeconds: (message['durationSeconds'] as num?)
+                      ?.toInt(),
                 ),
               const SizedBox(height: 4),
               Text(
@@ -746,7 +803,9 @@ class _ChatPageState extends State<ChatPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  isFailed ? Icons.error_outline_rounded : Icons.schedule_rounded,
+                  isFailed
+                      ? Icons.error_outline_rounded
+                      : Icons.schedule_rounded,
                   size: 14,
                   color: Colors.white70,
                 ),
@@ -862,6 +921,160 @@ class _ChatPageState extends State<ChatPage> {
     final primary = (message['message'] ?? '').toString();
     if (primary.isNotEmpty) return primary;
     return (message['text'] ?? '').toString();
+  }
+
+  Future<void> _openReportFromMessage(Map<String, dynamic> message) async {
+    final reportId = (message['reportId'] ?? '').toString().trim();
+    if (reportId.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Report reference is missing an ID.')),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatReportDetailsPage(reportId: reportId),
+      ),
+    );
+  }
+
+  Widget _buildReportReferenceBubble(Map<String, dynamic> message, bool isMe) {
+    final reportId = (message['reportId'] ?? '').toString().trim();
+    final text = _resolveMessageText(message);
+
+    return Container(
+      constraints: const BoxConstraints(minWidth: 220),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: isMe ? Colors.white12 : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isMe ? Colors.white24 : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.flag_outlined,
+                size: 18,
+                color: isMe ? Colors.white : const Color(0xFF1976D2),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Report Update',
+                style: TextStyle(
+                  color: isMe ? Colors.white : Colors.black87,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          if (text.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              text,
+              style: TextStyle(color: isMe ? Colors.white : Colors.black87),
+            ),
+          ],
+          if (reportId.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Report ID: $reportId',
+              style: TextStyle(
+                fontSize: 12,
+                color: isMe ? Colors.white70 : Colors.black54,
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: () => _openReportFromMessage(message),
+            icon: const Icon(Icons.open_in_new, size: 16),
+            label: const Text('View Report'),
+            style: TextButton.styleFrom(
+              foregroundColor: isMe ? Colors.white : const Color(0xFF1976D2),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReportResolvedBubble(Map<String, dynamic> message, bool isMe) {
+    final reportId = (message['reportId'] ?? '').toString().trim();
+    final text = _resolveMessageText(message);
+    final content = text.isNotEmpty ? text : 'הדיווח שלך טופל.';
+
+    return Container(
+      constraints: const BoxConstraints(minWidth: 220),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: isMe ? Colors.white12 : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isMe ? Colors.white24 : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.check_circle_outline,
+                size: 18,
+                color: isMe ? Colors.white : Colors.green.shade700,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'הדיווח טופל',
+                style: TextStyle(
+                  color: isMe ? Colors.white : Colors.black87,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            content,
+            style: TextStyle(color: isMe ? Colors.white : Colors.black87),
+          ),
+          if (reportId.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Report ID: $reportId',
+              style: TextStyle(
+                fontSize: 12,
+                color: isMe ? Colors.white70 : Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () => _openReportFromMessage(message),
+              icon: const Icon(Icons.open_in_new, size: 16),
+              label: const Text('View Report'),
+              style: TextButton.styleFrom(
+                foregroundColor: isMe ? Colors.white : const Color(0xFF1976D2),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Widget _buildImageAttachment(String url, String? fileName) {
@@ -995,7 +1208,8 @@ class _ChatPageState extends State<ChatPage> {
         final localPath = snapshot.data;
         final isDownloading = _downloadingUrls.contains(url);
         final isActive = _activeAudioUrl == url;
-        final isPlaying = isActive && _audioPlayerState == ap.PlayerState.playing;
+        final isPlaying =
+            isActive && _audioPlayerState == ap.PlayerState.playing;
         final position = isActive && _audioPlayerState != ap.PlayerState.stopped
             ? _activeAudioPosition
             : Duration.zero;
@@ -1005,7 +1219,10 @@ class _ChatPageState extends State<ChatPage> {
         final durationText = _formatAudioSeconds(duration);
         final positionText = _formatAudioSeconds(position);
         final progress = duration.inMilliseconds > 0
-            ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
+            ? (position.inMilliseconds / duration.inMilliseconds).clamp(
+                0.0,
+                1.0,
+              )
             : 0.0;
 
         return Container(
@@ -1028,9 +1245,9 @@ class _ChatPageState extends State<ChatPage> {
                   onTap: isDownloading
                       ? null
                       : () => _toggleAudioPlayback(
-                            url: url,
-                            localPath: localPath,
-                          ),
+                          url: url,
+                          localPath: localPath,
+                        ),
                   child: SizedBox(
                     width: 44,
                     height: 44,
@@ -1074,13 +1291,17 @@ class _ChatPageState extends State<ChatPage> {
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
-                            color: isMe ? Colors.white12 : const Color(0xFFE2E8F0),
+                            color: isMe
+                                ? Colors.white12
+                                : const Color(0xFFE2E8F0),
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Text(
                             durationText,
                             style: TextStyle(
-                              color: isMe ? Colors.white : const Color(0xFF0F172A),
+                              color: isMe
+                                  ? Colors.white
+                                  : const Color(0xFF0F172A),
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
                             ),
@@ -1123,7 +1344,9 @@ class _ChatPageState extends State<ChatPage> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(999),
                       child: LinearProgressIndicator(
-                        value: isDownloading ? _downloadProgress[url] : progress,
+                        value: isDownloading
+                            ? _downloadProgress[url]
+                            : progress,
                         minHeight: 4,
                         color: isMe ? Colors.white : const Color(0xFF1976D2),
                         backgroundColor: isMe
@@ -1583,7 +1806,9 @@ class _ChatPageState extends State<ChatPage> {
 
     if (mounted) {
       setState(() {
-        final index = _pendingMediaUploads.indexWhere((item) => item.id == upload.id);
+        final index = _pendingMediaUploads.indexWhere(
+          (item) => item.id == upload.id,
+        );
         if (index != -1) {
           _pendingMediaUploads.removeAt(index);
         }
@@ -1836,17 +2061,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  String _formatAudioDuration(Duration duration) {
-    if (duration <= Duration.zero) {
-      return '00:00';
-    }
-
-    final totalSeconds = duration.inSeconds;
-    final minutes = (totalSeconds ~/ 60).toString().padLeft(2, '0');
-    final seconds = (totalSeconds % 60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
-  }
-
   String _formatAudioSeconds(Duration duration) {
     final seconds = duration.inSeconds;
     if (seconds <= 0) return '0s';
@@ -1980,6 +2194,189 @@ class _ChatPageState extends State<ChatPage> {
       _isSelectionMode = false;
       _selectedMessageIds.clear();
     });
+  }
+}
+
+class ChatReportDetailsPage extends StatelessWidget {
+  final String reportId;
+
+  const ChatReportDetailsPage({super.key, required this.reportId});
+
+  String _formatTimestamp(Timestamp? ts) {
+    if (ts == null) return 'Unknown time';
+    return intl.DateFormat('yyyy-MM-dd HH:mm').format(ts.toDate());
+  }
+
+  Future<String> _userNameFromId(String userId) async {
+    if (userId.isEmpty) return '-';
+    if (userId == 'app') return 'App';
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .get();
+    final name = (doc.data()?['name'] ?? '').toString().trim();
+    return name.isEmpty ? userId : name;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Report Details')),
+      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        stream: FirebaseFirestore.instance
+            .collection('reports')
+            .doc(reportId)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const Center(child: Text('Could not load this report.'));
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (!snapshot.data!.exists) {
+            return const Center(child: Text('This report no longer exists.'));
+          }
+
+          final data = snapshot.data!.data() ?? <String, dynamic>{};
+          final reporterId = (data['reporterId'] ?? '').toString();
+          final reportedId = (data['reportedId'] ?? '').toString();
+          final resolvedBy = (data['resolvedBy'] ?? '').toString();
+          final isAllowed =
+              currentUserId != null &&
+              (currentUserId == reporterId ||
+                  currentUserId == reportedId ||
+                  currentUserId == resolvedBy);
+
+          if (!isAllowed) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text('You do not have access to this report.'),
+              ),
+            );
+          }
+
+          final subject = (data['subject'] ?? data['reason'] ?? 'General issue')
+              .toString();
+          final reason = (data['reason'] ?? '').toString();
+          final details = (data['details'] ?? '').toString();
+          final status = (data['status'] ?? 'open').toString();
+          final source = (data['source'] ?? '').toString();
+          final reportType = (data['reportType'] ?? '').toString();
+          final createdAt = data['timestamp'] as Timestamp?;
+          final resolvedAt = data['resolvedAt'] as Timestamp?;
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Card(
+                  elevation: 0.5,
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          subject,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            Chip(label: Text('Status: $status')),
+                            Chip(
+                              label: Text(
+                                'Created: ${_formatTimestamp(createdAt)}',
+                              ),
+                            ),
+                            if (source.isNotEmpty)
+                              Chip(label: Text('Source: $source')),
+                            if (reportType.isNotEmpty)
+                              Chip(label: Text('Type: $reportType')),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  elevation: 0.5,
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Report ID: $reportId'),
+                        const SizedBox(height: 6),
+                        FutureBuilder<String>(
+                          future: _userNameFromId(reporterId),
+                          builder: (context, snapshot) {
+                            final reporterName = snapshot.data ?? '-';
+                            return Text('Reporter: $reporterName');
+                          },
+                        ),
+                        const SizedBox(height: 6),
+                        FutureBuilder<String>(
+                          future: _userNameFromId(reportedId),
+                          builder: (context, snapshot) {
+                            final reportedName = snapshot.data ?? '-';
+                            return Text('Reported User: $reportedName');
+                          },
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Resolved By: ${resolvedBy.isEmpty ? '-' : resolvedBy}',
+                        ),
+                        const SizedBox(height: 6),
+                        Text('Resolved At: ${_formatTimestamp(resolvedAt)}'),
+                        if (reason.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text('Reason: $reason'),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                if (details.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Card(
+                    elevation: 0.5,
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Details',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(details),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 }
 
@@ -2121,10 +2518,7 @@ class _PendingMediaUpload {
     this.isFailed = false,
   });
 
-  _PendingMediaUpload copyWith({
-    double? progress,
-    bool? isFailed,
-  }) {
+  _PendingMediaUpload copyWith({double? progress, bool? isFailed}) {
     return _PendingMediaUpload(
       id: id,
       receiverId: receiverId,

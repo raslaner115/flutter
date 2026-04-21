@@ -9,6 +9,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:untitled1/ptofile.dart';
+import 'package:untitled1/pages/admin_reports_page.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:untitled1/services/bkmv_export_service.dart';
 import 'package:untitled1/utils/booking_mode.dart';
@@ -423,7 +424,10 @@ class _AdminPanelState extends State<AdminPanel> {
               icon: Icons.report_rounded,
               title: 'Reports Queue',
               subtitle: 'Handle user and project reports',
-              onTap: () => _showReports(context),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AdminReportsPage()),
+              ),
             ),
             const SizedBox(height: 20),
             _buildSectionTitle('System Configuration'),
@@ -647,56 +651,6 @@ class _AdminPanelState extends State<AdminPanel> {
                   ),
                 ),
               ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  void _showReports(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _AdminBottomSheet(
-        title: 'Active Reports',
-        stream: _firestore
-            .collection('reports')
-            .orderBy('timestamp', descending: true)
-            .snapshots(),
-        itemBuilder: (context, doc) {
-          final report = doc.data() as Map<String, dynamic>;
-          return Card(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: ListTile(
-              title: Text('Reason: ${report['reason']}'),
-              subtitle: Text('Reported ID: ${report['reportedId']}'),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(
-                      Icons.visibility_outlined,
-                      color: Colors.blue,
-                    ),
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => Profile(userId: report['reportedId']),
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(
-                      Icons.check_circle_outline,
-                      color: Colors.green,
-                    ),
-                    onPressed: () =>
-                        _firestore.collection('reports').doc(doc.id).delete(),
-                  ),
-                ],
-              ),
             ),
           );
         },

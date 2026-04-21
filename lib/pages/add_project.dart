@@ -324,6 +324,11 @@ class _AddProjectPageState extends State<AddProjectPage> {
                 .toList(),
           });
 
+      await FirebaseFirestore.instance.collection('metadata').doc('system').set(
+        {'projectsCount': FieldValue.increment(1)},
+        SetOptions(merge: true),
+      );
+
       if (mounted) {
         Navigator.pop(context, true);
       }

@@ -11,6 +11,7 @@ import 'package:untitled1/pages/about.dart';
 import 'package:untitled1/pages/account_settings.dart';
 import 'package:untitled1/pages/help_page.dart';
 import 'package:untitled1/pages/privacy_policy_page.dart';
+import 'package:untitled1/pages/reports_page.dart';
 import 'package:untitled1/pages/terms_of_service_page.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -238,6 +239,7 @@ class _SettingsPageState extends State<SettingsPage> {
           'terms': 'תנאי שימוש',
           'delete_account': 'מחיקת חשבון',
           'help': 'עזרה',
+          'reports': 'דיווחים',
           'logout': 'התנתקות',
           'appearance': 'מראה',
           'schedule': 'לוח זמנים',
@@ -264,6 +266,7 @@ class _SettingsPageState extends State<SettingsPage> {
           'terms': 'شروط الخدمة',
           'delete_account': 'حذف الحساب',
           'help': 'المساعدة',
+          'reports': 'البلاغات',
           'logout': 'تسجيل الخروج',
           'appearance': 'المظهر',
           'schedule': 'الجدول الزمني',
@@ -290,6 +293,7 @@ class _SettingsPageState extends State<SettingsPage> {
           'terms': 'Условия использования',
           'delete_account': 'Удалить аккаунт',
           'help': 'Помощь',
+          'reports': 'Жалобы',
           'logout': 'Выйти',
           'appearance': 'Внешний вид',
           'schedule': 'Расписание',
@@ -316,6 +320,7 @@ class _SettingsPageState extends State<SettingsPage> {
           'terms': 'የአጠቃቀም ውል',
           'delete_account': 'መለያ ሰርዝ',
           'help': 'እገዛ',
+          'reports': 'ሪፖርቶች',
           'logout': 'ውጣ',
           'appearance': 'መልክ',
           'schedule': 'መርሃ ግብር',
@@ -341,6 +346,7 @@ class _SettingsPageState extends State<SettingsPage> {
           'terms': 'Terms of Service',
           'delete_account': 'Delete Account',
           'help': 'Help & Support',
+          'reports': 'Reports',
           'logout': 'Logout',
           'appearance': 'Appearance',
           'schedule': 'Schedule',
@@ -611,6 +617,18 @@ class _SettingsPageState extends State<SettingsPage> {
                           Icons.help_outline_rounded,
                           strings['help']!,
                           _goToHelpPage,
+                        ),
+                        _buildGalaxyTile(
+                          Icons.report_problem_outlined,
+                          strings['reports']!,
+                          () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const ReportsPage(),
+                              ),
+                            );
+                          },
                         ),
                         _buildGalaxyTile(
                           Icons.info_outline_rounded,
@@ -907,6 +925,20 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: Text(strings['help']!),
                   trailing: const CupertinoListTileChevron(),
                   onTap: _goToHelpPage,
+                ),
+                CupertinoListTile(
+                  leading: const Icon(
+                    CupertinoIcons.exclamationmark_bubble,
+                    color: CupertinoColors.systemBlue,
+                  ),
+                  title: Text(strings['reports']!),
+                  trailing: const CupertinoListTileChevron(),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      CupertinoPageRoute(builder: (_) => const ReportsPage()),
+                    );
+                  },
                 ),
                 CupertinoListTile(
                   leading: const Icon(

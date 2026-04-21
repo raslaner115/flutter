@@ -15,10 +15,11 @@ class AdminProfile extends StatefulWidget {
   State<AdminProfile> createState() => _AdminProfileState();
 }
 
-class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderStateMixin {
+class _AdminProfileState extends State<AdminProfile>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  
+
   String _userName = "";
   String _email = "";
   String _profileImageUrl = "";
@@ -44,8 +45,7 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
           _isMaintenanceMode = doc.data()?['maintenanceMode'] ?? false;
           _appVersion = doc.data()?['minRequiredVersion'] ?? "1.0.0";
           _businessName = (doc.data()?['businessName'] ?? '').toString();
-          _businessNumber =
-              (doc.data()?['businessNumber'] ?? '').toString();
+          _businessNumber = (doc.data()?['businessNumber'] ?? '').toString();
         });
       } else if (mounted) {
         setState(() {
@@ -91,7 +91,10 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
   }
 
   Map<String, String> _getLocalizedStrings(BuildContext context) {
-    final locale = Provider.of<LanguageProvider>(context, listen: false).locale.languageCode;
+    final locale = Provider.of<LanguageProvider>(
+      context,
+      listen: false,
+    ).locale.languageCode;
     switch (locale) {
       case 'he':
         return {
@@ -119,7 +122,9 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator(color: Colors.red)));
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: Colors.red)),
+      );
     }
 
     final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
@@ -138,8 +143,11 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
               actions: [
                 IconButton(
                   icon: const Icon(Icons.settings_outlined),
-                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())).then((_) => _fetchAdminData()),
-                )
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SettingsPage()),
+                  ).then((_) => _fetchAdminData()),
+                ),
               ],
               flexibleSpace: FlexibleSpaceBar(
                 background: Stack(
@@ -150,7 +158,11 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                     else
                       Container(
                         color: Colors.red[900],
-                        child: Icon(Icons.admin_panel_settings, size: 100, color: Colors.white.withValues(alpha: 0.2)),
+                        child: Icon(
+                          Icons.admin_panel_settings,
+                          size: 100,
+                          color: Colors.white.withValues(alpha: 0.2),
+                        ),
                       ),
                     Container(
                       decoration: BoxDecoration(
@@ -176,15 +188,26 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                             children: [
                               Text(
                                 _userName,
-                                style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               const SizedBox(width: 8),
-                              const Icon(Icons.verified_user, color: Colors.blueAccent, size: 24),
+                              const Icon(
+                                Icons.verified_user,
+                                color: Colors.blueAccent,
+                                size: 24,
+                              ),
                             ],
                           ),
                           Text(
                             _email,
-                            style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 16),
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.8),
+                              fontSize: 16,
+                            ),
                           ),
                           const SizedBox(height: 12),
                           _buildQuickStats(),
@@ -204,7 +227,10 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                   indicatorWeight: 3,
                   labelColor: Colors.red[900],
                   unselectedLabelColor: Colors.grey,
-                  labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  labelStyle: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
                   tabs: [
                     Tab(text: locale == 'he' ? "סקירה" : "Overview"),
                     Tab(text: locale == 'he' ? "ניהול" : "Management"),
@@ -212,7 +238,7 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                   ],
                 ),
               ),
-            )
+            ),
           ],
           body: TabBarView(
             controller: _tabController,
@@ -228,43 +254,68 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
   }
 
   Widget _buildQuickStats() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          _buildHeaderStat("Users", "customer"),
-          _buildHeaderStat("Workers", "worker"),
-          _buildHeaderStat("Reports", null, collection: 'reports'),
-        ],
-      ),
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _firestore.collection('metadata').doc('system').snapshots(),
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data() ?? <String, dynamic>{};
+        var usersCount = _metricFromMetadata(
+          data,
+          directKeys: const ['usersCount', 'totalUsers'],
+          nestedKeys: const ['users'],
+        );
+        if (usersCount == 0) {
+          final totalWorkers = (data['totalWorkers'] as num?)?.toInt() ?? 0;
+          final totalCustomers = (data['totalCustomers'] as num?)?.toInt() ?? 0;
+          if (totalWorkers > 0 || totalCustomers > 0) {
+            usersCount = totalWorkers + totalCustomers;
+          }
+        }
+        final workersCount = _metricFromMetadata(
+          data,
+          directKeys: const ['workersCount', 'workerCount', 'totalWorkers'],
+          nestedKeys: const ['workers'],
+        );
+        final reportsCount = _metricFromMetadata(
+          data,
+          directKeys: const ['reportsCount', 'reportCount', 'totalReports'],
+          nestedKeys: const ['reports'],
+        );
+
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildHeaderStat("Users", usersCount),
+              _buildHeaderStat("Workers", workersCount),
+              _buildHeaderStat("Reports", reportsCount),
+            ],
+          ),
+        );
+      },
     );
   }
 
-  Widget _buildHeaderStat(String label, String? role, {String collection = 'users'}) {
-    Query query = _firestore.collection(collection);
-    if (role != null) {
-      query = query.where('role', isEqualTo: role);
-    }
-
-    return StreamBuilder<QuerySnapshot>(
-      stream: query.snapshots(),
-      builder: (context, snapshot) {
-        final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              count.toString(),
-              style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              label,
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 12),
-            ),
-          ],
-        );
-      },
+  Widget _buildHeaderStat(String label, int count) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          count.toString(),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.6),
+            fontSize: 12,
+          ),
+        ),
+      ],
     );
   }
 
@@ -279,7 +330,9 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
           const SizedBox(height: 12),
           _buildStatusCard(),
           const SizedBox(height: 24),
-          _buildSectionTitle(locale == 'he' ? "פעולות מהירות" : "Quick Actions"),
+          _buildSectionTitle(
+            locale == 'he' ? "פעולות מהירות" : "Quick Actions",
+          ),
           const SizedBox(height: 12),
           GridView.count(
             shrinkWrap: true,
@@ -289,18 +342,43 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
             crossAxisSpacing: 12,
             childAspectRatio: 1.5,
             children: [
-              _buildQuickActionCard(Icons.add_alert_rounded, "Broadcast", Colors.blue, _showBroadcastDialog),
-              _buildQuickActionCard(Icons.security_rounded, "Security", Colors.orange, _showSecurityOptions),
-              _buildQuickActionCard(Icons.analytics_rounded, "Analytics", Colors.green, () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const AdminAnalyticsPage(),
-                  ),
-                );
-              }),
-              _buildQuickActionCard(Icons.business_rounded, "Business Info", Colors.teal, _showBusinessInfoDialog),
-              _buildQuickActionCard(Icons.settings_suggest_rounded, "System Config", Colors.purple, _showSystemConfig),
+              _buildQuickActionCard(
+                Icons.add_alert_rounded,
+                "Broadcast",
+                Colors.blue,
+                _showBroadcastDialog,
+              ),
+              _buildQuickActionCard(
+                Icons.security_rounded,
+                "Security",
+                Colors.orange,
+                _showSecurityOptions,
+              ),
+              _buildQuickActionCard(
+                Icons.analytics_rounded,
+                "Analytics",
+                Colors.green,
+                () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const AdminAnalyticsPage(),
+                    ),
+                  );
+                },
+              ),
+              _buildQuickActionCard(
+                Icons.business_rounded,
+                "Business Info",
+                Colors.teal,
+                _showBusinessInfoDialog,
+              ),
+              _buildQuickActionCard(
+                Icons.settings_suggest_rounded,
+                "System Config",
+                Colors.purple,
+                _showSystemConfig,
+              ),
             ],
           ),
           const SizedBox(height: 32),
@@ -318,13 +396,24 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionTitle(locale == 'he' ? "הכרזות אחרונות" : "Recent Announcements"),
+        _buildSectionTitle(
+          locale == 'he' ? "הכרזות אחרונות" : "Recent Announcements",
+        ),
         const SizedBox(height: 12),
         StreamBuilder<QuerySnapshot>(
-          stream: _firestore.collection('system_announcements').orderBy('timestamp', descending: true).limit(3).snapshots(),
+          stream: _firestore
+              .collection('system_announcements')
+              .orderBy('timestamp', descending: true)
+              .limit(3)
+              .snapshots(),
           builder: (context, snapshot) {
             if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-              return Text(locale == 'he' ? "אין הכרזות לשלוח" : "No announcements sent yet", style: TextStyle(color: Colors.grey[400], fontSize: 12));
+              return Text(
+                locale == 'he'
+                    ? "אין הכרזות לשלוח"
+                    : "No announcements sent yet",
+                style: TextStyle(color: Colors.grey[400], fontSize: 12),
+              );
             }
             return Column(
               children: snapshot.data!.docs.map((doc) {
@@ -332,14 +421,29 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                 return Card(
                   elevation: 0,
                   margin: const EdgeInsets.only(bottom: 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.grey[200]!)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Colors.grey[200]!),
+                  ),
                   child: ListTile(
                     dense: true,
-                    title: Text(data['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text(data['message'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis),
+                    title: Text(
+                      data['title'] ?? '',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text(
+                      data['message'] ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
-                      onPressed: () => _deleteAnnouncement(doc.id, data['title']),
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        size: 20,
+                        color: Colors.red,
+                      ),
+                      onPressed: () =>
+                          _deleteAnnouncement(doc.id, data['title']),
                     ),
                   ),
                 );
@@ -353,66 +457,104 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
 
   Widget _buildDatabaseStats() {
     final locale = Provider.of<LanguageProvider>(context).locale.languageCode;
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSectionTitle(locale == 'he' ? "מדדי ביצועים" : "Database Performance"),
-          const SizedBox(height: 20),
-          Row(
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _firestore.collection('metadata').doc('system').snapshots(),
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data() ?? <String, dynamic>{};
+        final workersCount = _metricFromMetadata(
+          data,
+          directKeys: const ['workersCount', 'workerCount'],
+          nestedKeys: const ['workers'],
+        );
+        final projectsCount = _metricFromMetadata(
+          data,
+          directKeys: const ['projectsCount', 'projectCount'],
+          nestedKeys: const ['projects'],
+        );
+        final reviewsCount = _metricFromMetadata(
+          data,
+          directKeys: const ['reviewsCount', 'reviewCount'],
+          nestedKeys: const ['reviews'],
+        );
+
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.grey[50],
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.grey[200]!),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: _buildMetricTile("Workers", "worker", Icons.engineering)),
-              Expanded(child: _buildMetricTile("Projects", null, Icons.work_history, subcollection: 'projects')),
-              Expanded(child: _buildMetricTile("Reviews", null, Icons.star, subcollection: 'reviews')),
+              _buildSectionTitle(
+                locale == 'he' ? "מדדי ביצועים" : "Database Performance",
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildMetricTile(
+                      "Workers",
+                      workersCount,
+                      Icons.engineering,
+                    ),
+                  ),
+                  Expanded(
+                    child: _buildMetricTile(
+                      "Projects",
+                      projectsCount,
+                      Icons.work_history,
+                    ),
+                  ),
+                  Expanded(
+                    child: _buildMetricTile(
+                      "Reviews",
+                      reviewsCount,
+                      Icons.star,
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
-  Widget _buildMetricTile(String label, String? role, IconData icon, {String? subcollection}) {
-    if (subcollection != null) {
-      return StreamBuilder<QuerySnapshot>(
-        stream: _firestore.collectionGroup(subcollection).snapshots(),
-        builder: (context, snapshot) {
-          final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
-          return Column(
-            children: [
-              Icon(icon, color: Colors.red[900], size: 20),
-              const SizedBox(height: 8),
-              Text(count.toString(), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
-            ],
-          );
-        },
-      );
+  int _metricFromMetadata(
+    Map<String, dynamic> data, {
+    required List<String> directKeys,
+    required List<String> nestedKeys,
+  }) {
+    for (final key in directKeys) {
+      final value = data[key];
+      if (value is num) return value.toInt();
     }
 
-    Query query = _firestore.collection('users');
-    if (role != null) {
-      query = query.where('role', isEqualTo: role);
+    final stats = data['databaseStats'];
+    if (stats is Map<String, dynamic>) {
+      for (final key in nestedKeys) {
+        final value = stats[key];
+        if (value is num) return value.toInt();
+      }
     }
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: query.snapshots(),
-      builder: (context, snapshot) {
-        final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
-        return Column(
-          children: [
-            Icon(icon, color: Colors.red[900], size: 20),
-            const SizedBox(height: 8),
-            Text(count.toString(), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
-          ],
-        );
-      },
+    return 0;
+  }
+
+  Widget _buildMetricTile(String label, int count, IconData icon) {
+    return Column(
+      children: [
+        Icon(icon, color: Colors.red[900], size: 20),
+        const SizedBox(height: 8),
+        Text(
+          count.toString(),
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+      ],
     );
   }
 
@@ -426,15 +568,26 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: titleController, decoration: const InputDecoration(labelText: 'Title')),
-            TextField(controller: msgController, decoration: const InputDecoration(labelText: 'Message'), maxLines: 3),
+            TextField(
+              controller: titleController,
+              decoration: const InputDecoration(labelText: 'Title'),
+            ),
+            TextField(
+              controller: msgController,
+              decoration: const InputDecoration(labelText: 'Message'),
+              maxLines: 3,
+            ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () async {
-              if (titleController.text.isNotEmpty && msgController.text.isNotEmpty) {
+              if (titleController.text.isNotEmpty &&
+                  msgController.text.isNotEmpty) {
                 final messenger = ScaffoldMessenger.of(context);
                 await _firestore.collection('system_announcements').add({
                   'title': titleController.text,
@@ -445,12 +598,16 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                 await _logActivity("Sent Broadcast: ${titleController.text}");
                 if (context.mounted) {
                   Navigator.pop(context);
-                  messenger.showSnackBar(const SnackBar(content: Text("Broadcast sent successfully")));
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text("Broadcast sent successfully"),
+                    ),
+                  );
                 }
               }
             },
             child: const Text('Send to All'),
-          )
+          ),
         ],
       ),
     );
@@ -460,29 +617,40 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
     await _firestore.collection('system_announcements').doc(id).delete();
     await _logActivity("Deleted Announcement: $title");
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Announcement deleted")));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Announcement deleted")));
     }
   }
 
   void _showSecurityOptions() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => Container(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Security & Access Controls", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Text(
+                "Security & Access Controls",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 20),
               SwitchListTile(
                 title: const Text("Maintenance Mode"),
                 subtitle: const Text("Restrict access to all non-admin users"),
                 value: _isMaintenanceMode,
                 onChanged: (val) async {
-                  await _firestore.collection('metadata').doc('system').set({'maintenanceMode': val}, SetOptions(merge: true));
-                  await _logActivity("${val ? 'Enabled' : 'Disabled'} Maintenance Mode");
+                  await _firestore.collection('metadata').doc('system').set({
+                    'maintenanceMode': val,
+                  }, SetOptions(merge: true));
+                  await _logActivity(
+                    "${val ? 'Enabled' : 'Disabled'} Maintenance Mode",
+                  );
                   setState(() => _isMaintenanceMode = val);
                   setModalState(() {});
                 },
@@ -494,14 +662,23 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                 onTap: () => _confirmForceLogout(context),
               ),
               ListTile(
-                leading: const Icon(Icons.cleaning_services, color: Colors.blue),
+                leading: const Icon(
+                  Icons.cleaning_services,
+                  color: Colors.blue,
+                ),
                 title: const Text("Clear System Cache"),
-                subtitle: const Text("Reset global app counters and temporary data"),
+                subtitle: const Text(
+                  "Reset global app counters and temporary data",
+                ),
                 onTap: () async {
                   await _logActivity("Initiated System Cache Cleanup");
                   if (context.mounted) {
                     Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("System cache cleanup initiated")));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("System cache cleanup initiated"),
+                      ),
+                    );
                   }
                 },
               ),
@@ -517,11 +694,19 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Force Logout All Users?"),
-        content: const Text("This will immediately sign out all users from their current sessions. They will need to log in again."),
+        content: const Text(
+          "This will immediately sign out all users from their current sessions. They will need to log in again.",
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text("Force Logout"),
           ),
@@ -536,7 +721,9 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
         'forceLogoutAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
       await _logActivity("Forced Global Logout");
-      messenger.showSnackBar(const SnackBar(content: Text("Global logout triggered")));
+      messenger.showSnackBar(
+        const SnackBar(content: Text("Global logout triggered")),
+      );
     }
   }
 
@@ -545,16 +732,23 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
         child: Container(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text("Global Configuration", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Text(
+                "Global Configuration",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 20),
               TextField(
                 controller: versionController,
@@ -565,21 +759,31 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                 ),
               ),
               const SizedBox(height: 20),
-              const Text("Note: Users with versions lower than this will be forced to update.", style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const Text(
+                "Note: Users with versions lower than this will be forced to update.",
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red[900], foregroundColor: Colors.white),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red[900],
+                    foregroundColor: Colors.white,
+                  ),
                   onPressed: () async {
-                    await _firestore.collection('metadata').doc('system').set({'minRequiredVersion': versionController.text}, SetOptions(merge: true));
-                    await _logActivity("Set Min App Version to ${versionController.text}");
+                    await _firestore.collection('metadata').doc('system').set({
+                      'minRequiredVersion': versionController.text,
+                    }, SetOptions(merge: true));
+                    await _logActivity(
+                      "Set Min App Version to ${versionController.text}",
+                    );
                     setState(() => _appVersion = versionController.text);
                     if (context.mounted) Navigator.pop(context);
                   },
                   child: const Text("Save Configuration"),
                 ),
-              )
+              ),
             ],
           ),
         ),
@@ -589,7 +793,9 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
 
   void _showBusinessInfoDialog() {
     final businessNameController = TextEditingController(text: _businessName);
-    final businessNumberController = TextEditingController(text: _businessNumber);
+    final businessNumberController = TextEditingController(
+      text: _businessNumber,
+    );
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -597,7 +803,9 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
         child: Container(
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -658,12 +866,16 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
   }
 
   Future<void> _logActivity(String action) async {
-    await _firestore.collection('users').doc('${FirebaseAuth.instance.currentUser?.uid}').collection('admin_activity').add({
-      'action': action,
-      'timestamp': FieldValue.serverTimestamp(),
-      'adminId': FirebaseAuth.instance.currentUser?.uid,
-      'adminName': _userName,
-    });
+    await _firestore
+        .collection('users')
+        .doc('${FirebaseAuth.instance.currentUser?.uid}')
+        .collection('admin_activity')
+        .add({
+          'action': action,
+          'timestamp': FieldValue.serverTimestamp(),
+          'adminId': FirebaseAuth.instance.currentUser?.uid,
+          'adminName': _userName,
+        });
   }
 
   Widget _buildStatusCard() {
@@ -672,12 +884,16 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
       decoration: BoxDecoration(
         color: _isMaintenanceMode ? Colors.orange[50] : Colors.green[50],
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _isMaintenanceMode ? Colors.orange[100]! : Colors.green[100]!),
+        border: Border.all(
+          color: _isMaintenanceMode ? Colors.orange[100]! : Colors.green[100]!,
+        ),
       ),
       child: Row(
         children: [
           Icon(
-            _isMaintenanceMode ? Icons.warning_amber_rounded : Icons.check_circle,
+            _isMaintenanceMode
+                ? Icons.warning_amber_rounded
+                : Icons.check_circle,
             color: _isMaintenanceMode ? Colors.orange : Colors.green,
           ),
           const SizedBox(width: 12),
@@ -686,14 +902,26 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _isMaintenanceMode ? "System in Maintenance" : "All Systems Operational",
-                  style: TextStyle(fontWeight: FontWeight.bold, color: _isMaintenanceMode ? Colors.orange[900] : Colors.green[900]),
+                  _isMaintenanceMode
+                      ? "System in Maintenance"
+                      : "All Systems Operational",
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: _isMaintenanceMode
+                        ? Colors.orange[900]
+                        : Colors.green[900],
+                  ),
                 ),
                 Text(
-                  _isMaintenanceMode 
-                    ? "Normal users are currently blocked from accessing the app"
-                    : "Database, Auth and Storage are running smoothly",
-                  style: TextStyle(fontSize: 12, color: _isMaintenanceMode ? Colors.orange[700] : Colors.green[700]),
+                  _isMaintenanceMode
+                      ? "Normal users are currently blocked from accessing the app"
+                      : "Database, Auth and Storage are running smoothly",
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _isMaintenanceMode
+                        ? Colors.orange[700]
+                        : Colors.green[700],
+                  ),
                 ),
               ],
             ),
@@ -703,7 +931,12 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildQuickActionCard(IconData icon, String label, Color color, VoidCallback onTap) {
+  Widget _buildQuickActionCard(
+    IconData icon,
+    String label,
+    Color color,
+    VoidCallback onTap,
+  ) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
@@ -718,7 +951,14 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
           children: [
             Icon(icon, color: color),
             const SizedBox(height: 8),
-            Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
           ],
         ),
       ),
@@ -742,10 +982,15 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildSectionTitle(locale == 'he' ? "לוג פעילות" : "Activity Log"),
+              _buildSectionTitle(
+                locale == 'he' ? "לוג פעילות" : "Activity Log",
+              ),
               TextButton.icon(
                 icon: const Icon(Icons.delete_sweep_rounded, color: Colors.red),
-                label: Text(locale == 'he' ? "נקה הכל" : "Clear All", style: const TextStyle(color: Colors.red)),
+                label: Text(
+                  locale == 'he' ? "נקה הכל" : "Clear All",
+                  style: const TextStyle(color: Colors.red),
+                ),
                 onPressed: _confirmClearActivity,
               ),
             ],
@@ -753,13 +998,18 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
         ),
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
-            stream: _firestore.collection('users').doc('${FirebaseAuth.instance.currentUser?.uid}').collection('admin_activity')
+            stream: _firestore
+                .collection('users')
+                .doc('${FirebaseAuth.instance.currentUser?.uid}')
+                .collection('admin_activity')
                 .orderBy('timestamp', descending: true)
                 .limit(50)
                 .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator(color: Colors.red));
+                return const Center(
+                  child: CircularProgressIndicator(color: Colors.red),
+                );
               }
 
               if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
@@ -767,10 +1017,16 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.history_rounded, size: 64, color: Colors.grey[200]),
+                      Icon(
+                        Icons.history_rounded,
+                        size: 64,
+                        color: Colors.grey[200],
+                      ),
                       const SizedBox(height: 16),
                       Text(
-                        locale == 'he' ? "אין פעילות אדמין לאחרונה" : "No recent admin activity",
+                        locale == 'he'
+                            ? "אין פעילות אדמין לאחרונה"
+                            : "No recent admin activity",
                         style: TextStyle(color: Colors.grey[400]),
                       ),
                     ],
@@ -787,7 +1043,7 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                   final data = activities[index].data() as Map<String, dynamic>;
                   final timestamp = data['timestamp'] as Timestamp?;
                   final action = data['action']?.toString().toLowerCase() ?? '';
-                  
+
                   IconData icon = Icons.bolt;
                   Color iconColor = Colors.red;
 
@@ -803,7 +1059,8 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                   } else if (action.contains('maintenance')) {
                     icon = Icons.settings_applications;
                     iconColor = Colors.orange;
-                  } else if (action.contains('config') || action.contains('version')) {
+                  } else if (action.contains('config') ||
+                      action.contains('version')) {
                     icon = Icons.settings_suggest;
                     iconColor = Colors.purple;
                   }
@@ -818,10 +1075,19 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
                     child: ListTile(
                       leading: Container(
                         padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(color: iconColor.withValues(alpha: 0.1), shape: BoxShape.circle),
+                        decoration: BoxDecoration(
+                          color: iconColor.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
                         child: Icon(icon, color: iconColor, size: 20),
                       ),
-                      title: Text(data['action'] ?? 'Unknown Action', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                      title: Text(
+                        data['action'] ?? 'Unknown Action',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                       subtitle: Text(
                         "${data['adminName'] ?? 'System'} • ${timestamp != null ? _formatDate(timestamp.toDate()) : 'No time'}",
                         style: TextStyle(fontSize: 11, color: Colors.grey[500]),
@@ -838,18 +1104,29 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
   }
 
   Future<void> _confirmClearActivity() async {
-    final locale = Provider.of<LanguageProvider>(context, listen: false).locale.languageCode;
+    final locale = Provider.of<LanguageProvider>(
+      context,
+      listen: false,
+    ).locale.languageCode;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(locale == 'he' ? "נקה לוג פעילות?" : "Clear Activity Log?"),
-        content: Text(locale == 'he' 
-          ? "האם אתה בטוח שברצונך למחוק את כל היסטוריית הפעילות? פעולה זו אינה ניתנת לביטול." 
-          : "Are you sure you want to delete all activity history? This action cannot be undone."),
+        content: Text(
+          locale == 'he'
+              ? "האם אתה בטוח שברצונך למחוק את כל היסטוריית הפעילות? פעולה זו אינה ניתנת לביטול."
+              : "Are you sure you want to delete all activity history? This action cannot be undone.",
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(locale == 'he' ? "ביטול" : "Cancel")),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(locale == 'he' ? "ביטול" : "Cancel"),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: Text(locale == 'he' ? "נקה הכל" : "Clear All"),
           ),
@@ -859,7 +1136,11 @@ class _AdminProfileState extends State<AdminProfile> with SingleTickerProviderSt
 
     if (confirmed == true) {
       final batch = _firestore.batch();
-      final snapshot = await _firestore.collection('users').doc('${FirebaseAuth.instance.currentUser?.uid}').collection('admin_activity').get();
+      final snapshot = await _firestore
+          .collection('users')
+          .doc('${FirebaseAuth.instance.currentUser?.uid}')
+          .collection('admin_activity')
+          .get();
       for (var doc in snapshot.docs) {
         batch.delete(doc.reference);
       }
@@ -883,11 +1164,12 @@ class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
   double get maxExtent => _tabBar.preferredSize.height;
 
   @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Container(
-      color: Colors.white,
-      child: _tabBar,
-    );
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Container(color: Colors.white, child: _tabBar);
   }
 
   @override
