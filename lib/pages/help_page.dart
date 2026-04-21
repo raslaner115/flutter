@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:untitled1/pages/support_bot_page.dart';
 import 'package:untitled1/services/language_provider.dart';
 
 class HelpPage extends StatelessWidget {
@@ -19,11 +18,11 @@ class HelpPage extends StatelessWidget {
           'chat_title': 'צ\'אט תמיכה',
           'chat_body':
               'דבר עם עוזר התמיכה של Hiro וקבל תשובות מהירות בנושאי חשבון, בקשות עבודה, מעקב ותשלומים.',
-          'open_chat': 'פתח תמיכה',
           'faq_title': 'שאלות נפוצות',
           'quick_title': 'פעולות מהירות',
           'quick_requests_title': 'בקשות עבודה',
-          'quick_requests_body': 'עקוב אחרי בקשות, סטטוסים ותגובות של בעלי מקצוע.',
+          'quick_requests_body':
+              'עקוב אחרי בקשות, סטטוסים ותגובות של בעלי מקצוע.',
           'quick_account_title': 'חשבון ופרופיל',
           'quick_account_body': 'עדכון פרטים, תמונה, טלפון והגדרות חשבון.',
           'quick_payments_title': 'תשלומים ומנויים',
@@ -43,7 +42,8 @@ class HelpPage extends StatelessWidget {
           'tips_title': 'לפני שפונים לתמיכה',
           'tips_1': 'כתוב תיאור קצר וברור של הבעיה.',
           'tips_2': 'אם אפשר, ציין באיזה מסך או שלב זה קרה.',
-          'tips_3': 'בבקשות עבודה, תמונות טובות עוזרות לקבל תשובות מדויקות יותר.',
+          'tips_3':
+              'בבקשות עבודה, תמונות טובות עוזרות לקבל תשובות מדויקות יותר.',
         };
       case 'ar':
         return {
@@ -55,15 +55,16 @@ class HelpPage extends StatelessWidget {
           'chat_title': 'دردشة الدعم',
           'chat_body':
               'تحدث مع مساعد Hiro للحصول على مساعدة سريعة حول الحساب وطلبات العمل والمتابعة والمدفوعات.',
-          'open_chat': 'فتح الدعم',
           'faq_title': 'الأسئلة الشائعة',
           'quick_title': 'إجراءات سريعة',
           'quick_requests_title': 'طلبات العمل',
           'quick_requests_body': 'تابع الطلبات والحالات وردود أصحاب المهن.',
           'quick_account_title': 'الحساب والملف الشخصي',
-          'quick_account_body': 'تحديث البيانات والصورة والهاتف وإعدادات الحساب.',
+          'quick_account_body':
+              'تحديث البيانات والصورة والهاتف وإعدادات الحساب.',
           'quick_payments_title': 'المدفوعات والاشتراك',
-          'quick_payments_body': 'فهم المشتريات والاشتراك والوصول إلى الأدوات المدفوعة.',
+          'quick_payments_body':
+              'فهم المشتريات والاشتراك والوصول إلى الأدوات المدفوعة.',
           'faq_1_q': 'كيف أجد محترفاً؟',
           'faq_1_a':
               'ابحث حسب المجال أو الموقع أو الفئة، ثم افتح الملف الشخصي المناسب وأرسل طلب عمل أو طلب عرض سعر.',
@@ -79,7 +80,8 @@ class HelpPage extends StatelessWidget {
           'tips_title': 'قبل التواصل مع الدعم',
           'tips_1': 'اكتب وصفاً قصيراً وواضحاً للمشكلة.',
           'tips_2': 'إذا أمكن، اذكر الشاشة أو الخطوة التي حدثت فيها المشكلة.',
-          'tips_3': 'في طلبات العمل، تساعد الصور الجيدة في الحصول على ردود أدق.',
+          'tips_3':
+              'في طلبات العمل، تساعد الصور الجيدة في الحصول على ردود أدق.',
         };
       default:
         return {
@@ -91,7 +93,6 @@ class HelpPage extends StatelessWidget {
           'chat_title': 'Support Chat',
           'chat_body':
               'Talk to the Hiro support assistant for quick help with your account, work requests, tracking, and payments.',
-          'open_chat': 'Open Support',
           'faq_title': 'Frequently Asked Questions',
           'quick_title': 'Quick Topics',
           'quick_requests_title': 'Job requests',
@@ -117,7 +118,8 @@ class HelpPage extends StatelessWidget {
               'Open support chat and briefly explain what happened, where it happened, and what you expected instead.',
           'tips_title': 'Before Contacting Support',
           'tips_1': 'Write a short and clear description of the issue.',
-          'tips_2': 'If possible, mention which screen or step caused the problem.',
+          'tips_2':
+              'If possible, mention which screen or step caused the problem.',
           'tips_3':
               'For job requests, clear photos usually lead to better responses.',
         };
@@ -127,7 +129,9 @@ class HelpPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final strings = _strings(context);
-    final localeCode = Provider.of<LanguageProvider>(context).locale.languageCode;
+    final localeCode = Provider.of<LanguageProvider>(
+      context,
+    ).locale.languageCode;
     final isRtl = localeCode == 'he' || localeCode == 'ar';
 
     return Directionality(
@@ -306,28 +310,6 @@ class HelpPage extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SupportBotPage()),
-              );
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: const Color(0xFF1976D2),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-            icon: const Icon(Icons.chat_bubble_outline_rounded),
-            label: Text(
-              strings['open_chat']!,
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
         ],
       ),
     );
@@ -466,10 +448,7 @@ class HelpPage extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: Text(
               answer,
-              style: const TextStyle(
-                color: Color(0xFF475569),
-                height: 1.65,
-              ),
+              style: const TextStyle(color: Color(0xFF475569), height: 1.65),
             ),
           ),
         ],
@@ -478,11 +457,7 @@ class HelpPage extends StatelessWidget {
   }
 
   Widget _buildTipsCard(Map<String, String> strings) {
-    final tips = [
-      strings['tips_1']!,
-      strings['tips_2']!,
-      strings['tips_3']!,
-    ];
+    final tips = [strings['tips_1']!, strings['tips_2']!, strings['tips_3']!];
 
     return Container(
       padding: const EdgeInsets.all(18),
